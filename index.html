@@ -69,18 +69,22 @@
         out which kind of surprise it was the moment you use it.</p>
         <p><b>Crafting.</b> Carrying two combinable items and pressing craft
         fuses them into something stronger — an Ember, a Beacon, or a Ward,
-        each doing both of its parts' work at once. Crafting reads what you're
-        ACTUALLY carrying, not what the item bar told you, so a hallucinating
-        lead can reach for a pair that doesn't combine — or doesn't exist.</p>
-        <p><b>Trees and stone</b> turn up too — walk up and press survey/pick up
-        to chop wood or mine stone, no different from any other reach. Neither
-        one lies about what it is. Enough of both crafts a Stake — plant it
-        anywhere and it works exactly like a pylon from then on.</p>
+        each doing both of its parts' work at once. A small indicator names
+        what's craftable the moment it's possible, so you never have to guess
+        and press blind. Crafting reads what you're ACTUALLY carrying, not
+        what the item bar told you, so a hallucinating lead can still reach
+        for a pair that doesn't combine — or doesn't exist.</p>
+        <p><b>Trees and stone</b> turn up too — walk up and HOLD survey/pick up
+        to chop wood or mine stone. It takes a moment (watch the prompt fill),
+        and letting go early or wandering to a different one starts it over.
+        Neither a tree nor a deposit ever lies about what it is. Enough of
+        both crafts a Stake — plant it anywhere and it works exactly like a
+        pylon from then on.</p>
         <p><b>The basin isn't alone.</b> Clearing one survey pushes the party
         into the next, harder basin — carrying doses, items, materials, and
         every scar with them. The campaign ends when you fail one, or clear
         the last.</p>
-        <p class="howto-keys">WASD move · Shift run · mouse look · <b>E</b> survey/pick up/gather ·
+        <p class="howto-keys">WASD move · Shift run · mouse look · <b>E</b> survey/pick up, hold to gather ·
         <b>Z</b> cycle item · <b>X</b> use item · <b>C</b> craft ·
         <b>1–5</b> check in · <b>Shift+1–5</b> dose · <b>Q/R</b> select · <b>Esc</b> pause</p>
       </div>
@@ -110,8 +114,14 @@
     </div>
 
     <div id="itemBar" class="item-bar"></div>
+    <div id="craftHint" class="craft-hint"></div>
     <div id="subtitles" class="subtitles"></div>
-    <div id="actionPrompt" class="action-prompt"></div>
+    <!-- The fill is a separate element under the text so a hold-to-gather
+         progress bar can grow behind the label without re-laying-out text. -->
+    <div id="actionPrompt" class="action-prompt">
+      <span id="actionPromptFill" class="action-prompt-fill"></span>
+      <span id="actionPromptText" class="action-prompt-text"></span>
+    </div>
     <div class="reticle"></div>
     <div id="hints" class="hints"></div>
 

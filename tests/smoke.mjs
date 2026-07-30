@@ -328,6 +328,8 @@ function assert(cond, msg) {
   assert(craft.subtitles.trim().length > 0, "crafting produced no visible line");
 
   // --- gathering: chop a tree, mine a deposit, craft and plant a Stake ----
+  // Gathering is a HOLD, not a tap: a single M.act(SURVEY) must NOT gather,
+  // and only holding interact for long enough should.
   const gather = await page.evaluate(() => {
     const M = window.__mirage;
     const s = M.sim;
@@ -335,16 +337,18 @@ function assert(cond, msg) {
     t.discovered = true;
     M.teleport(t.x, t.z);
     M.advance(0.2);
-    M.act(M.ACTIONS.SURVEY); // the same contextual verb chops a tree in reach
-    M.advance(0.2);
+    M.act(M.ACTIONS.SURVEY); // a bare tap must not chop
+    M.advance(0.1);
+    const choppedAfterTap = t.chopped;
+    M.advance(1.5, { interact: true }); // now hold it
     const woodAfterChop = s.wood;
     const st = s.stones.find((x) => !x.mined);
     st.discovered = true;
     M.teleport(st.x, st.z);
     M.advance(0.2);
-    M.act(M.ACTIONS.SURVEY);
-    M.advance(0.2);
+    M.advance(1.5, { interact: true });
     return {
+      choppedAfterTap,
       chopped: t.chopped,
       mined: st.mined,
       woodAfterChop,
@@ -353,8 +357,9 @@ function assert(cond, msg) {
       stonePill: document.getElementById("stoneCount").textContent,
     };
   });
-  assert(gather.chopped, "the survey verb did not chop a tree in reach");
-  assert(gather.mined, "the survey verb did not mine a deposit in reach");
+  assert(!gather.choppedAfterTap, "a bare tap should not chop a tree — gathering must be a hold");
+  assert(gather.chopped, "holding interact did not chop a tree in reach");
+  assert(gather.mined, "holding interact did not mine a deposit in reach");
   assert(gather.woodAfterChop >= 1, "wood was not credited");
   assert(gather.stoneAfterMine >= 1, "stone was not credited");
   assert(gather.woodPill !== "0", `wood pill did not update: ${gather.woodPill}`);

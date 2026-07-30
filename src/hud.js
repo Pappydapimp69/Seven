@@ -7,7 +7,7 @@
 // debrief, after the run is over.
 
 import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory } from "./percept.js";
-import { LOG_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, GATHER_RADIUS } from "./state.js";
+import { LOG_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, gatherTarget, GATHER_HOLD_TIME, previewCraft } from "./state.js";
 
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 
@@ -44,6 +44,9 @@ export function createHud(sim, percept) {
     flash: document.getElementById("flash"),
     wood: document.getElementById("woodCount"),
     stone: document.getElementById("stoneCount"),
+    promptFill: document.getElementById("actionPromptFill"),
+    promptText: document.getElementById("actionPromptText"),
+    craftHint: document.getElementById("craftHint"),
   };
 
   // Build the roster once; only the read-out text changes per frame.
@@ -143,18 +146,6 @@ export function createHud(sim, percept) {
     return bestD <= ITEM_PICKUP_RADIUS ? best : null;
   }
 
-  /** Nearest tree/deposit in reach. Read straight off the sim, not perception
-   * — there is no lie to filter through here (see state.js's own comment on
-   * RESOURCE_SIGHT_RANGE): a tree is always a tree. */
-  function nearestGatherable() {
-    const d = (o) => Math.hypot(o.x - sim.player.x, o.z - sim.player.z);
-    const near = [
-      ...sim.trees.filter((t) => t.discovered && !t.chopped).map((t) => ({ ...t, prompt: "Chop the tree" })),
-      ...sim.stones.filter((s) => s.discovered && !s.mined).map((s) => ({ ...s, prompt: "Mine the stone" })),
-    ].sort((a, b) => d(a) - d(b))[0];
-    return near && d(near) <= GATHER_RADIUS ? near : null;
-  }
-
   function renderInventory(selectedItem) {
     if (!el.items) return;
     const slots = perceivedInventory(percept, sim);
@@ -205,26 +196,46 @@ export function createHud(sim, percept) {
     // then survey — so the on-screen text never promises one verb while the
     // button actually does another.
     const pickup = nearestPickupItem();
-    const gatherable = nearestGatherable();
+    const gatherable = gatherTarget(sim);
     const near = nearestUnloggedName();
     if (pickup && sim.status === "playing") {
-      el.prompt.textContent = `Pick up ${ITEM_INFO[pickup.shownKind].label}`;
+      el.promptText.textContent = `Pick up ${ITEM_INFO[pickup.shownKind].label}`;
       el.prompt.classList.add("show");
+      el.promptFill.style.width = "0%";
     } else if (gatherable && sim.status === "playing") {
-      el.prompt.textContent = gatherable.prompt;
+      const verb = gatherable.gatherKind === "tree" ? "Hold to chop the tree" : "Hold to mine the stone";
+      el.promptText.textContent = verb;
       el.prompt.classList.add("show");
+      // Only reflects progress toward THIS target — a hold on a different
+      // node (or none) reads as 0%, same rule updateGatherHold itself uses.
+      const pct = sim.gatherHold.targetId === gatherable.id ? (sim.gatherHold.progress / GATHER_HOLD_TIME) * 100 : 0;
+      el.promptFill.style.width = `${Math.min(100, Math.max(0, pct))}%`;
     } else if (near && sim.status === "playing") {
-      el.prompt.textContent = `Survey ${near.name}`;
+      el.promptText.textContent = `Survey ${near.name}`;
       el.prompt.classList.add("show");
+      el.promptFill.style.width = "0%";
     } else {
       el.prompt.classList.remove("show");
+      el.promptFill.style.width = "0%";
+    }
+
+    // Craft accessibility: name what's craftable the moment it's possible,
+    // rather than making the player guess and press blind.
+    if (el.craftHint) {
+      const preview = previewCraft(sim);
+      if (preview.ok && sim.status === "playing") {
+        el.craftHint.textContent = `Craft ready: ${ITEM_INFO[preview.kind].label}`;
+        el.craftHint.classList.add("show");
+      } else {
+        el.craftHint.classList.remove("show");
+      }
     }
   }
 
   function setHints(scheme) {
     const text = {
-      keyboard: "WASD move · Shift run · E survey/pick up/gather · Z cycle item · X use item · C craft · 1–5 check in · Shift+1–5 dose · Esc pause",
-      gamepad: "Stick move · [A] survey/pick up/gather · [RT] cycle item · [B] use item · D-pad Up craft · [X] check in · [Y] dose · [LB]/[RB] select · [Start] pause",
+      keyboard: "WASD move · Shift run · E survey/pick up, hold to gather · Z cycle item · X use item · C craft · 1–5 check in · Shift+1–5 dose · Esc pause",
+      gamepad: "Stick move · [A] survey/pick up, hold to gather · [RT] cycle item · [B] use item · D-pad Up craft · [X] check in · [Y] dose · [LB]/[RB] select · [Start] pause",
       touch: "Left half steers · right half looks · buttons bottom-right",
     }[scheme] || "";
     paintHint(el.hints, text);

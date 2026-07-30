@@ -97,6 +97,10 @@ function recipeKey(a, b) {
 // through percept.js — the same exception camp itself already gets.
 export const GATHER_RADIUS = 3.2; // same reach as an item pickup
 export const RESOURCE_SIGHT_RANGE = ITEM_SIGHT_RANGE; // same ground-clutter sighting distance as items
+// A chop/mine takes a deliberate hold, not a tap — long enough to feel like
+// real effort, short enough not to be a chore. Releasing early or switching
+// to a different tree/deposit resets progress to zero; see updateGatherHold.
+export const GATHER_HOLD_TIME = 1.2;
 // 2 wood + 2 stone -> one Stake (a carried item like any other; see useItem's
 // "stake" case). With 5 of each per basin that's at most 2 stakes a run,
 // scarce enough to matter, not so scarce it's never worth reaching for.
@@ -296,6 +300,9 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
     // crafting fuel, never carried or used on their own. Carry forward too.
     wood: carryOver ? carryOver.wood : 0,
     stone: carryOver ? carryOver.stone : 0,
+    // Hold-to-gather progress. Always fresh — a half-finished hold from the
+    // last basin means nothing here; the trees/deposits are all new.
+    gatherHold: { targetId: null, progress: 0 },
     // The survey log. Entries can be FALSE — that is the point.
     logEntries: [],
     doses: carryOver ? carryOver.doses : DOSE_COUNT,
@@ -645,29 +652,68 @@ export function pickupItem(sim) {
  * no phantom chance, no misidentification — a gathered resource is exactly
  * what it looked like. Instant and one-shot, same shape as pickupItem.
  */
-export function gatherResource(sim) {
-  if (sim.status !== "playing") return { ok: false, reason: "over" };
-
+/**
+ * The nearest tree or stone deposit in reach right now, whichever is closer,
+ * tagged with its kind. Single source of truth for "what would gathering
+ * hit" — used by gatherResource itself, by the hold-progress tracker below,
+ * and by main.js/hud.js so the prompt and the actual action never disagree.
+ */
+export function gatherTarget(sim) {
   const nearTree = sim.trees
     .filter((t) => !t.chopped && t.discovered && dist2D(t, sim.player) <= GATHER_RADIUS)
     .sort((a, b) => dist2D(a, sim.player) - dist2D(b, sim.player))[0];
   const nearStone = sim.stones
     .filter((s) => !s.mined && s.discovered && dist2D(s, sim.player) <= GATHER_RADIUS)
     .sort((a, b) => dist2D(a, sim.player) - dist2D(b, sim.player))[0];
-
   const pick = [nearTree, nearStone].filter(Boolean).sort((a, b) => dist2D(a, sim.player) - dist2D(b, sim.player))[0];
+  if (!pick) return null;
+  return { ...pick, gatherKind: pick === nearTree ? "tree" : "stone" };
+}
+
+export function gatherResource(sim) {
+  if (sim.status !== "playing") return { ok: false, reason: "over" };
+
+  const pick = gatherTarget(sim);
   if (!pick) return { ok: false, reason: "nothing-here" };
 
-  if (pick === nearTree) {
-    pick.chopped = true;
+  if (pick.gatherKind === "tree") {
+    const t = sim.trees.find((x) => x.id === pick.id);
+    t.chopped = true;
     sim.wood += 1;
     emit(sim, "gather", "Wood, cut and carried.", { resource: "wood" });
     return { ok: true, resource: "wood" };
   }
-  pick.mined = true;
+  const s = sim.stones.find((x) => x.id === pick.id);
+  s.mined = true;
   sim.stone += 1;
   emit(sim, "gather", "Stone, broken free.", { resource: "stone" });
   return { ok: true, resource: "stone" };
+}
+
+/**
+ * Advance (or reset) the hold-to-gather progress for this tick. Holding the
+ * interact verb while standing at a tree/deposit accumulates GATHER_HOLD_TIME
+ * seconds before gatherResource() actually fires; releasing early, walking
+ * out of reach, or switching to a different node all reset progress to zero
+ * — a hold is a commitment to ONE node, not a meter you can bank partway.
+ */
+function updateGatherHold(sim, dt, interacting) {
+  const target = interacting ? gatherTarget(sim) : null;
+  if (!target) {
+    sim.gatherHold.targetId = null;
+    sim.gatherHold.progress = 0;
+    return;
+  }
+  if (sim.gatherHold.targetId !== target.id) {
+    sim.gatherHold.targetId = target.id;
+    sim.gatherHold.progress = 0;
+  }
+  sim.gatherHold.progress += dt;
+  if (sim.gatherHold.progress >= GATHER_HOLD_TIME) {
+    gatherResource(sim);
+    sim.gatherHold.targetId = null;
+    sim.gatherHold.progress = 0;
+  }
 }
 
 /**
@@ -763,39 +809,64 @@ export function useItem(sim, slotIndex, targetCompanionId) {
  * A phantom slot's `kind` is null and can never match a recipe, so it's
  * silently skipped rather than treated as a wrong guess.
  */
-export function craftItem(sim) {
-  if (sim.status !== "playing") return { ok: false, reason: "over" };
-
+/**
+ * What craftItem() would do right now, without doing it — a matching item
+ * pair, or (if none) enough raw materials for a Stake. Shared by craftItem
+ * itself and by previewCraft, so the HUD's "craft available" indicator can
+ * never claim something craftItem then refuses.
+ */
+function findCraftMatch(sim) {
   for (let i = 0; i < sim.inventory.length; i++) {
     for (let j = i + 1; j < sim.inventory.length; j++) {
       const a = sim.inventory[i];
       const b = sim.inventory[j];
       if (!a.real || !b.real) continue;
-      const result = CRAFT_RECIPES[recipeKey(a.kind, b.kind)];
-      if (!result) continue;
-      sim.inventory.splice(j, 1);
-      sim.inventory.splice(i, 1);
-      sim.inventory.push({ id: `slot${sim.inventory.length}-${sim.time.toFixed(2)}`, real: true, kind: result, claimedKind: null });
-      sim.stats.itemsCrafted += 1;
-      emit(sim, "craft", `The two combine. ${ITEM_INFO[result].label} forms in your hands.`, { itemKind: result });
-      return { ok: true, kind: result };
+      const kind = CRAFT_RECIPES[recipeKey(a.kind, b.kind)];
+      if (kind) return { type: "pair", i, j, kind };
     }
   }
-
-  // No matching item pair — try raw materials. A Stake is a carried item like
-  // any other (see useItem's "stake" case), so it needs room in the cap same
-  // as a pickup would.
   if (sim.wood >= STAKE_COST.wood && sim.stone >= STAKE_COST.stone) {
-    if (sim.inventory.length >= ITEM_CAP) return { ok: false, reason: "full" };
-    sim.wood -= STAKE_COST.wood;
-    sim.stone -= STAKE_COST.stone;
-    sim.inventory.push({ id: `slot${sim.inventory.length}-${sim.time.toFixed(2)}`, real: true, kind: "stake", claimedKind: null });
+    return { type: "material", kind: "stake" };
+  }
+  return null;
+}
+
+/**
+ * Read-only preview for the HUD: is there anything to craft right now, and
+ * what would it be? Mirrors craftItem()'s eventual success exactly, cap
+ * check included, so the indicator is never a promise craftItem breaks.
+ */
+export function previewCraft(sim) {
+  const match = findCraftMatch(sim);
+  if (!match) return { ok: false };
+  if (match.type === "material" && sim.inventory.length >= ITEM_CAP) return { ok: false };
+  return { ok: true, kind: match.kind };
+}
+
+export function craftItem(sim) {
+  if (sim.status !== "playing") return { ok: false, reason: "over" };
+
+  const match = findCraftMatch(sim);
+  if (!match) return { ok: false, reason: "no-recipe" };
+
+  if (match.type === "pair") {
+    sim.inventory.splice(match.j, 1);
+    sim.inventory.splice(match.i, 1);
+    sim.inventory.push({ id: `slot${sim.inventory.length}-${sim.time.toFixed(2)}`, real: true, kind: match.kind, claimedKind: null });
     sim.stats.itemsCrafted += 1;
-    emit(sim, "craft", "Wood and stone lash together. A stake, ready to plant.", { itemKind: "stake" });
-    return { ok: true, kind: "stake" };
+    emit(sim, "craft", `The two combine. ${ITEM_INFO[match.kind].label} forms in your hands.`, { itemKind: match.kind });
+    return { ok: true, kind: match.kind };
   }
 
-  return { ok: false, reason: "no-recipe" };
+  // Raw materials — a Stake is a carried item like any other (see useItem's
+  // "stake" case), so it needs room in the cap same as a pickup would.
+  if (sim.inventory.length >= ITEM_CAP) return { ok: false, reason: "full" };
+  sim.wood -= STAKE_COST.wood;
+  sim.stone -= STAKE_COST.stone;
+  sim.inventory.push({ id: `slot${sim.inventory.length}-${sim.time.toFixed(2)}`, real: true, kind: "stake", claimedKind: null });
+  sim.stats.itemsCrafted += 1;
+  emit(sim, "craft", "Wood and stone lash together. A stake, ready to plant.", { itemKind: "stake" });
+  return { ok: true, kind: "stake" };
 }
 
 /** Everyone at camp, or close enough to walk in together. */
@@ -855,6 +926,10 @@ export function checkEndings(sim) {
  * the sequence of inputs — the smoke test drives this directly through a debug
  * hook rather than waiting on wall-clock time (headless rAF runs well under
  * real time, so asserting on real seconds is a known way to get flaky tests).
+ *
+ * `input.interact` is a continuous HELD boolean (not an edge/tap) — it drives
+ * updateGatherHold, the only per-tick system that cares whether the verb is
+ * currently down rather than whether it was just pressed.
  */
 export function tick(sim, dt, input = {}) {
   if (sim.status !== "playing") return sim;
@@ -901,6 +976,8 @@ export function tick(sim, dt, input = {}) {
   // Unprompted chatter is the other half of the sensor: a companion who is
   // fraying will say so sideways, if you are listening.
   for (const c of sim.companions) companionRemark(sim, c, step);
+
+  updateGatherHold(sim, step, !!input.interact);
 
   checkEndings(sim);
   return sim;

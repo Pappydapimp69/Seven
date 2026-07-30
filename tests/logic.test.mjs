@@ -9,11 +9,11 @@
 import {
   createRun, tick, tickLucidity, bandOf, BAND, checkIn, useDose, logMarker, recover,
   beginHallucinating, debrief, trueLogCount, checkEndings, partyCentroid,
-  pickupItem, useItem, craftItem, gatherResource, emit,
+  pickupItem, useItem, craftItem, previewCraft, gatherResource, gatherTarget, emit,
   PARTY_SIZE, MAX_LUCIDITY, DOSE_COUNT, RECOVER_AT, RECOVER_TIME, DISSOLVE_TIME,
   TIME_LIMIT, PYLON_RADIUS, LOG_RADIUS, ISOLATION_DIST,
   ITEM_CAP, ITEM_PICKUP_RADIUS, ITEM_INFO, PHANTOM_ITEM_COST, CRAFT_RECIPES, CAMPAIGN_LENGTH,
-  GATHER_RADIUS, STAKE_COST, PYLON_MAX_CHARGE,
+  GATHER_RADIUS, GATHER_HOLD_TIME, STAKE_COST, PYLON_MAX_CHARGE,
 } from "../src/state.js";
 import { generateWorld, validate, findPath, isBlockedAt, GRID, ITEM_COUNT, ITEM_KINDS, TREE_COUNT, STONE_COUNT } from "../src/world.js";
 import {
@@ -814,6 +814,45 @@ check("craft works off the sim's truth, not the item bar's possibly-lying labels
   eq(craftItem(sim).reason, "no-recipe", "two true flares still can't combine, whatever the bar showed");
 });
 
+// ---------------------------------------------------------------------------
+// previewCraft — the HUD's "craft available" indicator, never a promise
+// craftItem then breaks
+// ---------------------------------------------------------------------------
+check("previewCraft reports nothing available when nothing is", () => {
+  const sim = createRun({ seed: 86 });
+  eq(previewCraft(sim).ok, false, "expected no preview with an empty inventory and no materials");
+});
+
+check("previewCraft matches a real item pair without consuming anything", () => {
+  const sim = createRun({ seed: 87 });
+  sim.inventory.push({ id: "a", real: true, kind: "flare", claimedKind: null });
+  sim.inventory.push({ id: "b", real: true, kind: "lens", claimedKind: null });
+  const preview = previewCraft(sim);
+  assert(preview.ok && preview.kind === "beacon", "expected a beacon preview for flare+lens");
+  eq(sim.inventory.length, 2, "previewing must not consume the pair");
+  const actual = craftItem(sim);
+  eq(actual.kind, preview.kind, "previewCraft must agree with what craftItem actually does");
+});
+
+check("previewCraft matches a materials-only craft, and respects the item cap", () => {
+  const sim = createRun({ seed: 88 });
+  sim.wood = STAKE_COST.wood;
+  sim.stone = STAKE_COST.stone;
+  const preview = previewCraft(sim);
+  assert(preview.ok && preview.kind === "stake", "expected a stake preview with enough materials");
+  const actual = craftItem(sim);
+  eq(actual.kind, preview.kind, "previewCraft must agree with what craftItem actually does");
+
+  // Now with a full inventory, the same materials should no longer preview
+  // as craftable — matching craftItem's own cap refusal.
+  const sim2 = createRun({ seed: 89 });
+  sim2.wood = STAKE_COST.wood;
+  sim2.stone = STAKE_COST.stone;
+  for (let i = 0; i < ITEM_CAP; i++) sim2.inventory.push({ id: `x${i}`, real: true, kind: "flare", claimedKind: null });
+  eq(previewCraft(sim2).ok, false, "previewCraft should not promise a craft that would be refused for a full inventory");
+  eq(craftItem(sim2).reason, "full", "sanity: craftItem itself should refuse for the same reason");
+});
+
 check("use: ember/beacon/ward do both parent effects at once", () => {
   const sim = createRun({ seed: 68 });
   const target = sim.companions[0];
@@ -890,6 +929,77 @@ check("gathering never touches inventory or lucidity — no deception, no cost",
   assert(res.ok && res.resource === "wood", "a hallucinating lead should still gather truthfully");
   eq(sim.inventory.length, 0, "gathering must not add an inventory slot");
   eq(sim.player.lucidity, before, "gathering must not cost lucidity");
+});
+
+// ---------------------------------------------------------------------------
+// hold-to-gather — chop/mine takes a deliberate hold, not a tap
+// ---------------------------------------------------------------------------
+check("holding short of GATHER_HOLD_TIME does not gather", () => {
+  const sim = createRun({ seed: 81 });
+  const t = sim.trees[0];
+  t.discovered = true;
+  sim.player.x = t.x;
+  sim.player.z = t.z;
+  advance(sim, GATHER_HOLD_TIME - 0.3, { interact: true });
+  eq(sim.wood, 0, "gathered before the hold finished");
+  assert(!t.chopped, "the tree was chopped early");
+  assert(sim.gatherHold.progress > 0, "holding should still be accumulating progress");
+});
+
+check("holding for GATHER_HOLD_TIME completes the gather", () => {
+  const sim = createRun({ seed: 82 });
+  const t = sim.trees[0];
+  t.discovered = true;
+  sim.player.x = t.x;
+  sim.player.z = t.z;
+  advance(sim, GATHER_HOLD_TIME - 0.1, { interact: true });
+  eq(sim.wood, 0, "gathered before the hold time was reached");
+  advance(sim, 0.2, { interact: true }); // crosses the threshold
+  eq(sim.wood, 1, "did not gather once the hold time was reached");
+  assert(t.chopped, "the tree was not marked chopped");
+  eq(sim.gatherHold.progress, 0, "hold progress should reset after completing");
+  eq(sim.gatherHold.targetId, null, "hold target should clear after completing");
+});
+
+check("releasing the interact verb early resets progress to zero", () => {
+  const sim = createRun({ seed: 83 });
+  const t = sim.trees[0];
+  t.discovered = true;
+  sim.player.x = t.x;
+  sim.player.z = t.z;
+  advance(sim, GATHER_HOLD_TIME * 0.6, { interact: true });
+  assert(sim.gatherHold.progress > 0, "progress should have accumulated");
+  advance(sim, 1 / 30, { interact: false }); // let go, one tick
+  eq(sim.gatherHold.progress, 0, "releasing early should reset progress");
+  eq(sim.gatherHold.targetId, null, "releasing early should clear the target");
+  eq(sim.wood, 0, "nothing should have been gathered");
+});
+
+check("switching to a different node resets progress instead of carrying it over", () => {
+  const sim = createRun({ seed: 84 });
+  const t = sim.trees[0];
+  const s = sim.stones[0];
+  t.discovered = true;
+  s.discovered = true;
+  sim.player.x = t.x;
+  sim.player.z = t.z;
+  advance(sim, GATHER_HOLD_TIME * 0.7, { interact: true });
+  assert(sim.gatherHold.targetId === t.id, "should be holding on the tree first");
+  sim.player.x = s.x;
+  sim.player.z = s.z;
+  advance(sim, 1 / 30, { interact: true }); // one tick standing at the new target
+  eq(sim.gatherHold.targetId, s.id, "target should switch to the stone");
+  assert(sim.gatherHold.progress < GATHER_HOLD_TIME * 0.7, "progress must not carry over from the old target");
+});
+
+check("gatherTarget agrees with what actually gets gathered — no second implementation to drift", () => {
+  const sim = createRun({ seed: 85 });
+  const t = sim.trees[0];
+  t.discovered = true;
+  sim.player.x = t.x;
+  sim.player.z = t.z;
+  const target = gatherTarget(sim);
+  assert(target && target.id === t.id && target.gatherKind === "tree", "gatherTarget did not find the tree");
 });
 
 // ---------------------------------------------------------------------------

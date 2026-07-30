@@ -338,9 +338,21 @@ input[type="range"] { width: 100%; margin-bottom: 18px; accent-color: var(--cyan
   font-size: 14px;
   opacity: 0;
   transition: opacity 0.18s;
+  overflow: hidden; /* clips the fill bar to the pill's rounded corners */
 }
 .action-prompt.show { opacity: 1; }
 .action-prompt::after { content: "  [E]"; color: var(--cyan); font-size: 12px; }
+/* Hold-to-gather progress. Width is set directly from JS each frame — no CSS
+   transition here, since a transition would lag a per-frame value and read as
+   mushy rather than responsive to how long the button has actually been down. */
+.action-prompt-fill {
+  position: absolute;
+  inset: 0;
+  width: 0%;
+  background: rgba(116, 224, 255, 0.35);
+  z-index: 0;
+}
+.action-prompt-text { position: relative; z-index: 1; }
 
 .reticle {
   position: absolute;
@@ -370,6 +382,23 @@ input[type="range"] { width: 100%; margin-bottom: 18px; accent-color: var(--cyan
 }
 .item-slot.sel { color: var(--ink); border-color: var(--cyan); background: rgba(116, 224, 255, 0.12); }
 .item-slot.empty { color: #4a5563; font-style: italic; }
+
+/* Sits just above the item bar — appears only when previewCraft(sim) says
+   pressing craft would actually do something, so [C] is never a guess. */
+.craft-hint {
+  position: absolute;
+  left: 16px;
+  bottom: 58px;
+  padding: 5px 10px;
+  background: rgba(127, 214, 192, 0.14);
+  border: 1px solid rgba(127, 214, 192, 0.4);
+  border-radius: 8px;
+  font-size: 11.5px;
+  color: var(--good);
+  opacity: 0;
+  transition: opacity 0.18s;
+}
+.craft-hint.show { opacity: 1; }
 
 .hints {
   position: absolute;
@@ -446,4 +475,5 @@ body[data-scheme="touch"] .touch-buttons { display: flex; }
   .touch-buttons { flex-direction: row; flex-wrap: wrap; justify-content: flex-end; max-width: 230px; }
   .tbtn { min-width: 90px; padding: 10px 12px; font-size: 12px; }
   .item-bar { bottom: 18px; }
+  .craft-hint { bottom: 52px; }
 }

@@ -2,8 +2,8 @@
 // input into the sim, the sim into perception, and perception into the screen.
 
 import {
-  createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem, craftItem, gatherResource,
-  PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, GATHER_RADIUS, CAMPAIGN_LENGTH,
+  createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem, craftItem, gatherTarget,
+  PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH,
 } from "./state.js";
 import { createPercept, updatePercept, distortion } from "./percept.js";
 import { createRenderer } from "./render.js";
@@ -218,15 +218,6 @@ function nearestPickupItem(sim) {
     .sort((a, b) => Math.hypot(a.x - sim.player.x, a.z - sim.player.z) - Math.hypot(b.x - sim.player.x, b.z - sim.player.z))[0] || null;
 }
 
-/** Is there a tree or stone deposit within reach? Same contextual-verb
- * reasoning as nearestPickupItem — checked after a pickup, before a survey. */
-function nearestGatherable(sim) {
-  const d = (o) => Math.hypot(o.x - sim.player.x, o.z - sim.player.z);
-  const trees = sim.trees.filter((t) => t.discovered && !t.chopped && d(t) <= GATHER_RADIUS);
-  const stones = sim.stones.filter((s) => s.discovered && !s.mined && d(s) <= GATHER_RADIUS);
-  return [...trees, ...stones].sort((a, b) => d(a) - d(b))[0] || null;
-}
-
 function handleAction(action, arg) {
   const { sim, percept, hud } = run;
   if (sim.status !== "playing") return;
@@ -247,15 +238,10 @@ function handleAction(action, arg) {
         }
         break;
       }
-      // Gathering comes next in the priority chain — a tree/deposit sits at
-      // the same close range as an item pickup and never lies about what it
-      // is, so there is nothing to gate on hallucination state here.
-      if (nearestGatherable(sim)) {
-        const gres = gatherResource(sim);
-        if (!gres.ok) audio.play("deny");
-        else audio.play("log");
-        break;
-      }
+      // Gathering is next in the priority chain, but it's a HOLD now (see
+      // tick()'s updateGatherHold), not a tap — a bare press here just needs
+      // to not fall through to a confusing "nothing to survey" message.
+      if (gatherTarget(sim)) break;
       const res = logMarker(sim, nearestPhantom(sim, percept));
       if (!res.ok) {
         // A failed survey used to be silent-but-for-a-sound-cue — indistinguishable
@@ -361,7 +347,7 @@ function step(dt, intent) {
 
   for (const { action, arg } of intent.queue) handleAction(action, arg);
 
-  tick(sim, dt, { move, run: intent.run, yaw });
+  tick(sim, dt, { move, run: intent.run, yaw, interact: intent.interact });
   const events = sim.events.slice();
   updatePercept(percept, sim, dt);
 
@@ -451,8 +437,16 @@ function boot() {
       for (const b of document.querySelectorAll("[data-vol]")) b.classList.toggle("sel", b === btn);
     });
   }
-  // Touch action buttons mirror the keyboard verbs.
+  // Touch action buttons mirror the keyboard verbs. Survey/pickup still fires
+  // on tap (click, which lands on release); pointerdown/pointerup ALSO track
+  // held state for the hold-to-gather mechanic, exactly like HELD.has("KeyE")
+  // does for keyboard — a touch button has no physical "held" state of its
+  // own, so input.js needs to be told.
   el("btnSurvey").addEventListener("click", () => run && handleAction(ACTIONS.SURVEY));
+  el("btnSurvey").addEventListener("pointerdown", () => input.setTouchInteractHeld(true));
+  el("btnSurvey").addEventListener("pointerup", () => input.setTouchInteractHeld(false));
+  el("btnSurvey").addEventListener("pointerleave", () => input.setTouchInteractHeld(false));
+  el("btnSurvey").addEventListener("pointercancel", () => input.setTouchInteractHeld(false));
   el("btnCheck").addEventListener("click", () => run && handleAction(ACTIONS.CHECK_IN, selected));
   el("btnDose").addEventListener("click", () => run && handleAction(ACTIONS.DOSE, selected));
   el("btnNext").addEventListener("click", () => run && handleAction(ACTIONS.NEXT_TARGET));
@@ -494,6 +488,7 @@ if (typeof window !== "undefined") {
           yaw: intent.yaw ?? run.sim.player.yaw,
           pitch: 0,
           queue: [],
+          interact: !!intent.interact,
         });
         done += slice;
       }

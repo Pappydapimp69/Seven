@@ -44,6 +44,7 @@ export function createInput(canvas, opts = {}) {
     pitch: 0,
     pointerLocked: false,
     queue: [], // discrete actions, drained each frame
+    touchInteract: false, // set by main.js's pointerdown/up on the touch survey button
   };
 
   const HELD = new Set();
@@ -64,6 +65,10 @@ export function createInput(canvas, opts = {}) {
   function setMenuHandlers(navX, navY, confirm, cancel) {
     menuHandlers = { navX, navY, confirm, cancel };
   }
+  // Touch has no physical key to hold — main.js tracks pointerdown/pointerup
+  // on the survey button itself and reports the held state here, the same
+  // role HELD.has("KeyE") plays for keyboard.
+  function setTouchInteractHeld(down) { state.touchInteract = down; }
 
   // ---- keyboard ------------------------------------------------------------
   const DIGIT = /^Digit([1-5])$/;
@@ -250,7 +255,7 @@ export function createInput(canvas, opts = {}) {
     if (edges[9]) push(ACTIONS.PAUSE); // Start
     state.look.dx += rx * 13;
     state.look.dy += ry * 9;
-    return { x: lx, z: ly, run: pressedNow[10] || pressedNow[6] };
+    return { x: lx, z: ly, run: pressedNow[10] || pressedNow[6], interact: pressedNow[0] };
   }
 
   window.addEventListener("keydown", onKeyDown);
@@ -296,7 +301,10 @@ export function createInput(canvas, opts = {}) {
     state.move.x = x;
     state.move.z = z;
     state.run = run;
-    return { move: { x, z }, run, yaw: state.yaw, pitch: state.pitch, queue, scheme, dt };
+    // Continuous HELD state for hold-to-gather — deliberately separate from
+    // `queue`, which only ever carries discrete, already-fired taps.
+    const interact = HELD.has("KeyE") || !!(padMove && padMove.interact) || state.touchInteract;
+    return { move: { x, z }, run, yaw: state.yaw, pitch: state.pitch, queue, scheme, dt, interact };
   }
 
   function destroy() {
@@ -310,6 +318,7 @@ export function createInput(canvas, opts = {}) {
   return {
     setMode,
     setMenuHandlers,
+    setTouchInteractHeld,
     poll,
     requestLock,
     destroy,

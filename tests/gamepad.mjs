@@ -233,7 +233,7 @@ const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, L3: 10, START:
   assert(afterCraft.crafted === 1, "crafting via D-pad Up was not recorded in stats");
 
   // ---- gathering: [A] is the same contextual verb, one priority step below
-  // an item pickup and above a marker survey.
+  // an item pickup and above a marker survey — but it's a HOLD, not a tap.
   await page.evaluate(() => {
     const s = window.__mirage.sim;
     const t = s.trees.find((x) => !x.chopped);
@@ -241,9 +241,15 @@ const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, L3: 10, START:
     window.__mirage.teleport(t.x, t.z);
   });
   const woodBefore = await page.evaluate(() => window.__mirage.sim.wood);
-  await tap(BTN.A);
+  await tap(BTN.A); // a bare tap must not chop
+  const woodAfterTap = await page.evaluate(() => window.__mirage.sim.wood);
+  assert(woodAfterTap === woodBefore, `a bare [A] tap should not gather (${woodBefore} -> ${woodAfterTap})`);
+  // Generous real-world hold: headless SwiftShader can run well under 10fps
+  // (see this file's own note on `tap`/`hold` timing), so this needs enough
+  // margin over GATHER_HOLD_TIME (1.2s of SIM time) to survive slow frames.
+  await hold(BTN.A, 2500);
   const woodAfter = await page.evaluate(() => window.__mirage.sim.wood);
-  assert(woodAfter === woodBefore + 1, `[A] did not chop the tree in reach (${woodBefore} -> ${woodAfter})`);
+  assert(woodAfter === woodBefore + 1, `holding [A] did not chop the tree in reach (${woodBefore} -> ${woodAfter})`);
 
   // Start pauses, and the pause screen is itself gamepad-navigable.
   await tap(BTN.START);
