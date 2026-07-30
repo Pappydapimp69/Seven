@@ -58,6 +58,21 @@ html, body {
   50% { transform: scale(1.06); opacity: 1; }
 }
 
+/* One-shot flash on a lucidity restore (flare/ember/beacon). Opacity only —
+   same reasoning as the vignette above, composited and cheap under software
+   GL. Instant on, eased off: hud.js's flash() sets .show with a forced reflow
+   so back-to-back uses restart the transition instead of no-op-ing. */
+.flash {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background: #eef6ff;
+  z-index: 6;
+  transition: opacity 0.35s ease-out;
+}
+.flash.show { opacity: 0.5; transition: opacity 0s; }
+
 /* ---------- screens ---------- */
 .screen {
   position: fixed;
@@ -283,6 +298,7 @@ input[type="range"] { width: 100%; margin-bottom: 18px; accent-color: var(--cyan
 .tag-bad .r-read, .tag-breaking-off .r-read { color: #ff9f6b; }
 .tag-gone .r-name { color: var(--bad); }
 .tag-gone .r-read { color: var(--bad); }
+.tag-steadied .r-read { color: var(--cyan); }
 .roster-row.uncertain .r-read { color: #8a6ea8; }
 
 .sel-line {

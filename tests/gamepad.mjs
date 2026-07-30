@@ -213,6 +213,25 @@ const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, L3: 10, START:
   assert(afterUse.inv === invBeforeUse - 1, `[B] did not consume the used slot (${invBeforeUse} -> ${afterUse.inv})`);
   assert(afterUse.used === usedBefore + 1, "using an item via [B] was not recorded in stats");
 
+  // ---- crafting: D-pad Up combines two real items, same edges[12] the title
+  // screen's menu nav already exercised — this time in "game" mode.
+  await page.evaluate(() => {
+    const s = window.__mirage.sim;
+    s.inventory.length = 0;
+    s.inventory.push({ id: "gp-craft-a", real: true, kind: "lens", claimedKind: null });
+    s.inventory.push({ id: "gp-craft-b", real: true, kind: "tether", claimedKind: null });
+  });
+  await tap(BTN.UP);
+  const afterCraft = await page.evaluate(() => ({
+    inventory: window.__mirage.sim.inventory.map((slot) => slot.kind),
+    crafted: window.__mirage.sim.stats.itemsCrafted,
+  }));
+  assert(
+    afterCraft.inventory.length === 1 && afterCraft.inventory[0] === "ward",
+    `D-pad Up should combine lens+tether into a ward, got ${JSON.stringify(afterCraft.inventory)}`,
+  );
+  assert(afterCraft.crafted === 1, "crafting via D-pad Up was not recorded in stats");
+
   // Start pauses, and the pause screen is itself gamepad-navigable.
   await tap(BTN.START);
   const pausedState = await page.evaluate(() => ({

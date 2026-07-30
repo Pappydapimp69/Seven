@@ -239,7 +239,13 @@ export function perceivedInventory(percept, sim) {
     }
     if (!lying) return { index, real: true, shownKind: slot.kind, label: ITEM_INFO[slot.kind].label, misidentified: false };
     if (!percept.itemLabels.has(slot.id)) {
-      const wrong = sim.rng.pick(ITEM_KINDS.filter((k) => k !== slot.kind));
+      // The carried-item lie draws from every displayable kind, crafted
+      // included — a hallucinating lead can believe they're holding an Ember
+      // they never crafted. World items stay restricted to ITEM_KINDS (see
+      // perceivedWorldItems): a crafted item has no ground mesh to mistake it
+      // for, so that lie only makes sense once something is already in hand.
+      const pool = Object.keys(ITEM_INFO).filter((k) => k !== slot.kind);
+      const wrong = sim.rng.pick(pool);
       percept.itemLabels.set(slot.id, wrong || slot.kind);
     }
     const shownKind = percept.itemLabels.get(slot.id);
@@ -289,6 +295,11 @@ export function rosterRead(percept, sim, companion) {
   if (companion.goalKind === "pylon") return { tag: "breaking off", note: "heading for a pylon", uncertain: false };
   if (band === BAND.BRITTLE) return { tag: "bad", note: "shaking", uncertain: false };
   if (lagging) return { tag: "lagging", note: "falling behind", uncertain: false };
+  // A Tether's effect is otherwise invisible math (a reduced drain rate) — this
+  // is the one place it becomes something the lead can actually see, and only
+  // when nothing more urgent (brittle, lagging) is already competing for the
+  // same line.
+  if (companion.steadyUntil > sim.time) return { tag: "steadied", note: "steadier, for now", uncertain: false };
   if (band === BAND.FRAYING) return { tag: "off", note: "talking to the ridge", uncertain: false };
   if (band === BAND.UNSETTLED) return { tag: "quiet", note: "quieter than usual", uncertain: false };
   return { tag: "ok", note: "steady", uncertain: false };

@@ -2,8 +2,8 @@
 // input into the sim, the sim into perception, and perception into the screen.
 
 import {
-  createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem,
-  PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS,
+  createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem, craftItem,
+  PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH,
 } from "./state.js";
 import { createPercept, updatePercept, distortion } from "./percept.js";
 import { createRenderer } from "./render.js";
@@ -30,6 +30,7 @@ let selected = 0; // companion index — shared by check-in/dose AND tether's ta
 let selectedItem = 0; // inventory slot index — cycled independently of `selected`
 let whisperTimer = 0;
 let lastFrame = 0;
+let campaignSeed = 0; // the seed the player actually entered/rolled — each basin in the campaign derives its own seed from this so "New basin" always starts a fresh campaign
 
 const LAYERS = ["title", "hudLayer", "pauseLayer", "debriefLayer"];
 function screens(show) {
@@ -128,7 +129,8 @@ function refreshSchemeUI(scheme) {
 
 function startRun({ seed, difficulty } = {}) {
   const seedValue = seed ?? Math.floor(Math.random() * 0xffffff) + 1;
-  const sim = createRun({ seed: seedValue, difficulty: difficulty || "standard" });
+  campaignSeed = seedValue;
+  const sim = createRun({ seed: seedValue, difficulty: difficulty || "standard", level: 1, campaignLength: CAMPAIGN_LENGTH });
   const percept = createPercept();
   const renderer = createRenderer(canvas, sim);
   const hud = createHud(sim, percept);
@@ -152,6 +154,48 @@ function startRun({ seed, difficulty } = {}) {
   // them throws in strict mode (ES modules are always strict), which is exactly
   // what the smoke test caught.
   return run;
+}
+
+/**
+ * A basin cleared with more of the campaign left: rebuild a fresh world under
+ * the same run rather than dropping to the debrief screen. The party's
+ * lucidity/scars/hallucination state, doses, inventory, and cumulative stats
+ * carry forward (see createRun's carryOver) — a worn-down party walks into the
+ * next fog still worn down, not reset to full. Percept/renderer are rebuilt
+ * from scratch because the world (terrain, rock instancing, monolith/pylon/
+ * item positions) is entirely new geometry, not something last basin's
+ * renderer can be pointed at in place.
+ */
+function advanceLevel() {
+  const old = run.sim;
+  const carryOver = {
+    party: old.party.map((c) => ({
+      id: c.id,
+      lucidity: c.lucidity,
+      scars: c.scars,
+      hallucinating: c.hallucinating,
+      hallucination: c.hallucination,
+      goneTime: c.goneTime,
+    })),
+    doses: old.doses,
+    inventory: old.inventory,
+    stats: old.stats,
+  };
+  const nextLevel = old.level + 1;
+  // Deterministic per-level seed derived from the campaign's own seed, so a
+  // given campaign seed always produces the same sequence of basins.
+  const seed = campaignSeed + nextLevel * 104729;
+  const sim = createRun({ seed, difficulty: old.difficulty, level: nextLevel, campaignLength: old.campaignLength, carryOver });
+  const percept = createPercept();
+  run.renderer.dispose();
+  const renderer = createRenderer(canvas, sim);
+  const hud = createHud(sim, percept);
+  hud.setHints(input.activeScheme);
+  hud.say(`Basin ${nextLevel} of ${sim.campaignLength}. The party pushes on.`, "warn");
+  run = { sim, percept, renderer, hud };
+  selected = 0;
+  selectedItem = 0;
+  lastFrame = 0;
 }
 
 function nearestPhantom(sim, percept) {
@@ -247,6 +291,20 @@ function handleAction(action, arg) {
       if (selectedItem >= sim.inventory.length && selectedItem > 0) selectedItem -= 1;
       break;
     }
+    case ACTIONS.CRAFT: {
+      // Works off the sim's own truth (state.js), never the item bar's
+      // possibly-lying labels — see craftItem's own comment. A hallucinating
+      // lead who thinks they're holding a matching pair can still fail here.
+      const cres = craftItem(sim);
+      if (!cres.ok) {
+        audio.play("deny");
+        hud.say(cres.reason === "need-two" ? "Need two things carried to combine." : "Nothing here combines.", "warn");
+        break;
+      }
+      audio.play("log");
+      selectedItem = Math.max(0, sim.inventory.length - 1); // land selection on the new item
+      break;
+    }
     case ACTIONS.PAUSE:
       togglePause();
       break;
@@ -313,7 +371,8 @@ function step(dt, intent) {
   hud.update({ yaw, pitch: intent.pitch ?? 0 }, selected, selectedItem);
   renderer.update(percept, dt, { yaw, pitch: intent.pitch ?? 0 });
 
-  if (sim.status !== "playing") finish();
+  if (sim.status === "levelComplete") advanceLevel();
+  else if (sim.status !== "playing") finish();
 }
 
 function finish() {
@@ -379,6 +438,7 @@ function boot() {
   el("btnNext").addEventListener("click", () => run && handleAction(ACTIONS.NEXT_TARGET));
   el("btnItem")?.addEventListener("click", () => run && handleAction(ACTIONS.CYCLE_ITEM));
   el("btnUse")?.addEventListener("click", () => run && handleAction(ACTIONS.USE_ITEM));
+  el("btnCraft")?.addEventListener("click", () => run && handleAction(ACTIONS.CRAFT));
   screens("title");
   requestAnimationFrame(frame);
 }
@@ -436,6 +496,7 @@ if (typeof window !== "undefined") {
     debrief: () => (run ? debrief(run.sim) : null),
     DIFFICULTY,
     ACTIONS,
+    CAMPAIGN_LENGTH,
   };
 }
 

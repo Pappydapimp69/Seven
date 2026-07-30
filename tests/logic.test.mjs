@@ -9,10 +9,10 @@
 import {
   createRun, tick, tickLucidity, bandOf, BAND, checkIn, useDose, logMarker, recover,
   beginHallucinating, debrief, trueLogCount, checkEndings, partyCentroid,
-  pickupItem, useItem,
+  pickupItem, useItem, craftItem, emit,
   PARTY_SIZE, MAX_LUCIDITY, DOSE_COUNT, RECOVER_AT, RECOVER_TIME, DISSOLVE_TIME,
   TIME_LIMIT, PYLON_RADIUS, LOG_RADIUS, ISOLATION_DIST,
-  ITEM_CAP, ITEM_PICKUP_RADIUS, ITEM_INFO, PHANTOM_ITEM_COST,
+  ITEM_CAP, ITEM_PICKUP_RADIUS, ITEM_INFO, PHANTOM_ITEM_COST, CRAFT_RECIPES, CAMPAIGN_LENGTH,
 } from "../src/state.js";
 import { generateWorld, validate, findPath, isBlockedAt, GRID, ITEM_COUNT, ITEM_KINDS } from "../src/world.js";
 import {
@@ -731,6 +731,170 @@ check("a phantom pickup is never rendered as a world object, only as an inventor
   updatePercept(percept, sim, 0.1);
   const worldSeen = perceivedWorldItems(percept, sim);
   assert(!worldSeen.some((w) => w.id === it.id), "a taken item must not still appear on the ground");
+});
+
+// ---------------------------------------------------------------------------
+// emit() — the event kind must never be shadowed by opts
+// ---------------------------------------------------------------------------
+check("emit()'s own event kind always wins, even if opts carries a field named 'kind'", () => {
+  const sim = createRun({ seed: 62 });
+  emit(sim, "itemUsed", "test text", { itemKind: "flare" });
+  const ev = sim.events[sim.events.length - 1];
+  eq(ev.kind, "itemUsed", "opts clobbered the event's own kind discriminator");
+  eq(ev.itemKind, "flare", "the per-item context should still ride along under its own name");
+});
+
+// ---------------------------------------------------------------------------
+// crafting — combine two real items into something stronger
+// ---------------------------------------------------------------------------
+check("crafting combines two real items into the recipe's result and consumes both slots", () => {
+  const sim = createRun({ seed: 63 });
+  sim.inventory.push({ id: "a", real: true, kind: "flare", claimedKind: null });
+  sim.inventory.push({ id: "b", real: true, kind: "tether", claimedKind: null });
+  const res = craftItem(sim);
+  assert(res.ok, "craft refused a valid recipe pair");
+  eq(res.kind, "ember", "flare+tether should produce an ember");
+  eq(sim.inventory.length, 1, "crafting should net one item from two");
+  eq(sim.inventory[0].kind, "ember", "the crafted slot should carry the recipe's result");
+  eq(sim.stats.itemsCrafted, 1, "itemsCrafted not counted");
+});
+
+check("every unordered pair of the three base items has a recipe", () => {
+  eq(CRAFT_RECIPES["flare+tether"], "ember");
+  eq(CRAFT_RECIPES["flare+lens"], "beacon");
+  eq(CRAFT_RECIPES["lens+tether"], "ward");
+});
+
+check("crafting needs at least two items carried", () => {
+  const sim = createRun({ seed: 64 });
+  eq(craftItem(sim).reason, "need-two", "wrong refusal with an empty inventory");
+  sim.inventory.push({ id: "a", real: true, kind: "flare", claimedKind: null });
+  eq(craftItem(sim).reason, "need-two", "wrong refusal with only one item");
+});
+
+check("two of the same item, or a phantom, refuse to combine", () => {
+  const sim = createRun({ seed: 65 });
+  sim.inventory.push({ id: "a", real: true, kind: "flare", claimedKind: null });
+  sim.inventory.push({ id: "b", real: true, kind: "flare", claimedKind: null });
+  eq(craftItem(sim).reason, "no-recipe", "two flares should not combine into anything");
+  eq(sim.inventory.length, 2, "a failed craft must not consume anything");
+
+  const sim2 = createRun({ seed: 66 });
+  sim2.inventory.push({ id: "a", real: true, kind: "flare", claimedKind: null });
+  sim2.inventory.push({ id: "b", real: false, claimedKind: "tether", kind: null }); // a phantom looks like a tether but isn't one
+  eq(craftItem(sim2).reason, "no-recipe", "a phantom ingredient must not knowingly combine into a recipe");
+  eq(sim2.inventory.length, 2, "a failed craft on a phantom pair must not consume anything");
+});
+
+check("craft works off the sim's truth, not the item bar's possibly-lying labels", () => {
+  // A hallucinating lead's item bar can show two items as a matching pair
+  // (percept.js's own lie) while the TRUE kinds underneath don't combine at
+  // all — craftItem never looks at perceivedInventory, only sim.inventory.
+  const sim = createRun({ seed: 67 });
+  sim.inventory.push({ id: "a", real: true, kind: "flare", claimedKind: null });
+  sim.inventory.push({ id: "b", real: true, kind: "flare", claimedKind: null });
+  const percept = createPercept();
+  sim.player.hallucinating = true;
+  updatePercept(percept, sim, 0.1);
+  percept.itemLabels.set("a", "tether"); // force the lie: shown as tether, really a flare
+  const seen = perceivedInventory(percept, sim);
+  eq(seen[0].shownKind, "tether", "test setup: the item bar should be lying about slot a");
+  eq(craftItem(sim).reason, "no-recipe", "two true flares still can't combine, whatever the bar showed");
+});
+
+check("use: ember/beacon/ward do both parent effects at once", () => {
+  const sim = createRun({ seed: 68 });
+  const target = sim.companions[0];
+
+  sim.player.lucidity = 50;
+  sim.inventory.push({ id: "s0", real: true, kind: "ember", claimedKind: null });
+  useItem(sim, 0, target.id);
+  eq(sim.player.lucidity, 50 + ITEM_INFO.ember.restore, "ember should restore lucidity like a flare");
+  assert(target.steadyUntil > sim.time, "ember should also steady its target like a tether");
+
+  sim.player.lucidity = 40;
+  sim.inventory.push({ id: "s1", real: true, kind: "beacon", claimedKind: null });
+  useItem(sim, 0);
+  eq(sim.player.lucidity, 40 + ITEM_INFO.beacon.restore, "beacon should restore lucidity like a flare");
+  assert(sim.player.lensUntil > sim.time, "beacon should also open a truth window like a lens");
+
+  const target2 = sim.companions[1];
+  sim.inventory.push({ id: "s2", real: true, kind: "ward", claimedKind: null });
+  useItem(sim, 0, target2.id);
+  assert(target2.steadyUntil > sim.time, "ward should steady its target like a tether");
+  assert(sim.player.lensUntil > sim.time, "ward should also open a truth window like a lens");
+});
+
+check("a crafted item in inventory can be mislabeled as any displayable kind, base or crafted", () => {
+  const sim = createRun({ seed: 69 });
+  sim.inventory.push({ id: "s0", real: true, kind: "ember", claimedKind: null });
+  const percept = createPercept();
+  sim.player.hallucinating = true;
+  updatePercept(percept, sim, 0.1);
+  const seen = perceivedInventory(percept, sim);
+  assert(Object.keys(ITEM_INFO).includes(seen[0].shownKind), "the shown kind should be one of the real displayable kinds");
+});
+
+// ---------------------------------------------------------------------------
+// campaign — a basin cleared early in the sequence advances, not ends
+// ---------------------------------------------------------------------------
+check("createRun defaults to a single-basin campaign — no caller is affected unless it opts in", () => {
+  const sim = createRun({ seed: 70 });
+  eq(sim.level, 1, "default level");
+  eq(sim.campaignLength, 1, "default campaignLength must stay 1 so existing callers see the old win path");
+});
+
+check("clearing a basin before the last one advances instead of ending the run", () => {
+  const sim = createRun({ seed: 71, level: 1, campaignLength: CAMPAIGN_LENGTH });
+  for (const m of sim.monoliths) m.logged = true;
+  sim.player.x = sim.world.camp.x;
+  sim.player.z = sim.world.camp.z;
+  sim.companions[0].x = sim.world.camp.x;
+  sim.companions[0].z = sim.world.camp.z;
+  sim.companions[1].x = sim.world.camp.x;
+  sim.companions[1].z = sim.world.camp.z;
+  checkEndings(sim);
+  eq(sim.status, "levelComplete", "should advance rather than end with more basins left");
+  eq(sim.ending, "advance");
+});
+
+check("clearing the LAST basin of a campaign wins for real", () => {
+  const sim = createRun({ seed: 72, level: CAMPAIGN_LENGTH, campaignLength: CAMPAIGN_LENGTH });
+  for (const m of sim.monoliths) m.logged = true;
+  sim.player.x = sim.world.camp.x;
+  sim.player.z = sim.world.camp.z;
+  sim.companions[0].x = sim.world.camp.x;
+  sim.companions[0].z = sim.world.camp.z;
+  sim.companions[1].x = sim.world.camp.x;
+  sim.companions[1].z = sim.world.camp.z;
+  checkEndings(sim);
+  eq(sim.status, "won", "the final basin should still win outright");
+  eq(sim.ending, "extracted");
+});
+
+check("carryOver continues lucidity, scars, doses and inventory into the next basin", () => {
+  const first = createRun({ seed: 73, level: 1, campaignLength: 2 });
+  first.companions[0].lucidity = 37;
+  first.companions[0].scars = 2;
+  first.doses = 1;
+  first.inventory.push({ id: "carried", real: true, kind: "lens", claimedKind: null });
+  const carryOver = {
+    party: first.party.map((c) => ({
+      id: c.id, lucidity: c.lucidity, scars: c.scars,
+      hallucinating: c.hallucinating, hallucination: c.hallucination, goneTime: c.goneTime,
+    })),
+    doses: first.doses,
+    inventory: first.inventory,
+    stats: first.stats,
+  };
+  const second = createRun({ seed: 74, level: 2, campaignLength: 2, carryOver });
+  eq(second.companions[0].lucidity, 37, "lucidity did not carry over");
+  eq(second.companions[0].scars, 2, "scars did not carry over");
+  eq(second.doses, 1, "doses did not carry over");
+  eq(second.inventory.length, 1, "inventory did not carry over");
+  eq(second.inventory[0].kind, "lens", "the carried item's kind changed");
+  // But the world and party POSITIONS are fresh, not carried:
+  assert(second.player.x !== undefined, "a fresh basin should still have a valid spawn");
 });
 
 // ---------------------------------------------------------------------------

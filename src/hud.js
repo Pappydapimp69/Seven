@@ -40,6 +40,8 @@ export function createHud(sim, percept) {
     hints: document.getElementById("hints"),
     selection: document.getElementById("selectionLabel"),
     items: document.getElementById("itemBar"),
+    level: document.getElementById("levelLabel"),
+    flash: document.getElementById("flash"),
   };
 
   // Build the roster once; only the read-out text changes per frame.
@@ -66,6 +68,20 @@ export function createHud(sim, percept) {
       .join("");
   }
 
+  /** A brief full-screen flash — the one moment a lucidity restore gets a
+   * visceral cue instead of only a subtitle and a slowly-thinning vignette.
+   * A fresh reflow before adding "show" restarts the CSS transition even on
+   * back-to-back uses, the same trick a shake/damage-flash effect needs. */
+  function flash() {
+    if (!el.flash) return;
+    el.flash.classList.remove("show");
+    void el.flash.offsetWidth;
+    el.flash.classList.add("show");
+    // "show" holds the instant jump to visible; removing it after a brief hold
+    // hands back to the base .flash rule's own (eased) transition to fade out.
+    setTimeout(() => el.flash.classList.remove("show"), 90);
+  }
+
   /** Drain the sim's event queue into subtitles. Called once per frame. */
   function pumpEvents() {
     for (const ev of sim.events) {
@@ -76,10 +92,15 @@ export function createHud(sim, percept) {
       else if (ev.kind === "log") say(ev.text, "good");
       else if (ev.kind === "logFalse") say(ev.text, "gone");
       else if (ev.kind === "dose") say(ev.text, "good");
+      else if (ev.kind === "discoverItem") say(ev.text, "");
       else if (ev.kind === "pickup") say(ev.text, "good");
       else if (ev.kind === "pickupFalse") say(ev.text, "gone");
-      else if (ev.kind === "itemUsed") say(ev.text, "good");
-      else if (ev.kind === "itemPhantom") say(ev.text, "gone");
+      else if (ev.kind === "itemUsed") {
+        say(ev.text, "good");
+        if (ITEM_INFO[ev.itemKind]?.restore) flash();
+      } else if (ev.kind === "itemPhantom") say(ev.text, "gone");
+      else if (ev.kind === "craft") say(ev.text, "good");
+      else if (ev.kind === "advance") say(ev.text, "good");
       else if (ev.kind === "end") say(ev.text, "warn");
     }
   }
@@ -138,6 +159,7 @@ export function createHud(sim, percept) {
         (sim.companions[selected] === c ? " selected" : "");
     }
     if (el.selection) el.selection.textContent = sim.companions[selected]?.name || "";
+    if (el.level) el.level.textContent = `${sim.level} / ${sim.campaignLength}`;
 
     const logged = sim.monoliths.filter((m) => m.logged).length;
     // The counter shows the LOG's length, not the truth — a false entry looks
@@ -179,8 +201,8 @@ export function createHud(sim, percept) {
 
   function setHints(scheme) {
     const text = {
-      keyboard: "WASD move · Shift run · E survey/pick up · Z cycle item · X use item · 1–5 check in · Shift+1–5 dose · Esc pause",
-      gamepad: "Stick move · [A] survey/pick up · [RT] cycle item · [B] use item · [X] check in · [Y] dose · [LB]/[RB] select · [Start] pause",
+      keyboard: "WASD move · Shift run · E survey/pick up · Z cycle item · X use item · C craft · 1–5 check in · Shift+1–5 dose · Esc pause",
+      gamepad: "Stick move · [A] survey/pick up · [RT] cycle item · [B] use item · D-pad Up craft · [X] check in · [Y] dose · [LB]/[RB] select · [Start] pause",
       touch: "Left half steers · right half looks · buttons bottom-right",
     }[scheme] || "";
     paintHint(el.hints, text);
@@ -203,7 +225,7 @@ export function renderDebrief(container, report) {
   container.innerHTML = `
     <div class="debrief-card">
       <h2>${verdict}</h2>
-      <p class="debrief-sub">${report.logged} of ${report.total} markers really surveyed · ${Math.floor(report.time / 60)}m ${report.time % 60}s</p>
+      <p class="debrief-sub">Basin ${report.level} of ${report.campaignLength} · ${report.logged} of ${report.total} markers really surveyed · ${Math.floor(report.time / 60)}m ${report.time % 60}s</p>
       ${falseNote}
       <table class="debrief-table">
         <tr><th>Who</th><th>Lucidity</th><th>State</th><th>Scars</th><th>Lost to it</th></tr>
@@ -216,7 +238,7 @@ export function renderDebrief(container, report) {
           )
           .join("")}
       </table>
-      <p class="debrief-foot">Doses used ${report.doseUses} · recoveries ${report.recoveries} · items used ${report.itemsUsed} · phantom items ${report.phantomItemsUsed}</p>
+      <p class="debrief-foot">Doses used ${report.doseUses} · recoveries ${report.recoveries} · items used ${report.itemsUsed} · crafted ${report.itemsCrafted} · phantom items ${report.phantomItemsUsed}</p>
       <button id="againBtn" class="big-btn" data-row="0" data-col="0">New basin</button>
     </div>`;
 }

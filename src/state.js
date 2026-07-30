@@ -58,13 +58,38 @@ export const ITEM_CAP = 3; // carried at once — forces the same "which do I ke
 export const ITEM_PICKUP_RADIUS = 3.2;
 export const ITEM_SIGHT_RANGE = 15; // smaller than SIGHT_RANGE — these are ground clutter, not standing stones
 export const ITEM_INFO = Object.freeze({
-  flare: { label: "Flare", restore: 30 }, // used on self: instant partial lucidity restore
-  tether: { label: "Tether", steadyMult: 0.4, steadySeconds: 45 }, // used on the selected companion: steadier for a while, not a cure
-  lens: { label: "Lens", clearSeconds: 20 }, // used on self: the SCREEN tells the truth for a while, even if you're still gone
+  flare: { label: "Flare", restore: 40 }, // used on self: instant partial lucidity restore
+  tether: { label: "Tether", steadyMult: 0.35, steadySeconds: 60 }, // used on the selected companion: steadier for a while, not a cure
+  lens: { label: "Lens", clearSeconds: 25 }, // used on self: the SCREEN tells the truth for a while, even if you're still gone
+  // Crafted only — never spawn in the world (see CRAFT_RECIPES below). Each
+  // does BOTH parent effects at once: the payoff for spending two carried
+  // slots and a craft action instead of using the pair separately.
+  ember: { label: "Ember", restore: 40, steadyMult: 0.35, steadySeconds: 60 }, // flare + tether
+  beacon: { label: "Beacon", restore: 40, clearSeconds: 25 }, // flare + lens
+  ward: { label: "Ward", steadyMult: 0.35, steadySeconds: 60, clearSeconds: 25 }, // tether + lens
 });
 // A phantom item's use is always a bad surprise — there is no real effect to
 // fall back on, so reaching for it costs you instead of rewarding you.
 export const PHANTOM_ITEM_COST = 8;
+
+// Unordered-pair recipes: combine any two of the three base pickups into one
+// stronger, craft-only item. Keyed by the two kinds sorted and joined, so
+// order never matters at the call site (see recipeKey below).
+export const CRAFT_RECIPES = Object.freeze({
+  "flare+tether": "ember",
+  "flare+lens": "beacon",
+  "lens+tether": "ward",
+});
+function recipeKey(a, b) {
+  return [a, b].sort().join("+");
+}
+
+// A short campaign: winning a basin before the last one advances to a fresh
+// basin instead of ending the run — see checkEndings(). Callers that don't
+// know about campaigns (tests, the balance harness) get campaignLength=1 by
+// default in createRun(), which keeps checkEndings' old single-basin "won"
+// path exactly as it was; only main.js opts into the multi-basin campaign.
+export const CAMPAIGN_LENGTH = 3;
 // Seconds of daylight. Finite, so a run cannot be salvaged by camping in a pylon
 // forever (otherwise a dominant and extremely boring strategy) — but set from
 // measurement rather than taste. The intended pressure is the party's minds, not
@@ -147,8 +172,17 @@ function makeCharacter(tpl, spawn, index) {
  * Create a run. `seed` fixes the world AND the behavioural jitter, so a seed is
  * a complete description of a run — which is what makes the balance harness and
  * the regression tests meaningful.
+ *
+ * `level`/`campaignLength`/`carryOver` are the campaign extension: a fresh
+ * basin always gets its own world (new seed) and spawn positions, but when
+ * `carryOver` is passed the party's lucidity/scars/hallucination state, doses,
+ * inventory, and cumulative stats continue from the previous basin instead of
+ * resetting — a worn-down party walks into the next fog already worn down.
+ * `campaignLength` defaults to 1 (single basin, the original behaviour) so
+ * every caller that doesn't know about campaigns — the balance harness, the
+ * logic tests — is unaffected; only main.js opts a real playthrough in.
  */
-export function createRun({ seed = 1, difficulty = "standard" } = {}) {
+export function createRun({ seed = 1, difficulty = "standard", level = 1, campaignLength = 1, carryOver = null } = {}) {
   const world = generateWorld(seed);
   const rng = makeRng(seed ^ 0x5eed);
   const spawn = { x: world.camp.x, z: world.camp.z };
@@ -192,6 +226,22 @@ export function createRun({ seed = 1, difficulty = "standard" } = {}) {
 
   const diff = DIFFICULTY[difficulty] || DIFFICULTY.standard;
 
+  // Carry the previous basin's party state forward by id — position/goal/path
+  // still reset to a fresh spawn (below), but lucidity, scars, whether a mind
+  // is mid-hallucination, and total gone-time survive the jump. A companion
+  // roster is a fixed set of ids every run, so lookup by id is exact.
+  if (carryOver) {
+    for (const saved of carryOver.party) {
+      const ch = saved.id === player.id ? player : companions.find((c) => c.id === saved.id);
+      if (!ch) continue;
+      ch.lucidity = saved.lucidity;
+      ch.scars = saved.scars;
+      ch.hallucinating = saved.hallucinating;
+      ch.hallucination = saved.hallucination;
+      ch.goneTime = saved.goneTime;
+    }
+  }
+
   return {
     seed,
     difficulty,
@@ -218,17 +268,21 @@ export function createRun({ seed = 1, difficulty = "standard" } = {}) {
     // while hallucinating: it has no true kind, only a `claimedKind` baked in at
     // pickup time — permanent, exactly like a false survey log entry, so it does
     // NOT reveal itself just because the lead later recovers. Discovery only
-    // happens at use time.
-    inventory: [],
+    // happens at use time. Carries forward across a campaign's basins.
+    inventory: carryOver ? carryOver.inventory : [],
     // The survey log. Entries can be FALSE — that is the point.
     logEntries: [],
-    doses: DOSE_COUNT,
+    doses: carryOver ? carryOver.doses : DOSE_COUNT,
     time: 0, // the sim's own clock. Tests assert against THIS, never wall time.
-    status: "playing", // playing | won | lost
+    status: "playing", // playing | levelComplete | won | lost
     ending: null,
     dissolveTimer: 0,
     events: [], // transient, drained by the HUD each frame
-    stats: { doseUses: 0, pylonSeconds: 0, recoveries: 0, falseLogs: 0, itemsUsed: 0, phantomItemsUsed: 0 },
+    // Reused across a campaign's basins (not recreated) so the end-of-campaign
+    // debrief reports cumulative totals, not just the final basin's.
+    stats: carryOver ? carryOver.stats : { doseUses: 0, pylonSeconds: 0, recoveries: 0, falseLogs: 0, itemsUsed: 0, phantomItemsUsed: 0, itemsCrafted: 0 },
+    level,
+    campaignLength,
   };
 }
 
@@ -239,7 +293,13 @@ export const DIFFICULTY = Object.freeze({
 });
 
 export function emit(sim, kind, text, opts = {}) {
-  sim.events.push({ kind, text, t: sim.time, ...opts });
+  // `...opts` spreads FIRST: an opts field that happens to be named `kind`
+  // (e.g. an item's own kind, passed as extra context) must never be able to
+  // silently overwrite the event's own type discriminator. It did, briefly —
+  // pickup/itemUsed events carried an `opts.kind` and ended up with `ev.kind`
+  // reading "flare" instead of "itemUsed", so the HUD's pumpEvents() switch
+  // never matched and the subtitle was silently dropped.
+  sim.events.push({ ...opts, kind, text, t: sim.time });
   if (sim.events.length > 64) sim.events.shift();
 }
 
@@ -429,6 +489,14 @@ export function discover(sim) {
       if (Math.hypot(it.x - ch.x, it.z - ch.z) > ITEM_SIGHT_RANGE) continue;
       if (!hasSight(sim, ch, it)) continue;
       it.discovered = true;
+      // Deliberately kind-agnostic: naming the item here would leak its true
+      // kind straight through the subtitle, bypassing percept.js entirely —
+      // the one place a hallucinating lead's item bar is allowed to lie about
+      // what they're looking at (see perceivedWorldItems).
+      emit(sim, "discoverItem", ch.isPlayer ? "Something in the grass, off to the side." : `${ch.name}: there's something over there.`, {
+        id: it.id,
+        who: ch.id,
+      });
       break;
     }
   }
@@ -518,7 +586,7 @@ export function pickupItem(sim) {
   }
 
   sim.inventory.push({ id: `slot${sim.inventory.length}-${sim.time.toFixed(2)}`, real: true, kind: near.itemKind, claimedKind: null });
-  emit(sim, "pickup", `${ITEM_INFO[near.itemKind].label} secured.`, { kind: near.itemKind });
+  emit(sim, "pickup", `${ITEM_INFO[near.itemKind].label} secured.`, { itemKind: near.itemKind });
   return { ok: true, real: true, kind: near.itemKind };
 }
 
@@ -548,22 +616,77 @@ export function useItem(sim, slotIndex, targetCompanionId) {
   switch (slot.kind) {
     case "flare":
       sim.player.lucidity = Math.min(MAX_LUCIDITY, sim.player.lucidity + info.restore);
-      emit(sim, "itemUsed", "The flare catches. Your head clears, a little.", { kind: "flare" });
+      emit(sim, "itemUsed", "The flare catches. Your head clears, sharply.", { itemKind: "flare" });
       break;
     case "tether": {
       const target = sim.companions.find((c) => c.id === targetCompanionId) || sim.companions[0];
       target.steadyUntil = sim.time + info.steadySeconds;
-      emit(sim, "itemUsed", `${target.name} steadies.`, { kind: "tether", who: target.id });
+      emit(sim, "itemUsed", `${target.name} steadies.`, { itemKind: "tether", who: target.id });
       break;
     }
     case "lens":
       sim.player.lensUntil = sim.time + info.clearSeconds;
-      emit(sim, "itemUsed", "For a while, you can trust your own eyes again.", { kind: "lens" });
+      emit(sim, "itemUsed", "For a while, you can trust your own eyes again.", { itemKind: "lens" });
       break;
+    // Crafted items do both parent effects at once — the payoff for spending
+    // two carried slots and a craft action instead of using them separately.
+    case "ember": {
+      sim.player.lucidity = Math.min(MAX_LUCIDITY, sim.player.lucidity + info.restore);
+      const target = sim.companions.find((c) => c.id === targetCompanionId) || sim.companions[0];
+      target.steadyUntil = sim.time + info.steadySeconds;
+      emit(sim, "itemUsed", `The ember flares. Your head clears, and ${target.name} steadies.`, { itemKind: "ember", who: target.id });
+      break;
+    }
+    case "beacon":
+      sim.player.lucidity = Math.min(MAX_LUCIDITY, sim.player.lucidity + info.restore);
+      sim.player.lensUntil = sim.time + info.clearSeconds;
+      emit(sim, "itemUsed", "The beacon burns bright. Your head clears, and so does the screen.", { itemKind: "beacon" });
+      break;
+    case "ward": {
+      const target = sim.companions.find((c) => c.id === targetCompanionId) || sim.companions[0];
+      target.steadyUntil = sim.time + info.steadySeconds;
+      sim.player.lensUntil = sim.time + info.clearSeconds;
+      emit(sim, "itemUsed", `The ward holds. ${target.name} steadies, and you can trust your own eyes again.`, { itemKind: "ward", who: target.id });
+      break;
+    }
     default:
       break;
   }
   return { ok: true, real: true, kind: slot.kind };
+}
+
+/**
+ * Combine two carried REAL items into a stronger one. Works off the sim's own
+ * truth (like everything else in this file) — never the lead's PERCEIVED
+ * inventory labels. That split is what makes a hallucinating lead's craft
+ * attempt able to fail even though the item bar told them they were holding a
+ * matching pair: the screen lied about what they were carrying, not this
+ * function.
+ *
+ * Scans every pair of carried slots for the first one that both are real AND
+ * form a known recipe — no slot-picking UI needed since the cap is only 3.
+ * A phantom slot's `kind` is null and can never match a recipe, so it's
+ * silently skipped rather than treated as a wrong guess.
+ */
+export function craftItem(sim) {
+  if (sim.status !== "playing") return { ok: false, reason: "over" };
+  if (sim.inventory.length < 2) return { ok: false, reason: "need-two" };
+  for (let i = 0; i < sim.inventory.length; i++) {
+    for (let j = i + 1; j < sim.inventory.length; j++) {
+      const a = sim.inventory[i];
+      const b = sim.inventory[j];
+      if (!a.real || !b.real) continue;
+      const result = CRAFT_RECIPES[recipeKey(a.kind, b.kind)];
+      if (!result) continue;
+      sim.inventory.splice(j, 1);
+      sim.inventory.splice(i, 1);
+      sim.inventory.push({ id: `slot${sim.inventory.length}-${sim.time.toFixed(2)}`, real: true, kind: result, claimedKind: null });
+      sim.stats.itemsCrafted += 1;
+      emit(sim, "craft", `The two combine. ${ITEM_INFO[result].label} forms in your hands.`, { itemKind: result });
+      return { ok: true, kind: result };
+    }
+  }
+  return { ok: false, reason: "no-recipe" };
 }
 
 /** Everyone at camp, or close enough to walk in together. */
@@ -600,9 +723,20 @@ export function checkEndings(sim) {
     // rumour, not a survey.
     const atCamp = sim.party.filter((c) => dist2D(c, sim.world.camp) <= 9);
     if (atCamp.includes(sim.player) && atCamp.length >= 3) {
-      sim.status = "won";
-      sim.ending = "extracted";
-      emit(sim, "end", "Camp. The record holds.");
+      if (sim.level < sim.campaignLength) {
+        // More basins in this campaign — main.js catches this status and
+        // rebuilds a fresh basin (advanceLevel), carrying the party forward
+        // instead of ending the run. The clock doesn't stop for a mind still
+        // mid-hallucination at the exact moment of extraction: that state
+        // carries into the next basin too.
+        sim.status = "levelComplete";
+        sim.ending = "advance";
+        emit(sim, "advance", `Basin ${sim.level} cleared. The party pushes on.`);
+      } else {
+        sim.status = "won";
+        sim.ending = "extracted";
+        emit(sim, "end", "Camp. The record holds.");
+      }
     }
   }
 }
@@ -677,6 +811,9 @@ export function debrief(sim) {
     recoveries: sim.stats.recoveries,
     itemsUsed: sim.stats.itemsUsed,
     phantomItemsUsed: sim.stats.phantomItemsUsed,
+    itemsCrafted: sim.stats.itemsCrafted,
+    level: sim.level,
+    campaignLength: sim.campaignLength,
     party: sim.party.map((c) => ({
       name: c.name,
       role: c.role,

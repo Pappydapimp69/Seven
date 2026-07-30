@@ -308,6 +308,60 @@ function assert(cond, msg) {
   assert(items.itemsUsed >= 1, "no item use was recorded in stats");
   assert(items.subtitles.trim().length > 0, "using an item produced no visible line");
 
+  // --- crafting: two real items combine into one via the CRAFT verb -------
+  const craft = await page.evaluate(() => {
+    const M = window.__mirage;
+    const s = M.sim;
+    s.inventory.length = 0;
+    s.inventory.push({ id: "craft-a", real: true, kind: "flare", claimedKind: null });
+    s.inventory.push({ id: "craft-b", real: true, kind: "tether", claimedKind: null });
+    M.act(M.ACTIONS.CRAFT);
+    M.advance(0.2);
+    return {
+      inventory: s.inventory.map((slot) => slot.kind),
+      itemsCrafted: s.stats.itemsCrafted,
+      subtitles: document.getElementById("subtitles").innerText,
+    };
+  });
+  assert(craft.inventory.length === 1 && craft.inventory[0] === "ember", `crafting flare+tether should leave one ember, got ${JSON.stringify(craft.inventory)}`);
+  assert(craft.itemsCrafted === 1, "craft was not recorded in stats");
+  assert(craft.subtitles.trim().length > 0, "crafting produced no visible line");
+
+  // --- campaign: clearing a basin before the last one advances in place ---
+  const level = await page.evaluate(() => {
+    const M = window.__mirage;
+    const s = M.sim;
+    const levelBefore = s.level;
+    const monolithPosBefore = s.monoliths.map((m) => `${m.x.toFixed(1)},${m.z.toFixed(1)}`).join("|");
+    for (const m of s.monoliths) m.logged = true;
+    s.logEntries = s.monoliths.map((m) => ({ id: m.id, name: m.name, real: true, t: s.time }));
+    M.teleport(s.world.camp.x, s.world.camp.z);
+    s.companions[0].x = s.world.camp.x;
+    s.companions[0].z = s.world.camp.z;
+    s.companions[1].x = s.world.camp.x;
+    s.companions[1].z = s.world.camp.z;
+    M.advance(0.5);
+    return {
+      levelBefore,
+      levelAfter: M.sim.level,
+      campaignLength: M.sim.campaignLength,
+      monolithPosBefore,
+      monolithPosAfter: M.sim.monoliths.map((m) => `${m.x.toFixed(1)},${m.z.toFixed(1)}`).join("|"),
+      allUnlogged: M.sim.monoliths.every((m) => !m.logged),
+      status: M.sim.status,
+      hudVisible: !document.getElementById("hudLayer").classList.contains("hidden"),
+      debriefVisible: !document.getElementById("debriefLayer").classList.contains("hidden"),
+      levelPill: document.getElementById("levelLabel").textContent,
+    };
+  });
+  assert(level.campaignLength > 1, `expected a real playthrough to opt into a multi-basin campaign, got length ${level.campaignLength}`);
+  assert(level.levelAfter === level.levelBefore + 1, `clearing a basin should advance the level (${level.levelBefore} -> ${level.levelAfter})`);
+  assert(level.status === "playing", `the new basin should be live and playing, got ${level.status}`);
+  assert(level.hudVisible && !level.debriefVisible, "advancing a level should stay on the HUD, not drop to the debrief screen");
+  assert(level.monolithPosAfter !== level.monolithPosBefore, "the next basin should be genuinely new geometry, not the same markers again");
+  assert(level.allUnlogged, "the new basin's markers should start unlogged");
+  assert(new RegExp(`${level.levelAfter} / ${level.campaignLength}`).test(level.levelPill), `level pill did not update: ${level.levelPill}`);
+
   // --- pause really stops the world ---------------------------------------
   const paused = await page.evaluate(async () => {
     const M = window.__mirage;

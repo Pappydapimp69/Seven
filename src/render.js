@@ -393,5 +393,22 @@ export function createRenderer(canvas, sim) {
   window.addEventListener("resize", resize);
   resize();
 
-  return { renderer, scene, camera, rig, update, resize, terrainHeight, PALETTE };
+  /**
+   * Tear this renderer down. Needed once a run can outlive a single world — a
+   * campaign's next basin is entirely new geometry (terrain, rock instancing,
+   * monolith/pylon/item meshes), so advancing a level builds a fresh
+   * createRenderer() rather than repointing this one, and the old one must
+   * free its GPU resources instead of leaking them.
+   */
+  function dispose() {
+    window.removeEventListener("resize", resize);
+    scene.traverse((obj) => {
+      if (obj.geometry) obj.geometry.dispose();
+      const mats = Array.isArray(obj.material) ? obj.material : obj.material ? [obj.material] : [];
+      for (const m of mats) m.dispose();
+    });
+    renderer.dispose();
+  }
+
+  return { renderer, scene, camera, rig, update, resize, dispose, terrainHeight, PALETTE };
 }
