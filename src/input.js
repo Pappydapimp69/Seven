@@ -21,11 +21,16 @@
 // swallowing them breaks the browser for no gain.
 
 export const ACTIONS = Object.freeze({
+  // SURVEY is the general "interact with what's in front of me" verb — its
+  // handler in main.js checks for a nearby item pickup before falling back to
+  // surveying a marker, so items needed no separate pickup button.
   SURVEY: "survey",
   CHECK_IN: "checkIn",
   DOSE: "dose",
   NEXT_TARGET: "nextTarget",
   PREV_TARGET: "prevTarget",
+  CYCLE_ITEM: "cycleItem",
+  USE_ITEM: "useItem",
   PAUSE: "pause",
 });
 
@@ -107,6 +112,8 @@ export function createInput(canvas, opts = {}) {
       case "KeyG": push(ACTIONS.DOSE); break;
       case "KeyQ": push(ACTIONS.PREV_TARGET); break;
       case "KeyR": push(ACTIONS.NEXT_TARGET); break;
+      case "KeyZ": push(ACTIONS.CYCLE_ITEM); break;
+      case "KeyX": push(ACTIONS.USE_ITEM); break;
       case "Escape": push(ACTIONS.PAUSE); break;
       case "Space": e.preventDefault(); break;
       default: return;
@@ -231,10 +238,12 @@ export function createInput(canvas, opts = {}) {
 
     // mode === "game"
     if (edges[0]) push(ACTIONS.SURVEY); // A
+    if (edges[1]) push(ACTIONS.USE_ITEM); // B
     if (edges[2]) push(ACTIONS.CHECK_IN); // X — no arg, acts on the shared selection
     if (edges[3]) push(ACTIONS.DOSE); // Y
     if (edges[4]) push(ACTIONS.PREV_TARGET); // LB
     if (edges[5]) push(ACTIONS.NEXT_TARGET); // RB
+    if (edges[7]) push(ACTIONS.CYCLE_ITEM); // RT
     if (edges[9]) push(ACTIONS.PAUSE); // Start
     state.look.dx += rx * 13;
     state.look.dy += ry * 9;

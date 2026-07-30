@@ -7,7 +7,7 @@
 
 import * as THREE from "../lib/three.module.js";
 import { CELL, GRID, cellToWorld } from "./world.js";
-import { perceivedMonoliths, perceivedPylons, perceivedCompanions, distortion } from "./percept.js";
+import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js";
 import { PYLON_RADIUS } from "./state.js";
 
 const PALETTE = {
@@ -25,7 +25,15 @@ const PALETTE = {
   camp: 0xffb562,
   body: 0x8d97a8,
   bodyLost: 0xb06a72,
+  itemFlare: 0xff8a3d,
+  itemTether: 0x5fe0c0,
+  itemLens: 0xbfe6ff,
 };
+
+// No phantom-object case here — a fake pickup is resolved entirely in
+// state.js/percept.js's inventory layer, never as a fake mesh sitting in the
+// world (see perceivedWorldItems's own comment for why).
+const ITEM_COLOR = { flare: PALETTE.itemFlare, tether: PALETTE.itemTether, lens: PALETTE.itemLens };
 
 const EYE_HEIGHT = 1.72;
 
@@ -185,7 +193,7 @@ export function createRenderer(canvas, sim) {
   // ---- monoliths, pylons, figures: pooled and rebuilt from perception ------
   const monolithGeo = new THREE.BoxGeometry(1.5, 7.4, 1.1);
   const ringGeo = new THREE.TorusGeometry(PYLON_RADIUS, 0.09, 6, 40);
-  const pool = { monoliths: new Map(), pylons: new Map(), figures: new Map() };
+  const pool = { monoliths: new Map(), pylons: new Map(), figures: new Map(), items: new Map() };
 
   function makeMonolith() {
     const g = new THREE.Group();
@@ -250,6 +258,22 @@ export function createRenderer(canvas, sim) {
     light.position.set(0.3, 1.3, 0.22);
     g.add(light);
     g.userData = { mat, light, bob: Math.random() * 6.283, lastX: 0, lastZ: 0 };
+    scene.add(g);
+    return g;
+  }
+
+  function makeItem() {
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.34, 0),
+      new THREE.MeshStandardMaterial({ color: PALETTE.itemFlare, roughness: 0.5, flatShading: true }),
+    );
+    body.position.y = 0.5;
+    g.add(body);
+    const glow = new THREE.PointLight(PALETTE.itemFlare, 0.9, 9, 2);
+    glow.position.y = 0.5;
+    g.add(glow);
+    g.userData = { body, glow };
     scene.add(g);
     return g;
   }
@@ -323,6 +347,19 @@ export function createRenderer(canvas, sim) {
       obj.userData.glow.intensity = live ? 0.5 + shown * 1.4 : 0.05;
       obj.userData.ring.material.opacity = live ? 0.12 + shown * 0.22 : 0.05;
       obj.userData.ring.material.color.set(live ? PALETTE.pylonLive : PALETTE.pylonDead);
+    }
+
+    // ---- ground items — kind SHOWN can be a lie, but the mesh itself never is:
+    // a phantom pickup has no world object at all (see perceivedWorldItems) ----
+    syncPool(pool.items, perceivedWorldItems(percept, sim), makeItem);
+    for (const obj of pool.items.values()) {
+      if (!obj.visible) continue;
+      const it = obj.userData.item;
+      const bob = 0.5 + Math.sin(elapsed * 2.4 + it.x + it.z) * 0.06;
+      obj.position.set(it.x, terrainHeight(it.x, it.z) + bob, it.z);
+      const color = ITEM_COLOR[it.shownKind] || PALETTE.itemFlare;
+      obj.userData.body.material.color.set(color);
+      obj.userData.glow.color.set(color);
     }
 
     // ---- companions (real and otherwise) ----

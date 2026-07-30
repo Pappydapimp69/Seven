@@ -6,8 +6,8 @@
 // the one hallucinating. The only place a real number is ever printed is the
 // debrief, after the run is over.
 
-import { perceivedYaw, rosterRead, distortion, filterReport } from "./percept.js";
-import { LOG_RADIUS, TIME_LIMIT, discoveredCount } from "./state.js";
+import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory } from "./percept.js";
+import { LOG_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO } from "./state.js";
 
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 
@@ -39,6 +39,7 @@ export function createHud(sim, percept) {
     vignette: document.getElementById("vignette"),
     hints: document.getElementById("hints"),
     selection: document.getElementById("selectionLabel"),
+    items: document.getElementById("itemBar"),
   };
 
   // Build the roster once; only the read-out text changes per frame.
@@ -75,6 +76,10 @@ export function createHud(sim, percept) {
       else if (ev.kind === "log") say(ev.text, "good");
       else if (ev.kind === "logFalse") say(ev.text, "gone");
       else if (ev.kind === "dose") say(ev.text, "good");
+      else if (ev.kind === "pickup") say(ev.text, "good");
+      else if (ev.kind === "pickupFalse") say(ev.text, "gone");
+      else if (ev.kind === "itemUsed") say(ev.text, "good");
+      else if (ev.kind === "itemPhantom") say(ev.text, "gone");
       else if (ev.kind === "end") say(ev.text, "warn");
     }
   }
@@ -102,7 +107,26 @@ export function createHud(sim, percept) {
     return bestD <= LOG_RADIUS ? best : null;
   }
 
-  function update(view, selected) {
+  /** Nearest pickup in reach, shown through PERCEPTION — the prompt names the
+   * item the lead believes they see, never the true kind underneath it. */
+  function nearestPickupItem() {
+    let best = null, bestD = Infinity;
+    for (const it of perceivedWorldItems(percept, sim)) {
+      const d = Math.hypot(it.x - sim.player.x, it.z - sim.player.z);
+      if (d < bestD) { bestD = d; best = it; }
+    }
+    return bestD <= ITEM_PICKUP_RADIUS ? best : null;
+  }
+
+  function renderInventory(selectedItem) {
+    if (!el.items) return;
+    const slots = perceivedInventory(percept, sim);
+    el.items.innerHTML = slots.length
+      ? slots.map((s, i) => `<div class="item-slot${i === selectedItem ? " sel" : ""}">${s.label}</div>`).join("")
+      : `<div class="item-slot empty">—</div>`;
+  }
+
+  function update(view, selected, selectedItem = 0) {
     pumpEvents();
 
     for (const c of sim.companions) {
@@ -135,8 +159,17 @@ export function createHud(sim, percept) {
     el.vignette.style.opacity = String(Math.min(0.92, dis * 0.9));
     el.vignette.classList.toggle("lost", percept.active);
 
+    renderInventory(selectedItem);
+
+    // A pickup in reach takes the prompt over a survey — same priority
+    // handleAction gives it in main.js, so the on-screen text never promises
+    // one verb while the button actually does the other.
+    const pickup = nearestPickupItem();
     const near = nearestUnloggedName();
-    if (near && sim.status === "playing") {
+    if (pickup && sim.status === "playing") {
+      el.prompt.textContent = `Pick up ${ITEM_INFO[pickup.shownKind].label}`;
+      el.prompt.classList.add("show");
+    } else if (near && sim.status === "playing") {
       el.prompt.textContent = `Survey ${near.name}`;
       el.prompt.classList.add("show");
     } else {
@@ -146,8 +179,8 @@ export function createHud(sim, percept) {
 
   function setHints(scheme) {
     const text = {
-      keyboard: "WASD move · Shift run · E survey · 1–5 check in · Shift+1–5 dose · Esc pause",
-      gamepad: "Stick move · [A] survey · [X] check in · [Y] dose · [LB]/[RB] select · [Start] pause",
+      keyboard: "WASD move · Shift run · E survey/pick up · Z cycle item · X use item · 1–5 check in · Shift+1–5 dose · Esc pause",
+      gamepad: "Stick move · [A] survey/pick up · [RT] cycle item · [B] use item · [X] check in · [Y] dose · [LB]/[RB] select · [Start] pause",
       touch: "Left half steers · right half looks · buttons bottom-right",
     }[scheme] || "";
     paintHint(el.hints, text);
@@ -183,7 +216,7 @@ export function renderDebrief(container, report) {
           )
           .join("")}
       </table>
-      <p class="debrief-foot">Doses used ${report.doseUses} · recoveries ${report.recoveries}</p>
+      <p class="debrief-foot">Doses used ${report.doseUses} · recoveries ${report.recoveries} · items used ${report.itemsUsed} · phantom items ${report.phantomItemsUsed}</p>
       <button id="againBtn" class="big-btn" data-row="0" data-col="0">New basin</button>
     </div>`;
 }

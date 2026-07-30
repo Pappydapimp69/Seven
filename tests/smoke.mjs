@@ -274,6 +274,40 @@ function assert(cond, msg) {
   assert(/1 \/ 6/.test(verbs.surveyPill), `log counter did not update: ${verbs.surveyPill}`);
   assert(/[1-6] \/ 6/.test(verbs.foundPill), `found counter never moved: ${verbs.foundPill}`);
 
+  // --- items: pick up via the contextual survey verb, cycle, use ---------
+  const items = await page.evaluate(() => {
+    const M = window.__mirage;
+    const s = M.sim;
+    const it = s.items.find((x) => !x.taken);
+    it.discovered = true;
+    M.teleport(it.x, it.z);
+    M.advance(0.2);
+    M.act(M.ACTIONS.SURVEY); // pickup takes priority over marker-survey when both are in reach
+    M.advance(0.2);
+    const pickedUp = s.inventory.length > 0 && it.taken;
+    const barAfterPickup = document.getElementById("itemBar").innerText;
+    // Push a second, known-real flare slot directly so USE_ITEM has a
+    // deterministic effect to assert on, regardless of what the world roll gave us.
+    s.inventory.push({ id: "smoke-flare", real: true, kind: "flare", claimedKind: null });
+    M.act(M.ACTIONS.CYCLE_ITEM);
+    const before = s.inventory.length;
+    M.act(M.ACTIONS.USE_ITEM);
+    M.advance(0.2);
+    return {
+      pickedUp,
+      barAfterPickup,
+      inventoryBeforeUse: before,
+      inventoryAfterUse: s.inventory.length,
+      itemsUsed: s.stats.itemsUsed + s.stats.phantomItemsUsed,
+      subtitles: document.getElementById("subtitles").innerText,
+    };
+  });
+  assert(items.pickedUp, "the survey verb did not pick up an item in reach");
+  assert(items.barAfterPickup.trim().length > 0 && items.barAfterPickup !== "—", "the item bar did not show a carried item");
+  assert(items.inventoryAfterUse === items.inventoryBeforeUse - 1, `USE_ITEM did not consume a slot (${items.inventoryBeforeUse} -> ${items.inventoryAfterUse})`);
+  assert(items.itemsUsed >= 1, "no item use was recorded in stats");
+  assert(items.subtitles.trim().length > 0, "using an item produced no visible line");
+
   // --- pause really stops the world ---------------------------------------
   const paused = await page.evaluate(async () => {
     const M = window.__mirage;

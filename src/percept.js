@@ -11,7 +11,8 @@
 // assert "a hallucinating lead is shown a marker the sim does not contain"
 // without booting a browser.
 
-import { HALLUCINATION, BAND, bandOf } from "./state.js";
+import { HALLUCINATION, BAND, bandOf, ITEM_INFO } from "./state.js";
+import { ITEM_KINDS } from "./world.js";
 
 const PHANTOM_NAMES = ["the Sixth Stone", "the Watching Slab", "the Other Cairn", "the Hollow Tooth"];
 const PHANTOM_COMPANIONS = ["ODEN", "MARIS", "THE SEVENTH"];
@@ -29,7 +30,23 @@ export function createPercept() {
     compassOffset: 0,
     swayPhase: 0,
     whisper: null,
+    // World-item misidentification, keyed by the item's own id so it stays
+    // stable for as long as this hallucination episode lasts (cleared on
+    // recovery, same lifetime as the other phantom* fields).
+    itemLabels: new Map(),
   };
+}
+
+/**
+ * Should the world currently be shown straight, regardless of the underlying
+ * hallucinating flag? A Lens buys a temporary truth window WITHOUT curing
+ * anything — the meter and `hallucinating` stay exactly as they are, only the
+ * SCREEN stops lying for a while. Kept separate from `percept.active` itself so
+ * the onset/offset edge-detection in updatePercept still tracks the real
+ * mechanical state, not the temporary reprieve.
+ */
+export function isClear(percept, sim) {
+  return sim.time < (sim.player.lensUntil || 0);
 }
 
 // Build the specific lie once, at onset, so it is stable while it lasts. A
@@ -111,6 +128,7 @@ export function updatePercept(percept, sim, dt) {
     percept.active = false;
     percept.kind = null;
     percept.whisper = null;
+    percept.itemLabels.clear();
   }
 
   const target = percept.active ? 1 : 0;
@@ -133,9 +151,11 @@ export function updatePercept(percept, sim, dt) {
 /**
  * How badly the presentation should be distorted, 0..1. Drives fog colour, camera
  * sway, and the audio bed. Below zero-lucidity there is a small pre-echo so the
- * lead gets *some* warning about themselves — the player's own tells.
+ * lead gets *some* warning about themselves — the player's own tells. A Lens
+ * window overrides all of this back to zero: the screen goes honest, full stop.
  */
 export function distortion(percept, sim) {
+  if (isClear(percept, sim)) return 0;
   const l = sim.player.lucidity;
   const pre = l <= 0 ? 0 : l < 14 ? 0.3 : l < 36 ? 0.15 : l < 62 ? 0.05 : 0;
   return Math.max(pre, percept.intensity);
@@ -144,17 +164,19 @@ export function distortion(percept, sim) {
 /** Markers as the lead sees them: the real ones, plus any that aren't. */
 export function perceivedMonoliths(percept, sim) {
   const real = sim.monoliths.map((m) => ({ ...m, phantom: false }));
-  return percept.active ? [...real, ...percept.phantomMonoliths] : real;
+  const lying = percept.active && !isClear(percept, sim);
+  return lying ? [...real, ...percept.phantomMonoliths] : real;
 }
 
 /** Pylons as the lead sees them — including spent ones reading as charged. */
 export function perceivedPylons(percept, sim) {
+  const lying = percept.active && !isClear(percept, sim);
   const real = sim.pylons.map((p) => ({
     ...p,
     phantom: false,
-    looksLive: p.charge > 0 || (percept.active && percept.deadPylonsLookLive.has(p.id)),
+    looksLive: p.charge > 0 || (lying && percept.deadPylonsLookLive.has(p.id)),
   }));
-  return percept.active ? [...real, ...percept.phantomPylons.map((p) => ({ ...p, looksLive: true }))] : real;
+  return lying ? [...real, ...percept.phantomPylons.map((p) => ({ ...p, looksLive: true }))] : real;
 }
 
 /** Companions as the lead sees them, phantoms included. */
@@ -169,12 +191,60 @@ export function perceivedCompanions(percept, sim) {
     goalKind: c.goalKind,
     phantom: false,
   }));
-  return percept.active ? [...real, ...percept.phantomCompanions] : real;
+  const lying = percept.active && !isClear(percept, sim);
+  return lying ? [...real, ...percept.phantomCompanions] : real;
 }
 
 /** The heading the lead thinks they are facing. */
 export function perceivedYaw(percept, sim) {
-  return sim.player.yaw + (percept.active ? percept.compassOffset : 0);
+  const lying = percept.active && !isClear(percept, sim);
+  return sim.player.yaw + (lying ? percept.compassOffset : 0);
+}
+
+/**
+ * World items as the lead sees them. Never a phantom OBJECT — a fake pickup is
+ * resolved at pickup time (see state.js pickupItem), not rendered as a fake
+ * thing sitting in the world — but a REAL item's displayed kind can still be
+ * wrong: assigned once per item id per hallucination episode (lazy, so it
+ * settles the moment it's first seen rather than reassigning every frame) and
+ * cleared on recovery.
+ */
+export function perceivedWorldItems(percept, sim) {
+  const lying = percept.active && !isClear(percept, sim);
+  return sim.items
+    .filter((it) => it.discovered && !it.taken)
+    .map((it) => {
+      if (!lying) return { ...it, shownKind: it.itemKind, misidentified: false };
+      if (!percept.itemLabels.has(it.id)) {
+        const wrong = sim.rng.pick(ITEM_KINDS.filter((k) => k !== it.itemKind));
+        percept.itemLabels.set(it.id, wrong || it.itemKind);
+      }
+      const shownKind = percept.itemLabels.get(it.id);
+      return { ...it, shownKind, misidentified: shownKind !== it.itemKind };
+    });
+}
+
+/**
+ * Carried items as the lead sees them. A phantom slot's claimed kind is baked
+ * in permanently at pickup time (state.js) and always shown as-is — that
+ * deception already happened and does not un-happen on recovery. A REAL slot
+ * gets the same live per-episode mislabeling as a world item, keyed by the
+ * slot's own id.
+ */
+export function perceivedInventory(percept, sim) {
+  const lying = percept.active && !isClear(percept, sim);
+  return sim.inventory.map((slot, index) => {
+    if (!slot.real) {
+      return { index, real: false, shownKind: slot.claimedKind, label: ITEM_INFO[slot.claimedKind].label, misidentified: false };
+    }
+    if (!lying) return { index, real: true, shownKind: slot.kind, label: ITEM_INFO[slot.kind].label, misidentified: false };
+    if (!percept.itemLabels.has(slot.id)) {
+      const wrong = sim.rng.pick(ITEM_KINDS.filter((k) => k !== slot.kind));
+      percept.itemLabels.set(slot.id, wrong || slot.kind);
+    }
+    const shownKind = percept.itemLabels.get(slot.id);
+    return { index, real: true, shownKind, label: ITEM_INFO[shownKind].label, misidentified: shownKind !== slot.kind };
+  });
 }
 
 /**

@@ -14,7 +14,7 @@
 // The sim's job is to keep an honest, testable record of what is TRUE; `percept.js`
 // is the only place allowed to lie about it.
 
-import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL } from "./world.js";
+import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS } from "./world.js";
 import { makeRng } from "./rng.js";
 import { updateCompanions, companionRemark } from "./party.js";
 
@@ -46,6 +46,25 @@ export const SIGHT_RANGE = 38; // how far into the fog a marker can be picked ou
 export const LOG_RADIUS = 5.0; // how close you must stand to log a monolith
 export const CORROBORATE_RADIUS = 11; // a companion this close can confirm what you see
 export const DISSOLVE_TIME = 10; // seconds with all six gone before the party dissolves
+
+// --- items -------------------------------------------------------------------
+// A found item is not automatically what it appears to be. state.js only ever
+// records the TRUE kind of a real pickup; percept.js is where a hallucinating
+// lead's own item bar can lie about it — see perceivedInventory(). A pickup made
+// WHILE hallucinating can additionally be a PHANTOM: `real:false`, nothing behind
+// it at all. Both cases resolve their surprise at USE time, never at pickup —
+// the whole point is that you don't find out until you reach for it.
+export const ITEM_CAP = 3; // carried at once — forces the same "which do I keep" choice as doses
+export const ITEM_PICKUP_RADIUS = 3.2;
+export const ITEM_SIGHT_RANGE = 15; // smaller than SIGHT_RANGE — these are ground clutter, not standing stones
+export const ITEM_INFO = Object.freeze({
+  flare: { label: "Flare", restore: 30 }, // used on self: instant partial lucidity restore
+  tether: { label: "Tether", steadyMult: 0.4, steadySeconds: 45 }, // used on the selected companion: steadier for a while, not a cure
+  lens: { label: "Lens", clearSeconds: 20 }, // used on self: the SCREEN tells the truth for a while, even if you're still gone
+});
+// A phantom item's use is always a bad surprise — there is no real effect to
+// fall back on, so reaching for it costs you instead of rewarding you.
+export const PHANTOM_ITEM_COST = 8;
 // Seconds of daylight. Finite, so a run cannot be salvaged by camping in a pylon
 // forever (otherwise a dominant and extremely boring strategy) — but set from
 // measurement rather than taste. The intended pressure is the party's minds, not
@@ -120,6 +139,7 @@ function makeCharacter(tpl, spawn, index) {
     beliefs: { claimedMarkers: [] },
     aliveTime: 0,
     goneTime: 0, // total seconds spent hallucinating (scored at the end)
+    steadyUntil: 0, // sim.time until which a Tether reduces this mind's drain
   };
 }
 
@@ -152,6 +172,8 @@ export function createRun({ seed = 1, difficulty = "standard" } = {}) {
     scars: 0,
     recoverProgress: 0,
     goneTime: 0,
+    steadyUntil: 0,
+    lensUntil: 0, // sim.time until which the lead's OWN screen is forced honest
   };
 
   // Open facing the middle of the basin: camp sits off-centre near the rim, and
@@ -188,6 +210,16 @@ export function createRun({ seed = 1, difficulty = "standard" } = {}) {
     // starts with. It is set when somebody in the party actually picks it out of
     // the fog (see `discover`).
     monoliths: world.monoliths.map((m) => ({ ...m, logged: false, discovered: false, foundBy: null })),
+    // World pickups. `taken` is set the instant a pickup resolves (Brain: never
+    // gate a one-shot pickup's deactivation on a despawn animation) — nothing
+    // downstream ever gets a second chance to grab an already-taken item.
+    items: world.items.map((it) => ({ ...it, discovered: false, taken: false })),
+    // The party's carried items. A slot with `real:false` is a phantom picked up
+    // while hallucinating: it has no true kind, only a `claimedKind` baked in at
+    // pickup time — permanent, exactly like a false survey log entry, so it does
+    // NOT reveal itself just because the lead later recovers. Discovery only
+    // happens at use time.
+    inventory: [],
     // The survey log. Entries can be FALSE — that is the point.
     logEntries: [],
     doses: DOSE_COUNT,
@@ -196,7 +228,7 @@ export function createRun({ seed = 1, difficulty = "standard" } = {}) {
     ending: null,
     dissolveTimer: 0,
     events: [], // transient, drained by the HUD each frame
-    stats: { doseUses: 0, pylonSeconds: 0, recoveries: 0, falseLogs: 0 },
+    stats: { doseUses: 0, pylonSeconds: 0, recoveries: 0, falseLogs: 0, itemsUsed: 0, phantomItemsUsed: 0 },
   };
 }
 
@@ -259,6 +291,10 @@ export function tickLucidity(sim, ch, dt) {
   const witnessed = sim.party.filter((o) => o !== ch && o.hallucinating && dist2D(o, ch) <= CONTAGION_DIST).length;
   mult *= 1 + CONTAGION_MULT * witnessed;
   mult *= 1 + SCAR_MULT * ch.scars;
+  // A Tether steadies without curing: it only ever reduces the rate feeding
+  // into the meter, never restores lucidity directly, so it can't substitute
+  // for a pylon — just buy time to reach one.
+  if (ch.steadyUntil > sim.time) mult *= ITEM_INFO.tether.steadyMult;
 
   const rate = BASE_DRAIN * ch.drain * sim.diffMult * mult;
   ch.lucidity = Math.max(0, ch.lucidity - rate * dt);
@@ -387,6 +423,15 @@ export function discover(sim) {
       break;
     }
   }
+  for (const it of sim.items) {
+    if (it.discovered || it.taken) continue;
+    for (const ch of sim.party) {
+      if (Math.hypot(it.x - ch.x, it.z - ch.z) > ITEM_SIGHT_RANGE) continue;
+      if (!hasSight(sim, ch, it)) continue;
+      it.discovered = true;
+      break;
+    }
+  }
 }
 
 export const discoveredCount = (sim) => sim.monoliths.filter((m) => m.discovered).length;
@@ -440,6 +485,86 @@ export function logMarker(sim, phantom = null) {
 }
 
 export const trueLogCount = (sim) => sim.monoliths.filter((m) => m.logged).length;
+
+/**
+ * Pick up whatever the lead is standing next to. Two ways this can go wrong,
+ * neither visible until later:
+ *   - if the lead is hallucinating, the pickup has a real chance of being a
+ *     PHANTOM — a slot with `real:false` and no true kind at all;
+ *   - even when it IS real, what the lead currently believes they picked up
+ *     is percept.js's business, not this function's — this only ever records
+ *     the truth.
+ */
+export function pickupItem(sim) {
+  if (sim.status !== "playing") return { ok: false, reason: "over" };
+  if (sim.inventory.length >= ITEM_CAP) return { ok: false, reason: "full" };
+
+  const near = sim.items
+    .filter((it) => !it.taken && it.discovered && dist2D(it, sim.player) <= ITEM_PICKUP_RADIUS)
+    .sort((a, b) => dist2D(a, sim.player) - dist2D(b, sim.player))[0];
+  if (!near) return { ok: false, reason: "nothing-here" };
+
+  // Deactivate the instant it's taken — no despawn animation gates a second
+  // pickup attempt racing in behind this one.
+  near.taken = true;
+
+  // A hallucinating lead has a real (not certain) chance that what their hand
+  // closed on was never there at all.
+  if (sim.player.hallucinating && sim.rng.chance(0.45)) {
+    const claimedKind = sim.rng.pick(ITEM_KINDS);
+    sim.inventory.push({ id: `slot${sim.inventory.length}-${sim.time.toFixed(2)}`, real: false, claimedKind, kind: null });
+    emit(sim, "pickupFalse", `You pick up ${ITEM_INFO[claimedKind].label}. It's warm in your hand.`, { phantom: true });
+    return { ok: true, real: false };
+  }
+
+  sim.inventory.push({ id: `slot${sim.inventory.length}-${sim.time.toFixed(2)}`, real: true, kind: near.itemKind, claimedKind: null });
+  emit(sim, "pickup", `${ITEM_INFO[near.itemKind].label} secured.`, { kind: near.itemKind });
+  return { ok: true, real: true, kind: near.itemKind };
+}
+
+/**
+ * Use a carried item slot. A real item does exactly what its TRUE kind does —
+ * which is "the wrong thing" from the lead's point of view whenever percept.js
+ * had them convinced it was some other kind. A phantom slot has no true effect
+ * to fall back on, so it always costs instead of helping: reaching for
+ * something that was never there is worse than not reaching at all.
+ */
+export function useItem(sim, slotIndex, targetCompanionId) {
+  if (sim.status !== "playing") return { ok: false, reason: "over" };
+  const slot = sim.inventory[slotIndex];
+  if (!slot) return { ok: false, reason: "empty" };
+  sim.inventory.splice(slotIndex, 1);
+
+  if (!slot.real) {
+    sim.player.lucidity = Math.max(0, sim.player.lucidity - PHANTOM_ITEM_COST);
+    sim.stats.phantomItemsUsed += 1;
+    emit(sim, "itemPhantom", "It wasn't there. It was never there.", {});
+    if (sim.player.lucidity <= 0) beginHallucinating(sim, sim.player);
+    return { ok: true, real: false, kind: null };
+  }
+
+  sim.stats.itemsUsed += 1;
+  const info = ITEM_INFO[slot.kind];
+  switch (slot.kind) {
+    case "flare":
+      sim.player.lucidity = Math.min(MAX_LUCIDITY, sim.player.lucidity + info.restore);
+      emit(sim, "itemUsed", "The flare catches. Your head clears, a little.", { kind: "flare" });
+      break;
+    case "tether": {
+      const target = sim.companions.find((c) => c.id === targetCompanionId) || sim.companions[0];
+      target.steadyUntil = sim.time + info.steadySeconds;
+      emit(sim, "itemUsed", `${target.name} steadies.`, { kind: "tether", who: target.id });
+      break;
+    }
+    case "lens":
+      sim.player.lensUntil = sim.time + info.clearSeconds;
+      emit(sim, "itemUsed", "For a while, you can trust your own eyes again.", { kind: "lens" });
+      break;
+    default:
+      break;
+  }
+  return { ok: true, real: true, kind: slot.kind };
+}
 
 /** Everyone at camp, or close enough to walk in together. */
 export function partyAtCamp(sim) {
@@ -550,6 +675,8 @@ export function debrief(sim) {
     falseLogs: sim.stats.falseLogs,
     doseUses: sim.stats.doseUses,
     recoveries: sim.stats.recoveries,
+    itemsUsed: sim.stats.itemsUsed,
+    phantomItemsUsed: sim.stats.phantomItemsUsed,
     party: sim.party.map((c) => ({
       name: c.name,
       role: c.role,

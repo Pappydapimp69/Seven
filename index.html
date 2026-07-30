@@ -59,7 +59,13 @@
         where there are none, a sixth companion joins the formation, spent pylons
         glow like full ones, north moves. Logging a marker with nobody lucid
         beside you can write down something that was never there.</p>
-        <p class="howto-keys">WASD move · Shift run · mouse look · <b>E</b> survey ·
+        <p><b>Items</b> turn up in the fog too — a flare, a tether, a lens. What
+        the item bar SAYS an item is may not be what it truly is while you're
+        gone, and something you pick up while hallucinating might not be
+        there at all. Either way it can be carried and used — you only find
+        out which kind of surprise it was the moment you use it.</p>
+        <p class="howto-keys">WASD move · Shift run · mouse look · <b>E</b> survey/pick up ·
+        <b>Z</b> cycle item · <b>X</b> use item ·
         <b>1–5</b> check in · <b>Shift+1–5</b> dose · <b>Q/R</b> select · <b>Esc</b> pause</p>
       </div>
 
@@ -84,6 +90,7 @@
       <div class="sel-line">selected: <span id="selectionLabel">VOSS</span></div>
     </div>
 
+    <div id="itemBar" class="item-bar"></div>
     <div id="subtitles" class="subtitles"></div>
     <div id="actionPrompt" class="action-prompt"></div>
     <div class="reticle"></div>
@@ -94,6 +101,8 @@
       <button id="btnCheck" class="tbtn">Check in</button>
       <button id="btnDose" class="tbtn">Dose</button>
       <button id="btnNext" class="tbtn small">Next</button>
+      <button id="btnItem" class="tbtn small">Cycle item</button>
+      <button id="btnUse" class="tbtn">Use item</button>
     </div>
   </div>
 

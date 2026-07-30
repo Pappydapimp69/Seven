@@ -337,6 +337,24 @@ input[type="range"] { width: 100%; margin-bottom: 18px; accent-color: var(--cyan
   background: rgba(223, 230, 240, 0.5);
 }
 
+.item-bar {
+  position: absolute;
+  left: 16px;
+  bottom: 22px;
+  display: flex;
+  gap: 6px;
+}
+.item-slot {
+  padding: 8px 12px;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--dim);
+}
+.item-slot.sel { color: var(--ink); border-color: var(--cyan); background: rgba(116, 224, 255, 0.12); }
+.item-slot.empty { color: #4a5563; font-style: italic; }
+
 .hints {
   position: absolute;
   bottom: 12px;
@@ -407,4 +425,9 @@ body[data-scheme="touch"] .touch-buttons { display: flex; }
   .subtitles { bottom: 130px; font-size: 13px; }
   .hud-top { gap: 5px; }
   .pill { padding: 5px 9px; font-size: 12px; }
+  /* Six touch buttons no longer fit one column on a phone screen without
+     running off the top — wrap into a compact block instead. */
+  .touch-buttons { flex-direction: row; flex-wrap: wrap; justify-content: flex-end; max-width: 230px; }
+  .tbtn { min-width: 90px; padding: 10px 12px; font-size: 12px; }
+  .item-bar { bottom: 18px; }
 }

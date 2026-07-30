@@ -9,13 +9,16 @@
 import {
   createRun, tick, tickLucidity, bandOf, BAND, checkIn, useDose, logMarker, recover,
   beginHallucinating, debrief, trueLogCount, checkEndings, partyCentroid,
+  pickupItem, useItem,
   PARTY_SIZE, MAX_LUCIDITY, DOSE_COUNT, RECOVER_AT, RECOVER_TIME, DISSOLVE_TIME,
   TIME_LIMIT, PYLON_RADIUS, LOG_RADIUS, ISOLATION_DIST,
+  ITEM_CAP, ITEM_PICKUP_RADIUS, ITEM_INFO, PHANTOM_ITEM_COST,
 } from "../src/state.js";
-import { generateWorld, validate, findPath, isBlockedAt, GRID } from "../src/world.js";
+import { generateWorld, validate, findPath, isBlockedAt, GRID, ITEM_COUNT, ITEM_KINDS } from "../src/world.js";
 import {
   createPercept, updatePercept, perceivedMonoliths, perceivedPylons, perceivedCompanions,
   perceivedYaw, rosterRead, filterReport, distortion,
+  perceivedWorldItems, perceivedInventory, isClear,
 } from "../src/percept.js";
 import { HALLUCINATION } from "../src/state.js";
 import { makeRng, hashSeed } from "../src/rng.js";
@@ -126,6 +129,17 @@ check("markers stand on open ground", () => {
     for (const f of [...w.monoliths, ...w.pylons]) {
       assert(!isBlockedAt(w, f.x, f.z), `seed ${seed}: ${f.id} is inside rock`);
     }
+  }
+});
+
+check("items place at the documented count, cycling every kind, all reachable", () => {
+  for (const seed of [1, 2, 3, 17, 42]) {
+    const w = generateWorld(seed);
+    eq(w.items.length, ITEM_COUNT, `seed ${seed}: wrong item count`);
+    for (let i = 0; i < w.items.length; i++) eq(w.items[i].itemKind, ITEM_KINDS[i % ITEM_KINDS.length], `seed ${seed}: item ${i} kind`);
+    const kinds = new Set(w.items.map((it) => it.itemKind));
+    assert(kinds.size === ITEM_KINDS.length, `seed ${seed}: not every kind appeared`);
+    assert(validate(w).ok, `seed ${seed}: an item was left unreachable`);
   }
 });
 
@@ -557,6 +571,166 @@ check("a lucid witness prevents a counterfeit entry", () => {
   const res = logMarker(sim, { name: "the Sixth Stone" });
   eq(res.ok, false, "a lucid companion should refuse the phantom");
   eq(sim.stats.falseLogs, 0, "false log recorded despite a witness");
+});
+
+// ---------------------------------------------------------------------------
+// items — pickup, phantom pickups, use, and the lie layer
+// ---------------------------------------------------------------------------
+check("picking up an item requires being in reach of a discovered pickup", () => {
+  const sim = createRun({ seed: 51 });
+  const it = sim.items[0];
+  sim.player.x = it.x + ITEM_PICKUP_RADIUS + 5;
+  sim.player.z = it.z;
+  eq(pickupItem(sim).ok, false, "picked up from out of reach");
+  it.discovered = true;
+  sim.player.x = it.x;
+  sim.player.z = it.z;
+  const res = pickupItem(sim);
+  assert(res.ok && res.real, "failed to pick up a real item in reach");
+  eq(res.kind, it.itemKind, "wrong kind recorded");
+  eq(sim.inventory.length, 1, "inventory did not grow");
+  assert(it.taken, "the world item was not marked taken");
+  eq(pickupItem(sim).ok, false, "picked up the same item twice");
+});
+
+check("the carried-item cap forces the same choice as doses", () => {
+  const sim = createRun({ seed: 52 });
+  for (let i = 0; i < ITEM_CAP; i++) sim.inventory.push({ id: `x${i}`, real: true, kind: "flare", claimedKind: null });
+  const it = sim.items[0];
+  it.discovered = true;
+  sim.player.x = it.x;
+  sim.player.z = it.z;
+  const res = pickupItem(sim);
+  eq(res.ok, false, "picked up over the cap");
+  eq(res.reason, "full", "wrong refusal reason");
+});
+
+check("a hallucinating lead can pick up something that was never there", () => {
+  const sim = createRun({ seed: 53 });
+  sim.player.hallucinating = true;
+  sim.rng.chance = () => true; // force the phantom branch deterministically
+  const it = sim.items[0];
+  it.discovered = true;
+  sim.player.x = it.x;
+  sim.player.z = it.z;
+  const res = pickupItem(sim);
+  assert(res.ok && res.real === false, "expected a phantom pickup");
+  const slot = sim.inventory[0];
+  eq(slot.real, false, "phantom slot marked real");
+  assert(ITEM_KINDS.includes(slot.claimedKind), "phantom claimedKind not a real kind string");
+  eq(slot.kind, null, "a phantom has no true kind");
+  assert(it.taken, "the underlying world item was not consumed");
+});
+
+check("a phantom slot's claimed kind is baked in and survives recovery — it never un-happens", () => {
+  const sim = createRun({ seed: 54 });
+  sim.inventory.push({ id: "slot0", real: false, claimedKind: "lens", kind: null });
+  const percept = createPercept();
+  sim.player.hallucinating = true;
+  updatePercept(percept, sim, 0.1); // onset
+  let seen = perceivedInventory(percept, sim);
+  eq(seen[0].real, false, "phantom slot should read as unreal");
+  eq(seen[0].shownKind, "lens", "phantom slot must show its claimed kind while gone");
+  sim.player.hallucinating = false;
+  updatePercept(percept, sim, 0.1); // recovery
+  seen = perceivedInventory(percept, sim);
+  eq(seen[0].shownKind, "lens", "a phantom's claimed kind must not reveal itself on recovery");
+  eq(seen[0].misidentified, false, "a phantom slot is never flagged as merely 'misidentified'");
+});
+
+check("use: a flare restores lucidity and is consumed", () => {
+  const sim = createRun({ seed: 55 });
+  sim.player.lucidity = 50;
+  sim.inventory.push({ id: "s0", real: true, kind: "flare", claimedKind: null });
+  const res = useItem(sim, 0);
+  assert(res.ok && res.real, "flare use failed");
+  eq(sim.player.lucidity, 50 + ITEM_INFO.flare.restore, "flare did not restore the documented amount");
+  eq(sim.inventory.length, 0, "the slot was not consumed");
+  eq(sim.stats.itemsUsed, 1, "itemsUsed not counted");
+});
+
+check("use: a tether steadies the target — reduced drain, not a cure", () => {
+  const sim = createRun({ seed: 56 });
+  const target = sim.companions[0];
+  const spot = farFromPylons(sim);
+  for (const c of sim.party) { c.x = spot.x; c.z = spot.z; }
+  const before = tickLucidity(sim, target, 1);
+  sim.inventory.push({ id: "s0", real: true, kind: "tether", claimedKind: null });
+  useItem(sim, 0, target.id);
+  assert(target.steadyUntil > sim.time, "tether did not set a steady window");
+  const after = tickLucidity(sim, target, 1);
+  assert(after < before, `tether did not reduce drain: ${after} vs ${before}`);
+  assert(after > 0, "a tether must not fully stop drain — it steadies, it does not cure");
+});
+
+check("use: a lens buys a truth window without touching the meter or curing anyone", () => {
+  const sim = createRun({ seed: 57 });
+  const percept = createPercept();
+  sim.player.hallucinating = true;
+  sim.player.hallucination = HALLUCINATION.WRONG_WAY;
+  updatePercept(percept, sim, 0.1);
+  const lucidityBefore = sim.player.lucidity;
+  assert(distortion(percept, sim) > 0, "expected distortion before the lens");
+  sim.inventory.push({ id: "s0", real: true, kind: "lens", claimedKind: null });
+  useItem(sim, 0);
+  eq(sim.player.lucidity, lucidityBefore, "a lens must not touch lucidity");
+  assert(sim.player.hallucinating, "a lens must not cure the hallucination itself");
+  assert(isClear(percept, sim), "isClear should be true inside the lens window");
+  eq(distortion(percept, sim), 0, "the screen should read honest during a lens window");
+  eq(perceivedYaw(percept, sim), sim.player.yaw, "the lens should stop the compass lie too");
+});
+
+check("use: a phantom item is always a bad surprise, never a reward", () => {
+  const sim = createRun({ seed: 58 });
+  sim.player.lucidity = PHANTOM_ITEM_COST + 10;
+  sim.inventory.push({ id: "s0", real: false, claimedKind: "flare", kind: null });
+  const res = useItem(sim, 0);
+  assert(res.ok && res.real === false, "phantom use should report unreal");
+  eq(sim.player.lucidity, 10, "phantom use did not cost the documented amount");
+  eq(sim.stats.phantomItemsUsed, 1, "phantomItemsUsed not counted");
+  assert(!sim.player.hallucinating, "should not have crossed zero yet");
+});
+
+check("using a phantom item can itself push the lead into hallucinating", () => {
+  const sim = createRun({ seed: 59 });
+  sim.player.lucidity = PHANTOM_ITEM_COST - 2;
+  sim.inventory.push({ id: "s0", real: false, claimedKind: "tether", kind: null });
+  useItem(sim, 0);
+  eq(sim.player.lucidity, 0, "lucidity went negative instead of floored");
+  assert(sim.player.hallucinating, "reaching for nothing should be able to tip the lead over");
+});
+
+check("a real item's displayed kind can be wrong while hallucinating, and holds steady for the episode", () => {
+  const sim = createRun({ seed: 60 });
+  const it = sim.items[0];
+  it.discovered = true;
+  const percept = createPercept();
+  sim.player.hallucinating = true;
+  updatePercept(percept, sim, 0.1);
+  const first = perceivedWorldItems(percept, sim).find((x) => x.id === it.id);
+  assert(first, "discovered item missing from perception");
+  const second = perceivedWorldItems(percept, sim).find((x) => x.id === it.id);
+  eq(second.shownKind, first.shownKind, "the lie must hold steady within one episode, not re-roll every call");
+  sim.player.hallucinating = false;
+  updatePercept(percept, sim, 0.1); // recovery clears the label
+  const clear = perceivedWorldItems(percept, sim).find((x) => x.id === it.id);
+  eq(clear.shownKind, it.itemKind, "a lucid lead must see the true kind");
+  eq(clear.misidentified, false, "no misidentification flag while lucid");
+});
+
+check("a phantom pickup is never rendered as a world object, only as an inventory slot", () => {
+  const sim = createRun({ seed: 61 });
+  sim.player.hallucinating = true;
+  sim.rng.chance = () => true;
+  const it = sim.items[0];
+  it.discovered = true;
+  sim.player.x = it.x;
+  sim.player.z = it.z;
+  pickupItem(sim); // resolves as a phantom; the real item is consumed either way
+  const percept = createPercept();
+  updatePercept(percept, sim, 0.1);
+  const worldSeen = perceivedWorldItems(percept, sim);
+  assert(!worldSeen.some((w) => w.id === it.id), "a taken item must not still appear on the ground");
 });
 
 // ---------------------------------------------------------------------------

@@ -178,6 +178,41 @@ const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, L3: 10, START:
   const dosesAfter = await page.evaluate(() => window.__mirage.sim.doses);
   assert(dosesAfter === dosesBefore - 1, `Y (dose) did not spend a dose (before ${dosesBefore}, after ${dosesAfter})`);
 
+  // ---- items: A is the same contextual pickup verb as SURVEY, RT cycles, B uses
+  await page.evaluate(() => {
+    const s = window.__mirage.sim;
+    const it = s.items.find((x) => !x.taken);
+    it.discovered = true;
+    window.__mirage.teleport(it.x, it.z);
+  });
+  const invBefore = await page.evaluate(() => window.__mirage.sim.inventory.length);
+  await tap(BTN.A); // pickup takes priority over marker-survey when both are in reach
+  const afterPickup = await page.evaluate(() => ({
+    inv: window.__mirage.sim.inventory.length,
+    bar: document.getElementById("itemBar").innerText,
+  }));
+  assert(afterPickup.inv === invBefore + 1, `[A] did not pick up the item in reach (${invBefore} -> ${afterPickup.inv})`);
+  assert(afterPickup.bar.trim().length > 0 && afterPickup.bar !== "—", `item bar did not show the carried item: ${JSON.stringify(afterPickup.bar)}`);
+
+  // Push a second, known-real flare directly so RT/B have a deterministic
+  // target regardless of what kind the world roll actually handed us.
+  await page.evaluate(() => {
+    window.__mirage.sim.inventory.push({ id: "gp-flare", real: true, kind: "flare", claimedKind: null });
+  });
+  await tap(BTN.RT);
+  const selectedAfterCycle = await page.evaluate(() => window.__mirage.selectedItem);
+  assert(selectedAfterCycle === 1, `[RT] did not cycle to the second inventory slot, got ${selectedAfterCycle}`);
+
+  const invBeforeUse = await page.evaluate(() => window.__mirage.sim.inventory.length);
+  const usedBefore = await page.evaluate(() => window.__mirage.sim.stats.itemsUsed + window.__mirage.sim.stats.phantomItemsUsed);
+  await tap(BTN.B);
+  const afterUse = await page.evaluate(() => ({
+    inv: window.__mirage.sim.inventory.length,
+    used: window.__mirage.sim.stats.itemsUsed + window.__mirage.sim.stats.phantomItemsUsed,
+  }));
+  assert(afterUse.inv === invBeforeUse - 1, `[B] did not consume the used slot (${invBeforeUse} -> ${afterUse.inv})`);
+  assert(afterUse.used === usedBefore + 1, "using an item via [B] was not recorded in stats");
+
   // Start pauses, and the pause screen is itself gamepad-navigable.
   await tap(BTN.START);
   const pausedState = await page.evaluate(() => ({

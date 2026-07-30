@@ -2,8 +2,8 @@
 // input into the sim, the sim into perception, and perception into the screen.
 
 import {
-  createRun, tick, debrief, logMarker, checkIn, useDose,
-  PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS,
+  createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem,
+  PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS,
 } from "./state.js";
 import { createPercept, updatePercept, distortion } from "./percept.js";
 import { createRenderer } from "./render.js";
@@ -26,7 +26,8 @@ const audio = createAudio();
 const input = createInput(canvas, { sensitivity: 1, onScheme: refreshSchemeUI });
 let run = null; // { sim, percept, renderer, hud }
 let paused = false;
-let selected = 0;
+let selected = 0; // companion index — shared by check-in/dose AND tether's target
+let selectedItem = 0; // inventory slot index — cycled independently of `selected`
 let whisperTimer = 0;
 let lastFrame = 0;
 
@@ -132,6 +133,7 @@ function startRun({ seed, difficulty } = {}) {
   const renderer = createRenderer(canvas, sim);
   const hud = createHud(sim, percept);
   selected = 0;
+  selectedItem = 0;
   paused = false;
   whisperTimer = 0;
   run = { sim, percept, renderer, hud };
@@ -162,11 +164,34 @@ function nearestPhantom(sim, percept) {
   return bestD <= LOG_RADIUS ? best : null;
 }
 
+/** Is there a pickup within reach right now? Checked before falling back to a
+ * marker survey — one contextual "interact" verb, not a separate pickup button. */
+function nearestPickupItem(sim) {
+  return sim.items
+    .filter((it) => it.discovered && !it.taken && Math.hypot(it.x - sim.player.x, it.z - sim.player.z) <= ITEM_PICKUP_RADIUS)
+    .sort((a, b) => Math.hypot(a.x - sim.player.x, a.z - sim.player.z) - Math.hypot(b.x - sim.player.x, b.z - sim.player.z))[0] || null;
+}
+
 function handleAction(action, arg) {
   const { sim, percept, hud } = run;
   if (sim.status !== "playing") return;
   switch (action) {
     case ACTIONS.SURVEY: {
+      // A pickup takes priority over a survey when both are in reach — items
+      // sit much closer to the ground than a monolith you can stand inside the
+      // radius of, so this only ever matters when the player deliberately
+      // walked up to something small.
+      const item = nearestPickupItem(sim);
+      if (item) {
+        const pres = pickupItem(sim);
+        if (!pres.ok) {
+          audio.play("deny");
+          hud.say(pres.reason === "full" ? "Hands are full. Use or drop something first." : "Nothing to pick up here.", "warn");
+        } else {
+          audio.play(pres.real ? "log" : "logFalse");
+        }
+        break;
+      }
       const res = logMarker(sim, nearestPhantom(sim, percept));
       if (!res.ok) {
         // A failed survey used to be silent-but-for-a-sound-cue — indistinguishable
@@ -205,6 +230,23 @@ function handleAction(action, arg) {
     case ACTIONS.PREV_TARGET:
       selected = (selected + PARTY_SIZE - 2) % (PARTY_SIZE - 1);
       break;
+    case ACTIONS.CYCLE_ITEM:
+      if (sim.inventory.length) selectedItem = (selectedItem + 1) % sim.inventory.length;
+      break;
+    case ACTIONS.USE_ITEM: {
+      if (!sim.inventory.length) {
+        audio.play("deny");
+        hud.say("Nothing carried to use.", "warn");
+        break;
+      }
+      if (selectedItem >= sim.inventory.length) selectedItem = 0;
+      const target = sim.companions[selected];
+      const ures = useItem(sim, selectedItem, target?.id);
+      if (!ures.ok) { audio.play("deny"); break; }
+      audio.play(ures.real ? "dose" : "logFalse");
+      if (selectedItem >= sim.inventory.length && selectedItem > 0) selectedItem -= 1;
+      break;
+    }
     case ACTIONS.PAUSE:
       togglePause();
       break;
@@ -268,7 +310,7 @@ function step(dt, intent) {
   }
   audio.update(distortion(percept, sim), prox);
 
-  hud.update({ yaw, pitch: intent.pitch ?? 0 }, selected);
+  hud.update({ yaw, pitch: intent.pitch ?? 0 }, selected, selectedItem);
   renderer.update(percept, dt, { yaw, pitch: intent.pitch ?? 0 });
 
   if (sim.status !== "playing") finish();
@@ -335,6 +377,8 @@ function boot() {
   el("btnCheck").addEventListener("click", () => run && handleAction(ACTIONS.CHECK_IN, selected));
   el("btnDose").addEventListener("click", () => run && handleAction(ACTIONS.DOSE, selected));
   el("btnNext").addEventListener("click", () => run && handleAction(ACTIONS.NEXT_TARGET));
+  el("btnItem")?.addEventListener("click", () => run && handleAction(ACTIONS.CYCLE_ITEM));
+  el("btnUse")?.addEventListener("click", () => run && handleAction(ACTIONS.USE_ITEM));
   screens("title");
   requestAnimationFrame(frame);
 }
@@ -356,6 +400,7 @@ if (typeof window !== "undefined") {
     get renderer() { return run?.renderer ?? null; },
     get paused() { return paused; },
     get selected() { return selected; },
+    get selectedItem() { return selectedItem; },
     act: (action, arg) => run && handleAction(action, arg),
     /** Advance the sim by `seconds` in fixed slices, optionally holding movement. */
     advance(seconds, intent = {}) {

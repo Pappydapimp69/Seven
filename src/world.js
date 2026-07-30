@@ -10,6 +10,9 @@
 //   * MONOLITH x6 — the survey markers. Finding and logging all of them is the goal.
 //   * PYLON  x5  — lucid anchors. Standing near a live pylon restores lucidity to
 //                  everyone in range. They are the only renewable relief in the area.
+//   * ITEM   x6  — small pickups (see state.js ITEM_INFO for what each kind does).
+//                  World placement only knows their KIND string, not their effect —
+//                  that split keeps this module free of any game-mechanical import.
 //
 // CONNECTIVITY IS NOT A BYPRODUCT — IT IS ITS OWN PASS.
 // Carving with local rules (scatter rock clusters, respect a minimum spacing)
@@ -27,11 +30,15 @@ export const CELL = 2.6; // world units per grid cell
 export const GRID = 46; // cells per side
 export const MONOLITH_COUNT = 6;
 export const PYLON_COUNT = 5;
+export const ITEM_COUNT = 6;
+// Kind strings only — state.js ITEM_INFO owns what each one actually does.
+export const ITEM_KINDS = Object.freeze(["flare", "tether", "lens"]);
 
 export const FEATURE = Object.freeze({
   CAMP: "camp",
   MONOLITH: "monolith",
   PYLON: "pylon",
+  ITEM: "item",
 });
 
 // Survey markers get names, not numbers — a companion has to be able to say
@@ -219,13 +226,14 @@ export function generateWorld(seed = 1) {
     picks.every((p) => Math.hypot(p.cx - c.cx, p.cz - c.cz) >= minSep) &&
     Math.hypot(camp.cx - c.cx, camp.cz - c.cz) >= 9;
   let guard = 0;
-  while (picks.length < MONOLITH_COUNT + PYLON_COUNT && guard++ < 6000) {
+  const totalPicks = MONOLITH_COUNT + PYLON_COUNT + ITEM_COUNT;
+  while (picks.length < totalPicks && guard++ < 6000) {
     const c = openNear(blocked, rng.int(2, GRID - 3), rng.int(2, GRID - 3));
     if (farEnough(c)) picks.push(c);
   }
   // If the spacing loop ran dry (dense seed), top up without the separation rule
   // rather than shipping a world missing its objectives.
-  while (picks.length < MONOLITH_COUNT + PYLON_COUNT) {
+  while (picks.length < totalPicks) {
     picks.push(openNear(blocked, rng.int(2, GRID - 3), rng.int(2, GRID - 3)));
   }
 
@@ -238,9 +246,20 @@ export function generateWorld(seed = 1) {
     cz: c.cz,
     ...cellToWorld(c.cx, c.cz),
   }));
-  const pylons = picks.slice(MONOLITH_COUNT).map((c, i) => ({
+  const pylons = picks.slice(MONOLITH_COUNT, MONOLITH_COUNT + PYLON_COUNT).map((c, i) => ({
     id: `p${i}`,
     kind: FEATURE.PYLON,
+    cx: c.cx,
+    cz: c.cz,
+    ...cellToWorld(c.cx, c.cz),
+  }));
+  // Kinds cycle rather than randomise so every seed guarantees at least one of
+  // each — a world where the dice never deal a Lens is a worse world, not a
+  // harder one.
+  const items = picks.slice(MONOLITH_COUNT + PYLON_COUNT).map((c, i) => ({
+    id: `i${i}`,
+    kind: FEATURE.ITEM,
+    itemKind: ITEM_KINDS[i % ITEM_KINDS.length],
     cx: c.cx,
     cz: c.cz,
     ...cellToWorld(c.cx, c.cz),
@@ -249,7 +268,7 @@ export function generateWorld(seed = 1) {
   // ---- CONNECTIVITY REPAIR PASS (explicit, then re-verified) ----------------
   // Flood from CAMP; anything unreachable gets a carved corridor from the
   // nearest reachable cell. Repeat until the fill covers every feature.
-  const features = [...monoliths, ...pylons];
+  const features = [...monoliths, ...pylons, ...items];
   let repairs = 0;
   for (let pass = 0; pass < 12; pass++) {
     const reach = floodFill(blocked, camp.cx, camp.cz);
@@ -290,6 +309,7 @@ export function generateWorld(seed = 1) {
     camp: { id: "camp", kind: FEATURE.CAMP, cx: camp.cx, cz: camp.cz, ...cellToWorld(camp.cx, camp.cz) },
     monoliths,
     pylons,
+    items,
     repairs, // how many corridors the fixup pass had to carve (diagnostic)
   };
 }
@@ -329,7 +349,7 @@ export function moveWithCollision(world, pos, dx, dz, radius = 0.55) {
 export function validate(world) {
   const reach = floodFill(world.blocked, world.camp.cx, world.camp.cz);
   const unreachable = [];
-  for (const f of [...world.monoliths, ...world.pylons]) {
+  for (const f of [...world.monoliths, ...world.pylons, ...world.items]) {
     if (!reach[f.cz * GRID + f.cx]) unreachable.push(f.id);
   }
   let open = 0;
