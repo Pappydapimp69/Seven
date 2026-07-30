@@ -232,6 +232,19 @@ const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, L3: 10, START:
   );
   assert(afterCraft.crafted === 1, "crafting via D-pad Up was not recorded in stats");
 
+  // ---- gathering: [A] is the same contextual verb, one priority step below
+  // an item pickup and above a marker survey.
+  await page.evaluate(() => {
+    const s = window.__mirage.sim;
+    const t = s.trees.find((x) => !x.chopped);
+    t.discovered = true;
+    window.__mirage.teleport(t.x, t.z);
+  });
+  const woodBefore = await page.evaluate(() => window.__mirage.sim.wood);
+  await tap(BTN.A);
+  const woodAfter = await page.evaluate(() => window.__mirage.sim.wood);
+  assert(woodAfter === woodBefore + 1, `[A] did not chop the tree in reach (${woodBefore} -> ${woodAfter})`);
+
   // Start pauses, and the pause screen is itself gamepad-navigable.
   await tap(BTN.START);
   const pausedState = await page.evaluate(() => ({

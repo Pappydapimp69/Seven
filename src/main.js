@@ -2,8 +2,8 @@
 // input into the sim, the sim into perception, and perception into the screen.
 
 import {
-  createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem, craftItem,
-  PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH,
+  createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem, craftItem, gatherResource,
+  PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, GATHER_RADIUS, CAMPAIGN_LENGTH,
 } from "./state.js";
 import { createPercept, updatePercept, distortion } from "./percept.js";
 import { createRenderer } from "./render.js";
@@ -179,6 +179,8 @@ function advanceLevel() {
     })),
     doses: old.doses,
     inventory: old.inventory,
+    wood: old.wood,
+    stone: old.stone,
     stats: old.stats,
   };
   const nextLevel = old.level + 1;
@@ -216,6 +218,15 @@ function nearestPickupItem(sim) {
     .sort((a, b) => Math.hypot(a.x - sim.player.x, a.z - sim.player.z) - Math.hypot(b.x - sim.player.x, b.z - sim.player.z))[0] || null;
 }
 
+/** Is there a tree or stone deposit within reach? Same contextual-verb
+ * reasoning as nearestPickupItem — checked after a pickup, before a survey. */
+function nearestGatherable(sim) {
+  const d = (o) => Math.hypot(o.x - sim.player.x, o.z - sim.player.z);
+  const trees = sim.trees.filter((t) => t.discovered && !t.chopped && d(t) <= GATHER_RADIUS);
+  const stones = sim.stones.filter((s) => s.discovered && !s.mined && d(s) <= GATHER_RADIUS);
+  return [...trees, ...stones].sort((a, b) => d(a) - d(b))[0] || null;
+}
+
 function handleAction(action, arg) {
   const { sim, percept, hud } = run;
   if (sim.status !== "playing") return;
@@ -234,6 +245,15 @@ function handleAction(action, arg) {
         } else {
           audio.play(pres.real ? "log" : "logFalse");
         }
+        break;
+      }
+      // Gathering comes next in the priority chain — a tree/deposit sits at
+      // the same close range as an item pickup and never lies about what it
+      // is, so there is nothing to gate on hallucination state here.
+      if (nearestGatherable(sim)) {
+        const gres = gatherResource(sim);
+        if (!gres.ok) audio.play("deny");
+        else audio.play("log");
         break;
       }
       const res = logMarker(sim, nearestPhantom(sim, percept));
@@ -298,7 +318,7 @@ function handleAction(action, arg) {
       const cres = craftItem(sim);
       if (!cres.ok) {
         audio.play("deny");
-        hud.say(cres.reason === "need-two" ? "Need two things carried to combine." : "Nothing here combines.", "warn");
+        hud.say(cres.reason === "full" ? "Hands are full. Use or drop something first." : "Nothing here combines.", "warn");
         break;
       }
       audio.play("log");

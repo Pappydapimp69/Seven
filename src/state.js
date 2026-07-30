@@ -67,6 +67,9 @@ export const ITEM_INFO = Object.freeze({
   ember: { label: "Ember", restore: 40, steadyMult: 0.35, steadySeconds: 60 }, // flare + tether
   beacon: { label: "Beacon", restore: 40, clearSeconds: 25 }, // flare + lens
   ward: { label: "Ward", steadyMult: 0.35, steadySeconds: 60, clearSeconds: 25 }, // tether + lens
+  // Crafted from raw materials, not other items — see STAKE_COST/craftItem.
+  // Using it doesn't affect the player directly at all; it plants a pylon.
+  stake: { label: "Stake", charge: 60 },
 });
 // A phantom item's use is always a bad surprise — there is no real effect to
 // fall back on, so reaching for it costs you instead of rewarding you.
@@ -83,6 +86,21 @@ export const CRAFT_RECIPES = Object.freeze({
 function recipeKey(a, b) {
   return [a, b].sort().join("+");
 }
+
+// --- raw materials -----------------------------------------------------------
+// Trees and stone deposits are always exactly what they look like — there is no
+// deception layer here at all, unlike carried items. A tree cannot be a phantom
+// and a hallucinating lead cannot be shown the wrong kind of node, because
+// nothing about "this is a tree" is ever in question; the lie only ever lives
+// in what an ITEM claims to be once it's in your hand. That is also why
+// render.js is allowed to read sim.trees/sim.stones directly instead of going
+// through percept.js — the same exception camp itself already gets.
+export const GATHER_RADIUS = 3.2; // same reach as an item pickup
+export const RESOURCE_SIGHT_RANGE = ITEM_SIGHT_RANGE; // same ground-clutter sighting distance as items
+// 2 wood + 2 stone -> one Stake (a carried item like any other; see useItem's
+// "stake" case). With 5 of each per basin that's at most 2 stakes a run,
+// scarce enough to matter, not so scarce it's never worth reaching for.
+export const STAKE_COST = Object.freeze({ wood: 2, stone: 2 });
 
 // A short campaign: winning a basin before the last one advances to a fresh
 // basin instead of ending the run — see checkEndings(). Callers that don't
@@ -264,12 +282,20 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
     // gate a one-shot pickup's deactivation on a despawn animation) — nothing
     // downstream ever gets a second chance to grab an already-taken item.
     items: world.items.map((it) => ({ ...it, discovered: false, taken: false })),
+    // Raw-material nodes. `chopped`/`mined` are one-shot, same pattern as an
+    // item's `taken` — set the instant gatherResource() resolves.
+    trees: world.trees.map((t) => ({ ...t, discovered: false, chopped: false })),
+    stones: world.stones.map((s) => ({ ...s, discovered: false, mined: false })),
     // The party's carried items. A slot with `real:false` is a phantom picked up
     // while hallucinating: it has no true kind, only a `claimedKind` baked in at
     // pickup time — permanent, exactly like a false survey log entry, so it does
     // NOT reveal itself just because the lead later recovers. Discovery only
     // happens at use time. Carries forward across a campaign's basins.
     inventory: carryOver ? carryOver.inventory : [],
+    // Gathered raw materials. Plain counters, not inventory slots — they are
+    // crafting fuel, never carried or used on their own. Carry forward too.
+    wood: carryOver ? carryOver.wood : 0,
+    stone: carryOver ? carryOver.stone : 0,
     // The survey log. Entries can be FALSE — that is the point.
     logEntries: [],
     doses: carryOver ? carryOver.doses : DOSE_COUNT,
@@ -500,6 +526,29 @@ export function discover(sim) {
       break;
     }
   }
+  // Trees and stone deposits carry no deception at all — see the "raw
+  // materials" comment on RESOURCE_SIGHT_RANGE — so, unlike an item, naming
+  // what it is here is safe.
+  for (const t of sim.trees) {
+    if (t.discovered || t.chopped) continue;
+    for (const ch of sim.party) {
+      if (Math.hypot(t.x - ch.x, t.z - ch.z) > RESOURCE_SIGHT_RANGE) continue;
+      if (!hasSight(sim, ch, t)) continue;
+      t.discovered = true;
+      emit(sim, "discoverResource", ch.isPlayer ? "A tree, close enough to reach." : `${ch.name}: wood, over there.`, { id: t.id, who: ch.id });
+      break;
+    }
+  }
+  for (const s of sim.stones) {
+    if (s.discovered || s.mined) continue;
+    for (const ch of sim.party) {
+      if (Math.hypot(s.x - ch.x, s.z - ch.z) > RESOURCE_SIGHT_RANGE) continue;
+      if (!hasSight(sim, ch, s)) continue;
+      s.discovered = true;
+      emit(sim, "discoverResource", ch.isPlayer ? "Stone breaking through the ground." : `${ch.name}: stone, over there.`, { id: s.id, who: ch.id });
+      break;
+    }
+  }
 }
 
 export const discoveredCount = (sim) => sim.monoliths.filter((m) => m.discovered).length;
@@ -591,6 +640,37 @@ export function pickupItem(sim) {
 }
 
 /**
+ * Chop the nearest reachable tree or mine the nearest reachable stone deposit,
+ * whichever is closer. Unlike a pickup, there is nothing to get wrong here —
+ * no phantom chance, no misidentification — a gathered resource is exactly
+ * what it looked like. Instant and one-shot, same shape as pickupItem.
+ */
+export function gatherResource(sim) {
+  if (sim.status !== "playing") return { ok: false, reason: "over" };
+
+  const nearTree = sim.trees
+    .filter((t) => !t.chopped && t.discovered && dist2D(t, sim.player) <= GATHER_RADIUS)
+    .sort((a, b) => dist2D(a, sim.player) - dist2D(b, sim.player))[0];
+  const nearStone = sim.stones
+    .filter((s) => !s.mined && s.discovered && dist2D(s, sim.player) <= GATHER_RADIUS)
+    .sort((a, b) => dist2D(a, sim.player) - dist2D(b, sim.player))[0];
+
+  const pick = [nearTree, nearStone].filter(Boolean).sort((a, b) => dist2D(a, sim.player) - dist2D(b, sim.player))[0];
+  if (!pick) return { ok: false, reason: "nothing-here" };
+
+  if (pick === nearTree) {
+    pick.chopped = true;
+    sim.wood += 1;
+    emit(sim, "gather", "Wood, cut and carried.", { resource: "wood" });
+    return { ok: true, resource: "wood" };
+  }
+  pick.mined = true;
+  sim.stone += 1;
+  emit(sim, "gather", "Stone, broken free.", { resource: "stone" });
+  return { ok: true, resource: "stone" };
+}
+
+/**
  * Use a carried item slot. A real item does exactly what its TRUE kind does —
  * which is "the wrong thing" from the lead's point of view whenever percept.js
  * had them convinced it was some other kind. A phantom slot has no true effect
@@ -649,6 +729,21 @@ export function useItem(sim, slotIndex, targetCompanionId) {
       emit(sim, "itemUsed", `The ward holds. ${target.name} steadies, and you can trust your own eyes again.`, { itemKind: "ward", who: target.id });
       break;
     }
+    // Doesn't affect the player or a companion directly — it plants a pylon
+    // at the player's current position. Everything downstream (recharge,
+    // drain-while-in-use, even a hallucinating lead's FALSE_ANCHOR reading a
+    // spent one as live) is the SAME pylon logic every other pylon already
+    // gets, for free, because this just becomes an entry in sim.pylons.
+    case "stake":
+      sim.pylons.push({
+        id: `stake${sim.pylons.length}-${sim.time.toFixed(2)}`,
+        x: sim.player.x,
+        z: sim.player.z,
+        charge: info.charge,
+        live: true,
+      });
+      emit(sim, "itemUsed", "You drive the stake into the ground. It will hold, for a while.", { itemKind: "stake" });
+      break;
     default:
       break;
   }
@@ -670,7 +765,7 @@ export function useItem(sim, slotIndex, targetCompanionId) {
  */
 export function craftItem(sim) {
   if (sim.status !== "playing") return { ok: false, reason: "over" };
-  if (sim.inventory.length < 2) return { ok: false, reason: "need-two" };
+
   for (let i = 0; i < sim.inventory.length; i++) {
     for (let j = i + 1; j < sim.inventory.length; j++) {
       const a = sim.inventory[i];
@@ -686,6 +781,20 @@ export function craftItem(sim) {
       return { ok: true, kind: result };
     }
   }
+
+  // No matching item pair — try raw materials. A Stake is a carried item like
+  // any other (see useItem's "stake" case), so it needs room in the cap same
+  // as a pickup would.
+  if (sim.wood >= STAKE_COST.wood && sim.stone >= STAKE_COST.stone) {
+    if (sim.inventory.length >= ITEM_CAP) return { ok: false, reason: "full" };
+    sim.wood -= STAKE_COST.wood;
+    sim.stone -= STAKE_COST.stone;
+    sim.inventory.push({ id: `slot${sim.inventory.length}-${sim.time.toFixed(2)}`, real: true, kind: "stake", claimedKind: null });
+    sim.stats.itemsCrafted += 1;
+    emit(sim, "craft", "Wood and stone lash together. A stake, ready to plant.", { itemKind: "stake" });
+    return { ok: true, kind: "stake" };
+  }
+
   return { ok: false, reason: "no-recipe" };
 }
 
@@ -812,6 +921,8 @@ export function debrief(sim) {
     itemsUsed: sim.stats.itemsUsed,
     phantomItemsUsed: sim.stats.phantomItemsUsed,
     itemsCrafted: sim.stats.itemsCrafted,
+    wood: sim.wood,
+    stone: sim.stone,
     level: sim.level,
     campaignLength: sim.campaignLength,
     party: sim.party.map((c) => ({

@@ -33,12 +33,20 @@ export const PYLON_COUNT = 5;
 export const ITEM_COUNT = 6;
 // Kind strings only — state.js ITEM_INFO owns what each one actually does.
 export const ITEM_KINDS = Object.freeze(["flare", "tether", "lens"]);
+// Raw-material nodes: chop a tree for wood, mine a deposit for stone. Unlike
+// ITEM, these carry no `itemKind` — a tree is always a tree, a deposit always
+// stone. There is no deception layer for these at all (see state.js/percept.js
+// comments): only carried/crafted ITEMS are ever subject to the lie.
+export const TREE_COUNT = 5;
+export const STONE_COUNT = 5;
 
 export const FEATURE = Object.freeze({
   CAMP: "camp",
   MONOLITH: "monolith",
   PYLON: "pylon",
   ITEM: "item",
+  TREE: "tree",
+  STONE: "stone",
 });
 
 // Survey markers get names, not numbers — a companion has to be able to say
@@ -226,7 +234,7 @@ export function generateWorld(seed = 1) {
     picks.every((p) => Math.hypot(p.cx - c.cx, p.cz - c.cz) >= minSep) &&
     Math.hypot(camp.cx - c.cx, camp.cz - c.cz) >= 9;
   let guard = 0;
-  const totalPicks = MONOLITH_COUNT + PYLON_COUNT + ITEM_COUNT;
+  const totalPicks = MONOLITH_COUNT + PYLON_COUNT + ITEM_COUNT + TREE_COUNT + STONE_COUNT;
   while (picks.length < totalPicks && guard++ < 6000) {
     const c = openNear(blocked, rng.int(2, GRID - 3), rng.int(2, GRID - 3));
     if (farEnough(c)) picks.push(c);
@@ -256,10 +264,26 @@ export function generateWorld(seed = 1) {
   // Kinds cycle rather than randomise so every seed guarantees at least one of
   // each — a world where the dice never deal a Lens is a worse world, not a
   // harder one.
-  const items = picks.slice(MONOLITH_COUNT + PYLON_COUNT).map((c, i) => ({
+  const items = picks.slice(MONOLITH_COUNT + PYLON_COUNT, MONOLITH_COUNT + PYLON_COUNT + ITEM_COUNT).map((c, i) => ({
     id: `i${i}`,
     kind: FEATURE.ITEM,
     itemKind: ITEM_KINDS[i % ITEM_KINDS.length],
+    cx: c.cx,
+    cz: c.cz,
+    ...cellToWorld(c.cx, c.cz),
+  }));
+  const treeStart = MONOLITH_COUNT + PYLON_COUNT + ITEM_COUNT;
+  const trees = picks.slice(treeStart, treeStart + TREE_COUNT).map((c, i) => ({
+    id: `t${i}`,
+    kind: FEATURE.TREE,
+    cx: c.cx,
+    cz: c.cz,
+    ...cellToWorld(c.cx, c.cz),
+  }));
+  const stoneStart = treeStart + TREE_COUNT;
+  const stones = picks.slice(stoneStart, stoneStart + STONE_COUNT).map((c, i) => ({
+    id: `st${i}`,
+    kind: FEATURE.STONE,
     cx: c.cx,
     cz: c.cz,
     ...cellToWorld(c.cx, c.cz),
@@ -268,7 +292,7 @@ export function generateWorld(seed = 1) {
   // ---- CONNECTIVITY REPAIR PASS (explicit, then re-verified) ----------------
   // Flood from CAMP; anything unreachable gets a carved corridor from the
   // nearest reachable cell. Repeat until the fill covers every feature.
-  const features = [...monoliths, ...pylons, ...items];
+  const features = [...monoliths, ...pylons, ...items, ...trees, ...stones];
   let repairs = 0;
   for (let pass = 0; pass < 12; pass++) {
     const reach = floodFill(blocked, camp.cx, camp.cz);
@@ -310,6 +334,8 @@ export function generateWorld(seed = 1) {
     monoliths,
     pylons,
     items,
+    trees,
+    stones,
     repairs, // how many corridors the fixup pass had to carve (diagnostic)
   };
 }
@@ -349,7 +375,7 @@ export function moveWithCollision(world, pos, dx, dz, radius = 0.55) {
 export function validate(world) {
   const reach = floodFill(world.blocked, world.camp.cx, world.camp.cz);
   const unreachable = [];
-  for (const f of [...world.monoliths, ...world.pylons, ...world.items]) {
+  for (const f of [...world.monoliths, ...world.pylons, ...world.items, ...world.trees, ...world.stones]) {
     if (!reach[f.cz * GRID + f.cx]) unreachable.push(f.id);
   }
   let open = 0;

@@ -9,12 +9,13 @@
 import {
   createRun, tick, tickLucidity, bandOf, BAND, checkIn, useDose, logMarker, recover,
   beginHallucinating, debrief, trueLogCount, checkEndings, partyCentroid,
-  pickupItem, useItem, craftItem, emit,
+  pickupItem, useItem, craftItem, gatherResource, emit,
   PARTY_SIZE, MAX_LUCIDITY, DOSE_COUNT, RECOVER_AT, RECOVER_TIME, DISSOLVE_TIME,
   TIME_LIMIT, PYLON_RADIUS, LOG_RADIUS, ISOLATION_DIST,
   ITEM_CAP, ITEM_PICKUP_RADIUS, ITEM_INFO, PHANTOM_ITEM_COST, CRAFT_RECIPES, CAMPAIGN_LENGTH,
+  GATHER_RADIUS, STAKE_COST, PYLON_MAX_CHARGE,
 } from "../src/state.js";
-import { generateWorld, validate, findPath, isBlockedAt, GRID, ITEM_COUNT, ITEM_KINDS } from "../src/world.js";
+import { generateWorld, validate, findPath, isBlockedAt, GRID, ITEM_COUNT, ITEM_KINDS, TREE_COUNT, STONE_COUNT } from "../src/world.js";
 import {
   createPercept, updatePercept, perceivedMonoliths, perceivedPylons, perceivedCompanions,
   perceivedYaw, rosterRead, filterReport, distortion,
@@ -140,6 +141,17 @@ check("items place at the documented count, cycling every kind, all reachable", 
     const kinds = new Set(w.items.map((it) => it.itemKind));
     assert(kinds.size === ITEM_KINDS.length, `seed ${seed}: not every kind appeared`);
     assert(validate(w).ok, `seed ${seed}: an item was left unreachable`);
+  }
+});
+
+check("trees and stone deposits place at the documented counts, all reachable", () => {
+  for (const seed of [1, 2, 3, 17, 42]) {
+    const w = generateWorld(seed);
+    eq(w.trees.length, TREE_COUNT, `seed ${seed}: wrong tree count`);
+    eq(w.stones.length, STONE_COUNT, `seed ${seed}: wrong stone count`);
+    for (const t of w.trees) assert(!isBlockedAt(w, t.x, t.z), `seed ${seed}: ${t.id} is inside rock`);
+    for (const s of w.stones) assert(!isBlockedAt(w, s.x, s.z), `seed ${seed}: ${s.id} is inside rock`);
+    assert(validate(w).ok, `seed ${seed}: a tree or stone deposit was left unreachable`);
   }
 });
 
@@ -765,11 +777,11 @@ check("every unordered pair of the three base items has a recipe", () => {
   eq(CRAFT_RECIPES["lens+tether"], "ward");
 });
 
-check("crafting needs at least two items carried", () => {
+check("crafting refuses when there's neither a matching item pair nor enough raw materials", () => {
   const sim = createRun({ seed: 64 });
-  eq(craftItem(sim).reason, "need-two", "wrong refusal with an empty inventory");
+  eq(craftItem(sim).reason, "no-recipe", "wrong refusal with an empty inventory and no materials");
   sim.inventory.push({ id: "a", real: true, kind: "flare", claimedKind: null });
-  eq(craftItem(sim).reason, "need-two", "wrong refusal with only one item");
+  eq(craftItem(sim).reason, "no-recipe", "wrong refusal with only one item and no materials");
 });
 
 check("two of the same item, or a phantom, refuse to combine", () => {
@@ -836,6 +848,103 @@ check("a crafted item in inventory can be mislabeled as any displayable kind, ba
 });
 
 // ---------------------------------------------------------------------------
+// gathering — chop a tree, mine a deposit, no deception involved at all
+// ---------------------------------------------------------------------------
+check("gathering requires being in reach of a discovered tree or deposit", () => {
+  const sim = createRun({ seed: 75 });
+  const t = sim.trees[0];
+  sim.player.x = t.x + GATHER_RADIUS + 5;
+  sim.player.z = t.z;
+  eq(gatherResource(sim).ok, false, "gathered from out of reach");
+  t.discovered = true;
+  sim.player.x = t.x;
+  sim.player.z = t.z;
+  const res = gatherResource(sim);
+  assert(res.ok && res.resource === "wood", "failed to chop a discovered tree in reach");
+  eq(sim.wood, 1, "wood not credited");
+  assert(t.chopped, "the tree was not marked chopped");
+  eq(gatherResource(sim).ok, false, "chopped the same tree twice");
+});
+
+check("mining a stone deposit credits stone the same way chopping credits wood", () => {
+  const sim = createRun({ seed: 76 });
+  const s = sim.stones[0];
+  s.discovered = true;
+  sim.player.x = s.x;
+  sim.player.z = s.z;
+  const res = gatherResource(sim);
+  assert(res.ok && res.resource === "stone", "failed to mine a discovered deposit in reach");
+  eq(sim.stone, 1, "stone not credited");
+  assert(s.mined, "the deposit was not marked mined");
+});
+
+check("gathering never touches inventory or lucidity — no deception, no cost", () => {
+  const sim = createRun({ seed: 77 });
+  const t = sim.trees[0];
+  t.discovered = true;
+  sim.player.x = t.x;
+  sim.player.z = t.z;
+  sim.player.hallucinating = true; // even hallucinating, gathering is always honest
+  const before = sim.player.lucidity;
+  const res = gatherResource(sim);
+  assert(res.ok && res.resource === "wood", "a hallucinating lead should still gather truthfully");
+  eq(sim.inventory.length, 0, "gathering must not add an inventory slot");
+  eq(sim.player.lucidity, before, "gathering must not cost lucidity");
+});
+
+// ---------------------------------------------------------------------------
+// the Stake — crafted from raw materials, plants a real pylon when used
+// ---------------------------------------------------------------------------
+check("crafting a stake needs enough wood AND stone, and works with an empty item inventory", () => {
+  const sim = createRun({ seed: 78 });
+  eq(craftItem(sim).reason, "no-recipe", "crafted a stake with nothing gathered");
+  sim.wood = STAKE_COST.wood;
+  eq(craftItem(sim).reason, "no-recipe", "crafted a stake with wood but no stone");
+  sim.stone = STAKE_COST.stone;
+  const res = craftItem(sim);
+  assert(res.ok && res.kind === "stake", "failed to craft a stake with enough of both materials");
+  eq(sim.wood, 0, "wood was not spent");
+  eq(sim.stone, 0, "stone was not spent");
+  eq(sim.inventory.length, 1, "the stake should sit in the inventory like any other item");
+  eq(sim.inventory[0].kind, "stake");
+});
+
+check("a stake still needs room in the item cap, same as a pickup would", () => {
+  const sim = createRun({ seed: 79 });
+  sim.wood = STAKE_COST.wood;
+  sim.stone = STAKE_COST.stone;
+  for (let i = 0; i < ITEM_CAP; i++) sim.inventory.push({ id: `x${i}`, real: true, kind: "flare", claimedKind: null });
+  const res = craftItem(sim);
+  eq(res.ok, false, "crafted a stake over the cap");
+  eq(res.reason, "full");
+  eq(sim.wood, STAKE_COST.wood, "materials must not be spent on a refused craft");
+});
+
+check("using a stake plants a real, functioning pylon at the player's position", () => {
+  const sim = createRun({ seed: 80 });
+  const pylonsBefore = sim.pylons.length;
+  sim.player.x = 12.5;
+  sim.player.z = -7.5;
+  sim.inventory.push({ id: "s0", real: true, kind: "stake", claimedKind: null });
+  const res = useItem(sim, 0);
+  assert(res.ok && res.real, "using a stake should succeed like any real item");
+  eq(sim.pylons.length, pylonsBefore + 1, "a stake should add exactly one pylon");
+  const planted = sim.pylons[sim.pylons.length - 1];
+  eq(planted.x, 12.5);
+  eq(planted.z, -7.5);
+  assert(planted.charge > 0 && planted.charge <= PYLON_MAX_CHARGE, "planted charge out of range");
+
+  // And it works exactly like a real pylon — tickLucidity doesn't know or
+  // care that this one didn't come from world generation.
+  const c = sim.companions[0];
+  c.lucidity = 20;
+  c.x = planted.x;
+  c.z = planted.z;
+  tickLucidity(sim, c, 1);
+  assert(c.lucidity > 20, "a planted stake should restore lucidity like any pylon");
+});
+
+// ---------------------------------------------------------------------------
 // campaign — a basin cleared early in the sequence advances, not ends
 // ---------------------------------------------------------------------------
 check("createRun defaults to a single-basin campaign — no caller is affected unless it opts in", () => {
@@ -872,12 +981,14 @@ check("clearing the LAST basin of a campaign wins for real", () => {
   eq(sim.ending, "extracted");
 });
 
-check("carryOver continues lucidity, scars, doses and inventory into the next basin", () => {
+check("carryOver continues lucidity, scars, doses, inventory and materials into the next basin", () => {
   const first = createRun({ seed: 73, level: 1, campaignLength: 2 });
   first.companions[0].lucidity = 37;
   first.companions[0].scars = 2;
   first.doses = 1;
   first.inventory.push({ id: "carried", real: true, kind: "lens", claimedKind: null });
+  first.wood = 3;
+  first.stone = 1;
   const carryOver = {
     party: first.party.map((c) => ({
       id: c.id, lucidity: c.lucidity, scars: c.scars,
@@ -885,6 +996,8 @@ check("carryOver continues lucidity, scars, doses and inventory into the next ba
     })),
     doses: first.doses,
     inventory: first.inventory,
+    wood: first.wood,
+    stone: first.stone,
     stats: first.stats,
   };
   const second = createRun({ seed: 74, level: 2, campaignLength: 2, carryOver });
@@ -893,6 +1006,8 @@ check("carryOver continues lucidity, scars, doses and inventory into the next ba
   eq(second.doses, 1, "doses did not carry over");
   eq(second.inventory.length, 1, "inventory did not carry over");
   eq(second.inventory[0].kind, "lens", "the carried item's kind changed");
+  eq(second.wood, 3, "wood did not carry over");
+  eq(second.stone, 1, "stone did not carry over");
   // But the world and party POSITIONS are fresh, not carried:
   assert(second.player.x !== undefined, "a fresh basin should still have a valid spawn");
 });

@@ -7,7 +7,7 @@
 // debrief, after the run is over.
 
 import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory } from "./percept.js";
-import { LOG_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO } from "./state.js";
+import { LOG_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, GATHER_RADIUS } from "./state.js";
 
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 
@@ -42,6 +42,8 @@ export function createHud(sim, percept) {
     items: document.getElementById("itemBar"),
     level: document.getElementById("levelLabel"),
     flash: document.getElementById("flash"),
+    wood: document.getElementById("woodCount"),
+    stone: document.getElementById("stoneCount"),
   };
 
   // Build the roster once; only the read-out text changes per frame.
@@ -93,6 +95,8 @@ export function createHud(sim, percept) {
       else if (ev.kind === "logFalse") say(ev.text, "gone");
       else if (ev.kind === "dose") say(ev.text, "good");
       else if (ev.kind === "discoverItem") say(ev.text, "");
+      else if (ev.kind === "discoverResource") say(ev.text, "");
+      else if (ev.kind === "gather") say(ev.text, "good");
       else if (ev.kind === "pickup") say(ev.text, "good");
       else if (ev.kind === "pickupFalse") say(ev.text, "gone");
       else if (ev.kind === "itemUsed") {
@@ -139,6 +143,18 @@ export function createHud(sim, percept) {
     return bestD <= ITEM_PICKUP_RADIUS ? best : null;
   }
 
+  /** Nearest tree/deposit in reach. Read straight off the sim, not perception
+   * — there is no lie to filter through here (see state.js's own comment on
+   * RESOURCE_SIGHT_RANGE): a tree is always a tree. */
+  function nearestGatherable() {
+    const d = (o) => Math.hypot(o.x - sim.player.x, o.z - sim.player.z);
+    const near = [
+      ...sim.trees.filter((t) => t.discovered && !t.chopped).map((t) => ({ ...t, prompt: "Chop the tree" })),
+      ...sim.stones.filter((s) => s.discovered && !s.mined).map((s) => ({ ...s, prompt: "Mine the stone" })),
+    ].sort((a, b) => d(a) - d(b))[0];
+    return near && d(near) <= GATHER_RADIUS ? near : null;
+  }
+
   function renderInventory(selectedItem) {
     if (!el.items) return;
     const slots = perceivedInventory(percept, sim);
@@ -168,6 +184,8 @@ export function createHud(sim, percept) {
     el.survey.classList.toggle("complete", logged >= sim.monoliths.length);
     if (el.found) el.found.textContent = `${discoveredCount(sim)} / ${sim.monoliths.length}`;
     el.doses.textContent = String(sim.doses);
+    if (el.wood) el.wood.textContent = String(sim.wood);
+    if (el.stone) el.stone.textContent = String(sim.stone);
 
     const yaw = perceivedYaw(percept, sim);
     const oct = ((Math.round((-yaw / (Math.PI * 2)) * 8) % 8) + 8) % 8;
@@ -183,13 +201,17 @@ export function createHud(sim, percept) {
 
     renderInventory(selectedItem);
 
-    // A pickup in reach takes the prompt over a survey — same priority
-    // handleAction gives it in main.js, so the on-screen text never promises
-    // one verb while the button actually does the other.
+    // Same priority handleAction gives it in main.js — pickup, then gather,
+    // then survey — so the on-screen text never promises one verb while the
+    // button actually does another.
     const pickup = nearestPickupItem();
+    const gatherable = nearestGatherable();
     const near = nearestUnloggedName();
     if (pickup && sim.status === "playing") {
       el.prompt.textContent = `Pick up ${ITEM_INFO[pickup.shownKind].label}`;
+      el.prompt.classList.add("show");
+    } else if (gatherable && sim.status === "playing") {
+      el.prompt.textContent = gatherable.prompt;
       el.prompt.classList.add("show");
     } else if (near && sim.status === "playing") {
       el.prompt.textContent = `Survey ${near.name}`;
@@ -201,8 +223,8 @@ export function createHud(sim, percept) {
 
   function setHints(scheme) {
     const text = {
-      keyboard: "WASD move · Shift run · E survey/pick up · Z cycle item · X use item · C craft · 1–5 check in · Shift+1–5 dose · Esc pause",
-      gamepad: "Stick move · [A] survey/pick up · [RT] cycle item · [B] use item · D-pad Up craft · [X] check in · [Y] dose · [LB]/[RB] select · [Start] pause",
+      keyboard: "WASD move · Shift run · E survey/pick up/gather · Z cycle item · X use item · C craft · 1–5 check in · Shift+1–5 dose · Esc pause",
+      gamepad: "Stick move · [A] survey/pick up/gather · [RT] cycle item · [B] use item · D-pad Up craft · [X] check in · [Y] dose · [LB]/[RB] select · [Start] pause",
       touch: "Left half steers · right half looks · buttons bottom-right",
     }[scheme] || "";
     paintHint(el.hints, text);
@@ -238,7 +260,7 @@ export function renderDebrief(container, report) {
           )
           .join("")}
       </table>
-      <p class="debrief-foot">Doses used ${report.doseUses} · recoveries ${report.recoveries} · items used ${report.itemsUsed} · crafted ${report.itemsCrafted} · phantom items ${report.phantomItemsUsed}</p>
+      <p class="debrief-foot">Doses used ${report.doseUses} · recoveries ${report.recoveries} · items used ${report.itemsUsed} · crafted ${report.itemsCrafted} · phantom items ${report.phantomItemsUsed} · wood left ${report.wood} · stone left ${report.stone}</p>
       <button id="againBtn" class="big-btn" data-row="0" data-col="0">New basin</button>
     </div>`;
 }

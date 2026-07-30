@@ -28,6 +28,9 @@ const PALETTE = {
   itemFlare: 0xff8a3d,
   itemTether: 0x5fe0c0,
   itemLens: 0xbfe6ff,
+  treeTrunk: 0x4a3826,
+  treeLeaf: 0x3f6b3f, // green, deliberately distinct from the dark rock-spire cones
+  stoneDeposit: 0x8b95a3, // lighter than the near-black rock spires and the grey ground litter
 };
 
 // No phantom-object case here — a fake pickup is resolved entirely in
@@ -193,7 +196,7 @@ export function createRenderer(canvas, sim) {
   // ---- monoliths, pylons, figures: pooled and rebuilt from perception ------
   const monolithGeo = new THREE.BoxGeometry(1.5, 7.4, 1.1);
   const ringGeo = new THREE.TorusGeometry(PYLON_RADIUS, 0.09, 6, 40);
-  const pool = { monoliths: new Map(), pylons: new Map(), figures: new Map(), items: new Map() };
+  const pool = { monoliths: new Map(), pylons: new Map(), figures: new Map(), items: new Map(), trees: new Map(), stones: new Map() };
 
   function makeMonolith() {
     const g = new THREE.Group();
@@ -274,6 +277,47 @@ export function createRenderer(canvas, sim) {
     glow.position.y = 0.5;
     g.add(glow);
     g.userData = { body, glow };
+    scene.add(g);
+    return g;
+  }
+
+  // A literal tree: brown trunk, green foliage — unmistakably not one of the
+  // dark rock-spire obstacles (see PALETTE.treeLeaf's own comment).
+  function makeTree() {
+    const g = new THREE.Group();
+    const trunk = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.16, 0.22, 1.6, 6),
+      new THREE.MeshStandardMaterial({ color: PALETTE.treeTrunk, roughness: 0.9 }),
+    );
+    trunk.position.y = 0.8;
+    g.add(trunk);
+    const leaves = new THREE.Mesh(
+      new THREE.ConeGeometry(0.9, 2.1, 7),
+      new THREE.MeshStandardMaterial({ color: PALETTE.treeLeaf, roughness: 0.85, flatShading: true }),
+    );
+    leaves.position.y = 2.3;
+    g.add(leaves);
+    g.userData = {};
+    scene.add(g);
+    return g;
+  }
+
+  // A small cluster of rock chunks — lighter and more compact than a rock
+  // spire, and distinct from the purely decorative ground litter.
+  function makeStoneDeposit() {
+    const g = new THREE.Group();
+    const mat = new THREE.MeshStandardMaterial({ color: PALETTE.stoneDeposit, roughness: 0.8, flatShading: true });
+    const offsets = [
+      [0, 0, 0, 0.36],
+      [0.28, 0.05, -0.1, 0.24],
+      [-0.22, 0.02, 0.18, 0.22],
+    ];
+    for (const [ox, oy, oz, s] of offsets) {
+      const chunk = new THREE.Mesh(new THREE.IcosahedronGeometry(s, 0), mat);
+      chunk.position.set(ox, oy + s * 0.6, oz);
+      g.add(chunk);
+    }
+    g.userData = {};
     scene.add(g);
     return g;
   }
@@ -360,6 +404,22 @@ export function createRenderer(canvas, sim) {
       const color = ITEM_COLOR[it.shownKind] || PALETTE.itemFlare;
       obj.userData.body.material.color.set(color);
       obj.userData.glow.color.set(color);
+    }
+
+    // ---- trees and stone deposits — read straight from the sim, not
+    // perception: neither one is ever a lie (see state.js's own comment on
+    // RESOURCE_SIGHT_RANGE), so there is nothing here for percept.js to filter ----
+    syncPool(pool.trees, sim.trees.filter((t) => t.discovered && !t.chopped), makeTree);
+    for (const obj of pool.trees.values()) {
+      if (!obj.visible) continue;
+      const t = obj.userData.item;
+      obj.position.set(t.x, terrainHeight(t.x, t.z), t.z);
+    }
+    syncPool(pool.stones, sim.stones.filter((s) => s.discovered && !s.mined), makeStoneDeposit);
+    for (const obj of pool.stones.values()) {
+      if (!obj.visible) continue;
+      const s = obj.userData.item;
+      obj.position.set(s.x, terrainHeight(s.x, s.z), s.z);
     }
 
     // ---- companions (real and otherwise) ----

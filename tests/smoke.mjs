@@ -327,6 +327,67 @@ function assert(cond, msg) {
   assert(craft.itemsCrafted === 1, "craft was not recorded in stats");
   assert(craft.subtitles.trim().length > 0, "crafting produced no visible line");
 
+  // --- gathering: chop a tree, mine a deposit, craft and plant a Stake ----
+  const gather = await page.evaluate(() => {
+    const M = window.__mirage;
+    const s = M.sim;
+    const t = s.trees.find((x) => !x.chopped);
+    t.discovered = true;
+    M.teleport(t.x, t.z);
+    M.advance(0.2);
+    M.act(M.ACTIONS.SURVEY); // the same contextual verb chops a tree in reach
+    M.advance(0.2);
+    const woodAfterChop = s.wood;
+    const st = s.stones.find((x) => !x.mined);
+    st.discovered = true;
+    M.teleport(st.x, st.z);
+    M.advance(0.2);
+    M.act(M.ACTIONS.SURVEY);
+    M.advance(0.2);
+    return {
+      chopped: t.chopped,
+      mined: st.mined,
+      woodAfterChop,
+      stoneAfterMine: s.stone,
+      woodPill: document.getElementById("woodCount").textContent,
+      stonePill: document.getElementById("stoneCount").textContent,
+    };
+  });
+  assert(gather.chopped, "the survey verb did not chop a tree in reach");
+  assert(gather.mined, "the survey verb did not mine a deposit in reach");
+  assert(gather.woodAfterChop >= 1, "wood was not credited");
+  assert(gather.stoneAfterMine >= 1, "stone was not credited");
+  assert(gather.woodPill !== "0", `wood pill did not update: ${gather.woodPill}`);
+  assert(gather.stonePill !== "0", `stone pill did not update: ${gather.stonePill}`);
+
+  const stake = await page.evaluate(() => {
+    const M = window.__mirage;
+    const s = M.sim;
+    s.wood = 2;
+    s.stone = 2;
+    M.act(M.ACTIONS.CRAFT); // no matching item pair carried -> falls back to the wood+stone recipe
+    const pylonsBefore = s.pylons.length;
+    const stakeSlot = s.inventory.findIndex((slot) => slot.kind === "stake");
+    M.teleport(30, 30);
+    M.advance(0.2);
+    // Cycle selection onto whichever slot actually holds the stake — it may
+    // not be slot 0 depending on what else is carried.
+    while (M.sim.inventory[M.selectedItem]?.kind !== "stake" && M.sim.inventory.some((x) => x.kind === "stake")) {
+      M.act(M.ACTIONS.CYCLE_ITEM);
+    }
+    M.act(M.ACTIONS.USE_ITEM);
+    M.advance(0.2);
+    return {
+      craftedStake: stakeSlot >= 0,
+      pylonsAfter: s.pylons.length,
+      pylonsBefore,
+      plantedAt: s.pylons[s.pylons.length - 1] ? { x: s.pylons[s.pylons.length - 1].x, z: s.pylons[s.pylons.length - 1].z } : null,
+    };
+  });
+  assert(stake.craftedStake, "wood+stone did not craft a stake");
+  assert(stake.pylonsAfter === stake.pylonsBefore + 1, `using a stake should plant exactly one pylon (${stake.pylonsBefore} -> ${stake.pylonsAfter})`);
+  assert(stake.plantedAt && Math.abs(stake.plantedAt.x - 30) < 0.5 && Math.abs(stake.plantedAt.z - 30) < 0.5, `stake planted at the wrong spot: ${JSON.stringify(stake.plantedAt)}`);
+
   // --- campaign: clearing a basin before the last one advances in place ---
   const level = await page.evaluate(() => {
     const M = window.__mirage;
