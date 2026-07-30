@@ -168,8 +168,15 @@ function handleAction(action, arg) {
   switch (action) {
     case ACTIONS.SURVEY: {
       const res = logMarker(sim, nearestPhantom(sim, percept));
-      if (!res.ok) audio.play("deny");
-      else audio.play(res.real ? "log" : "logFalse");
+      if (!res.ok) {
+        // A failed survey used to be silent-but-for-a-sound-cue — indistinguishable
+        // from the button doing nothing at all if audio hadn't started or wasn't
+        // noticed. Every press now says something on screen.
+        audio.play("deny");
+        hud.say(res.reason === "over" ? "The survey is already over." : "Nothing to survey here.", "warn");
+      } else {
+        audio.play(res.real ? "log" : "logFalse");
+      }
       break;
     }
     case ACTIONS.CHECK_IN: {

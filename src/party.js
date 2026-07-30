@@ -199,22 +199,33 @@ const LINES = {
     "Ground's good here.",
     "Still with you.",
     "Bearing holds.",
+    "Nothing to report. Good, for once.",
+    "Pace feels right. Keep it.",
+    "Quiet out here. The good kind of quiet.",
   ],
   unsettled: [
     "You hear that? …no. Forget it.",
     "Light's odd. Probably the dust.",
     "How long have we been walking?",
+    "Did we pass that rock already?",
+    "My ears are doing something. It'll pass.",
+    "Just tired. That's all this is.",
   ],
   fraying: [
     "The ridge moved. It moved, I watched it.",
     "Say my name. Just — say it.",
     "I don't like how quiet the stones are.",
     "Are we six? Count us. Count us again.",
+    "Something's walking the same line we are. Behind the fog.",
+    "I keep losing seconds. Small ones. It's fine.",
+    "The basin's got a rhythm. I can hear it now.",
   ],
   brittle: [
     "I need a pylon. I need one NOW.",
     "My hands aren't mine.",
     "Don't let me walk off. Promise me.",
+    "If I stop talking, that's when to worry.",
+    "Get me to the light. Please.",
   ],
 };
 
@@ -224,7 +235,37 @@ const GONE_LINES = [
   "This pylon's warm. Feel it. Feel it.",
   "North is behind us. It has been the whole time.",
   "They're all saying it. Can't you hear them agreeing?",
+  "I found the seventh marker. There's always been seven.",
+  "You already logged this one. Don't you remember?",
+  "The camp moved closer. It does that, near the end.",
+  "I'm not lost. You're lost. Follow me.",
 ];
+
+// A role-flavored line, mixed in alongside the general band pool so a
+// Surveyor sounds like a surveyor even while frayed, not just a generic
+// "someone" reading from the same script as everyone else.
+const ROLE_LINES = {
+  Surveyor: {
+    fraying: ["My own bearings don't agree with each other anymore."],
+    brittle: ["I can't trust my own readings. That's — that's the job, gone."],
+  },
+  Medic: {
+    fraying: ["Someone's pulse is wrong. I keep checking whose."],
+    brittle: ["I can't tell who needs me and who's asking for someone else."],
+  },
+  Rigger: {
+    fraying: ["That knot wasn't there this morning. I tied it. Didn't I?"],
+    brittle: ["My hands know the rope better than my head does right now."],
+  },
+  Signals: {
+    fraying: ["I'm picking up chatter. There's no one to send it."],
+    brittle: ["Everything sounds like it's coming through water."],
+  },
+  Geologist: {
+    fraying: ["This rock is younger than it was an hour ago."],
+    brittle: ["The ground keeps answering before I ask it anything."],
+  },
+};
 
 /**
  * Maybe have a companion say something. Rate-limited per character and weighted
@@ -251,7 +292,11 @@ export function companionRemark(sim, c, dt) {
   if (band === BAND.STEADY && sim.rng.chance(0.6)) return null; // healthy people don't narrate
   if (c.stoic > 0.7 && (band === BAND.FRAYING || band === BAND.UNSETTLED) && sim.rng.chance(0.55)) return null;
 
-  const text = sim.rng.pick(LINES[band] || LINES[BAND.STEADY]);
+  // A third of the time, reach for a line specific to this companion's role
+  // instead of the shared pool — when that band even has one for them.
+  const roleLines = ROLE_LINES[c.role]?.[band];
+  const pool = roleLines && sim.rng.chance(1 / 3) ? roleLines : LINES[band] || LINES[BAND.STEADY];
+  const text = sim.rng.pick(pool);
   emit(sim, "chatter", `${c.name}: ${text}`, { who: c.id });
   return text;
 }
