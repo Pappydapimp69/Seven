@@ -1,0 +1,72 @@
+name: Deploy MIRAGE to GitHub Pages
+
+# Publishes the repo root as the site root, so the game is playable at
+# https://<owner>.github.io/mirage/ . configure-pages(enablement:true) turns
+# Pages on the first time this runs, so no manual settings change is needed.
+#
+# Triggers on push to main AND workflow_dispatch. Unlike Opticon (a multi-branch
+# repo where a push trigger on feature branches burned deploy quota on
+# guaranteed-fail attempts — the github-pages environment refuses non-default-
+# branch deploys), this repo has one branch and one purpose, so push-to-main is
+# safe: every push here IS a push to the default branch.
+#
+# MANUAL RE-DISPATCH — READ BEFORE RETRYING (carried forward from Opticon's own
+# deploy workflow, where an unbounded retry habit produced 30 runs in a day and
+# ended with the whole site serving origin 404s while every run still reported
+# success). A 404 immediately after a successful deploy is usually CDN
+# propagation and clears on its own or after ONE re-dispatch — that remedy has a
+# ceiling. Distinguish propagation (some edge nodes 404, others serve, a known
+# asset may still load — one retry is reasonable) from origin down (root AND a
+# known static asset both 404 with age:0 from multiple nodes — more deploys
+# cannot fix this; stop and check the repo's Pages settings instead).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deployment; don't cancel an in-progress publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Pages (enable if needed)
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      # Assemble a runtime-only folder rather than uploading the repo root
+      # directly — the root also holds docs/, tests/ (including screenshots),
+      # and CLAUDE.md, none of which belong on the public site.
+      - name: Assemble the site
+        run: |
+          mkdir -p site
+          cp index.html site/
+          cp -r css lib src site/
+
+      - name: Upload the site as the Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
