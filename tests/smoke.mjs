@@ -269,7 +269,14 @@ function assert(cond, msg) {
     };
   });
   assert(verbs.doseSpent === 1, `dose was not consumed (${verbs.doseSpent})`);
-  assert(verbs.subtitles.trim().length > 0, "check-in produced no visible line");
+  // Checks for the SPEAKER'S NAME specifically, not just "some text is
+  // present" — a weak length>0 check here previously passed even when the
+  // check-in line silently failed to appear at all, because the leftover
+  // "Six of you..." start-of-run line was still sitting in the subtitle
+  // history from before (see the frame-ordering bug fixed in main.js's
+  // step(): handleAction()'s emitted events were being wiped by the very
+  // next tick() call in the same frame, before hud.update() ever read them).
+  assert(/IREN/.test(verbs.subtitles), `check-in did not name the companion who answered: ${JSON.stringify(verbs.subtitles)}`);
   assert(verbs.logged === 1, `survey did not log the marker (${verbs.logged})`);
   assert(/1 \/ 6/.test(verbs.surveyPill), `log counter did not update: ${verbs.surveyPill}`);
   assert(/[1-6] \/ 6/.test(verbs.foundPill), `found counter never moved: ${verbs.foundPill}`);
@@ -306,7 +313,11 @@ function assert(cond, msg) {
   assert(items.barAfterPickup.trim().length > 0 && items.barAfterPickup !== "—", "the item bar did not show a carried item");
   assert(items.inventoryAfterUse === items.inventoryBeforeUse - 1, `USE_ITEM did not consume a slot (${items.inventoryBeforeUse} -> ${items.inventoryAfterUse})`);
   assert(items.itemsUsed >= 1, "no item use was recorded in stats");
-  assert(items.subtitles.trim().length > 0, "using an item produced no visible line");
+  // CYCLE_ITEM from a fresh selectedItem=0 lands on index 1 — the manually
+  // pushed flare, not whatever the world pickup happened to be — so the
+  // exact use-text is deterministic. A length>0 check here is what let the
+  // frame-ordering bug (see the check-in assertion above) through silently.
+  assert(/The flare catches/.test(items.subtitles), `using the flare did not show its text: ${JSON.stringify(items.subtitles)}`);
 
   // --- crafting: two real items combine into one via the CRAFT verb -------
   const craft = await page.evaluate(() => {
@@ -325,7 +336,7 @@ function assert(cond, msg) {
   });
   assert(craft.inventory.length === 1 && craft.inventory[0] === "ember", `crafting flare+tether should leave one ember, got ${JSON.stringify(craft.inventory)}`);
   assert(craft.itemsCrafted === 1, "craft was not recorded in stats");
-  assert(craft.subtitles.trim().length > 0, "crafting produced no visible line");
+  assert(/The two combine/.test(craft.subtitles), `crafting did not show its text: ${JSON.stringify(craft.subtitles)}`);
 
   // --- gathering: chop a tree, mine a deposit, craft and plant a Stake ----
   // Gathering is a HOLD, not a tap: a single M.act(SURVEY) must NOT gather,

@@ -87,9 +87,16 @@ export function createHud(sim, percept) {
     setTimeout(() => el.flash.classList.remove("show"), 90);
   }
 
-  /** Drain the sim's event queue into subtitles. Called once per frame. */
-  function pumpEvents() {
-    for (const ev of sim.events) {
+  /**
+   * Drain the sim's event queue into subtitles. Called once per frame.
+   * `actionEvents` is a one-shot array main.js captured from THIS frame's
+   * handleAction() calls before tick() reset sim.events for its own internal
+   * emits (discover/recover/hallucinate/chatter/...) — passed in fresh every
+   * call, never stored, so it can't repeat on a later frame the way writing
+   * it back into sim.events itself did (see main.js's step() comment).
+   */
+  function pumpEvents(actionEvents = []) {
+    for (const ev of actionEvents.concat(sim.events)) {
       if (ev.kind === "chatter" || ev.kind === "report") say(ev.text, ev.gone ? "gone" : "");
       else if (ev.kind === "break") say(ev.text, "warn");
       else if (ev.kind === "hallucinate") say(ev.text, "gone");
@@ -154,8 +161,8 @@ export function createHud(sim, percept) {
       : `<div class="item-slot empty">—</div>`;
   }
 
-  function update(view, selected, selectedItem = 0) {
-    pumpEvents();
+  function update(view, selected, selectedItem = 0, actionEvents = []) {
+    pumpEvents(actionEvents);
 
     for (const c of sim.companions) {
       const { row, read } = rows.get(c.id);

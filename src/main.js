@@ -346,9 +346,22 @@ function step(dt, intent) {
   };
 
   for (const { action, arg } of intent.queue) handleAction(action, arg);
+  // handleAction() (pickup/use/craft/gather/log/dose) emits into sim.events —
+  // but tick()'s own first line wipes that array clean for ITS OWN internal
+  // emits (discover/recover/hallucinate/chatter/...), per sim.events'
+  // documented contract ("transient, drained by the HUD each frame" —
+  // createRun's own comment) that tick() owns and resets that array once per
+  // call. That contract is also load-bearing elsewhere (the balance harness
+  // and a couple of logic tests call tick() directly in a loop and count
+  // sim.events per call, which only works if each call starts clean) — so
+  // the fix here is a LOCAL, one-shot capture passed straight to hud.update,
+  // never written back into sim.events. This is why pickup/use/craft
+  // subtitles (and the flare-use flash) never actually appeared: the event
+  // existed for a few statements and was gone before anything read it.
+  const actionEvents = sim.events.slice();
 
   tick(sim, dt, { move, run: intent.run, yaw, interact: intent.interact });
-  const events = sim.events.slice();
+  const events = actionEvents.concat(sim.events);
   updatePercept(percept, sim, dt);
 
   for (const ev of events) {
@@ -374,7 +387,7 @@ function step(dt, intent) {
   }
   audio.update(distortion(percept, sim), prox);
 
-  hud.update({ yaw, pitch: intent.pitch ?? 0 }, selected, selectedItem);
+  hud.update({ yaw, pitch: intent.pitch ?? 0 }, selected, selectedItem, actionEvents);
   renderer.update(percept, dt, { yaw, pitch: intent.pitch ?? 0 });
 
   if (sim.status === "levelComplete") advanceLevel();
