@@ -10,10 +10,11 @@ import {
   createRun, tick, tickLucidity, bandOf, BAND, checkIn, useDose, logMarker, recover,
   beginHallucinating, debrief, trueLogCount, checkEndings, partyCentroid,
   pickupItem, useItem, craftItem, previewCraft, gatherResource, gatherTarget, emit,
+  rollTraits, pickHallucinationKind,
   PARTY_SIZE, MAX_LUCIDITY, DOSE_COUNT, RECOVER_AT, RECOVER_TIME, DISSOLVE_TIME,
   TIME_LIMIT, PYLON_RADIUS, LOG_RADIUS, ISOLATION_DIST,
   ITEM_CAP, ITEM_PICKUP_RADIUS, ITEM_INFO, PHANTOM_ITEM_COST, CRAFT_RECIPES, CAMPAIGN_LENGTH,
-  GATHER_RADIUS, GATHER_HOLD_TIME, STAKE_COST, PYLON_MAX_CHARGE,
+  GATHER_RADIUS, GATHER_HOLD_TIME, STAKE_COST, PYLON_MAX_CHARGE, TRAIT_VARIANCE, COMPANION_TEMPLATES,
 } from "../src/state.js";
 import { generateWorld, validate, findPath, isBlockedAt, GRID, ITEM_COUNT, ITEM_KINDS, TREE_COUNT, STONE_COUNT } from "../src/world.js";
 import {
@@ -266,6 +267,106 @@ check("the player is not exempt — the lead hallucinates too", () => {
   sim.player.lucidity = 0;
   beginHallucinating(sim, sim.player);
   assert(sim.player.hallucinating, "the player must be subject to the same rule");
+});
+
+// ---------------------------------------------------------------------------
+// traits — the same five names, a different personality roll each run
+// ---------------------------------------------------------------------------
+check("rollTraits stays within its documented bounds and drifts from the base", () => {
+  const rng = makeRng(90);
+  let anyDrifted = false;
+  for (const tpl of COMPANION_TEMPLATES) {
+    for (let i = 0; i < 50; i++) {
+      const t = rollTraits(rng, tpl);
+      assert(t.drain >= 0.6 && t.drain <= 1.4, `drain out of bounds: ${t.drain}`);
+      for (const key of ["stoic", "chatty", "wander", "selfCare"]) {
+        assert(t[key] >= 0 && t[key] <= 1, `${key} out of bounds: ${t[key]}`);
+      }
+      assert(Math.abs(t.drain - tpl.drain) <= TRAIT_VARIANCE + 1e-9, "drain drifted further than TRAIT_VARIANCE");
+      if (t.drain !== tpl.drain || t.stoic !== tpl.stoic) anyDrifted = true;
+    }
+  }
+  assert(anyDrifted, "traits never drifted from the template base across 250 rolls — rng not wired in");
+});
+
+check("a run's rolled traits are deterministic per seed", () => {
+  const a = createRun({ seed: 91 });
+  const b = createRun({ seed: 91 });
+  for (let i = 0; i < a.companions.length; i++) {
+    eq(a.companions[i].drain, b.companions[i].drain, `${a.companions[i].name} drain not deterministic`);
+    eq(a.companions[i].selfCare, b.companions[i].selfCare, `${a.companions[i].name} selfCare not deterministic`);
+  }
+});
+
+check("the same five names still lead — traits vary, identity doesn't", () => {
+  const sim = createRun({ seed: 92 });
+  eq(sim.companions.map((c) => c.name).join(","), "VOSS,IREN,HALDER,NKEM,PAO", "roster identity changed");
+  eq(sim.companions.map((c) => c.role).join(","), "Surveyor,Medic,Rigger,Signals,Geologist", "roster roles changed");
+});
+
+check("traits carry across a campaign's basins instead of re-rolling", () => {
+  const first = createRun({ seed: 93, level: 1, campaignLength: 2 });
+  const rolled = first.companions.map((c) => ({ id: c.id, drain: c.drain, selfCare: c.selfCare }));
+  const carryOver = {
+    party: first.party.map((c) => ({
+      id: c.id, lucidity: c.lucidity, scars: c.scars, hallucinating: c.hallucinating,
+      hallucination: c.hallucination, goneTime: c.goneTime,
+      drain: c.drain, stoic: c.stoic, chatty: c.chatty, wander: c.wander, selfCare: c.selfCare,
+    })),
+    doses: first.doses, inventory: first.inventory, wood: first.wood, stone: first.stone, stats: first.stats,
+  };
+  const second = createRun({ seed: 94, level: 2, campaignLength: 2, carryOver });
+  for (const saved of rolled) {
+    const ch = second.companions.find((c) => c.id === saved.id);
+    eq(ch.drain, saved.drain, `${ch.name}'s drain reshuffled at the next basin`);
+    eq(ch.selfCare, saved.selfCare, `${ch.name}'s selfCare reshuffled at the next basin`);
+  }
+});
+
+check("high selfCare breaks off for a known pylon before BRITTLE", () => {
+  const sim = createRun({ seed: 95 });
+  const p = sim.pylons[0];
+  const c = sim.companions[0];
+  const away = { x: p.x + 30, z: p.z + 4 };
+  for (const m of sim.party) { m.x = away.x; m.z = away.z; }
+  for (const other of sim.pylons) if (other !== p) other.charge = 0;
+  c.known = { pylons: new Set([p.id]), monoliths: new Set() };
+  c.selfCare = 0.9; // well above the UNSETTLED threshold
+  c.lucidity = 60; // UNSETTLED band, nowhere near BRITTLE
+  advance(sim, 3);
+  eq(c.goalKind, "pylon", "a high-selfCare companion should seek relief before BRITTLE");
+});
+
+check("low selfCare only breaks off at BRITTLE, same as before this feature existed", () => {
+  const sim = createRun({ seed: 96 });
+  const p = sim.pylons[0];
+  const c = sim.companions[0];
+  const away = { x: p.x + 30, z: p.z + 4 };
+  for (const m of sim.party) { m.x = away.x; m.z = away.z; }
+  for (const other of sim.pylons) if (other !== p) other.charge = 0;
+  c.known = { pylons: new Set([p.id]), monoliths: new Set() };
+  c.selfCare = 0.1;
+  c.lucidity = 20; // FRAYING, not yet BRITTLE
+  advance(sim, 3);
+  assert(c.goalKind !== "pylon", "a low-selfCare companion broke off before BRITTLE");
+});
+
+check("hallucination kind is trait-weighted for companions, but stays flat for the player", () => {
+  const sim = createRun({ seed: 97 });
+  const wanderer = { ...sim.companions[0], isPlayer: false, wander: 1, chatty: 0, selfCare: 0 };
+  const anchored = { ...sim.companions[0], isPlayer: false, wander: 0, chatty: 0, selfCare: 1 };
+  let wandererMarker = 0, anchoredMarker = 0;
+  const N = 400;
+  for (let i = 0; i < N; i++) {
+    if ([HALLUCINATION.PHANTOM_MARKER, HALLUCINATION.WRONG_WAY].includes(pickHallucinationKind(sim, wanderer))) wandererMarker++;
+    if (pickHallucinationKind(sim, anchored) === HALLUCINATION.FALSE_ANCHOR) anchoredMarker++;
+  }
+  assert(wandererMarker > N * 0.35, `a maximally-wander companion should draw PHANTOM_MARKER/WRONG_WAY often, got ${wandererMarker}/${N}`);
+  assert(anchoredMarker > N * 0.35, `a maximally-selfCare companion should draw FALSE_ANCHOR often, got ${anchoredMarker}/${N}`);
+
+  let playerKinds = new Set();
+  for (let i = 0; i < 60; i++) playerKinds.add(pickHallucinationKind(sim, sim.player));
+  assert(playerKinds.size > 1, "the player's roll should still cover multiple kinds, not be trait-narrowed");
 });
 
 // ---------------------------------------------------------------------------

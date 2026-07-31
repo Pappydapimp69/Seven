@@ -176,6 +176,14 @@ function advanceLevel() {
       hallucinating: c.hallucinating,
       hallucination: c.hallucination,
       goneTime: c.goneTime,
+      // Rolled once at campaign start (createRun ignores these for the
+      // player, who has no trait vector) — carried so a personality doesn't
+      // reshuffle at the next basin.
+      drain: c.drain,
+      stoic: c.stoic,
+      chatty: c.chatty,
+      wander: c.wander,
+      selfCare: c.selfCare,
     })),
     doses: old.doses,
     inventory: old.inventory,

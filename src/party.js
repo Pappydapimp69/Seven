@@ -11,6 +11,27 @@
 import { findPath, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, GRID } from "./world.js";
 import { BAND, bandOf, PYLON_RADIUS, emit } from "./state.js";
 
+// Higher band = worse. Lets a per-companion trait move the pylon-seeking
+// trigger EARLIER than the uniform BRITTLE tell everyone else gets, without
+// needing its own separate band scale.
+// Keyed by literal band strings, not `BAND.*` — see the note on `LINES`
+// below: a top-level dereference of BAND here hits the circular-import
+// temporal dead zone and throws before the game starts.
+const BAND_SEVERITY = { steady: 0, unsettled: 1, fraying: 2, brittle: 3, gone: 4 };
+
+/**
+ * How early THIS companion breaks off for a known pylon. Everyone still only
+ * acts on a band they've actually crossed — selfCare doesn't invent urgency,
+ * it just lowers how much urgency they need before they act on it. A low-
+ * selfCare companion is not careless; they're only as proactive as the loud,
+ * uniform tell every companion already has (BRITTLE).
+ */
+function seekThresholdBand(c) {
+  if (c.selfCare >= 0.66) return BAND.UNSETTLED;
+  if (c.selfCare >= 0.33) return BAND.FRAYING;
+  return BAND.BRITTLE;
+}
+
 const FOLLOW_RADIUS = 4.4; // formation stand-off from the lead
 const FOLLOW_SLACK = 2.0; // don't jitter inside this band
 const WALK_SPEED = 4.6; // a touch faster than the player's walk, so they can catch up
@@ -148,10 +169,12 @@ export function updateCompanions(sim, dt) {
 
     const band = bandOf(c.lucidity);
 
-    // BRITTLE is the loud tell: they break formation and make for a pylon they
-    // remember, whether or not you were planning to go there. If you're paying
-    // attention, that is your warning — there is no bar to read.
-    if (band === BAND.BRITTLE) {
+    // BRITTLE is the loud, uniform tell: everyone breaks formation for a
+    // remembered pylon by then, whether or not you were planning to go
+    // there. A companion with a high selfCare trait acts on that same signal
+    // earlier — UNSETTLED or FRAYING instead of waiting for BRITTLE — which
+    // is itself something you can learn to read about THEM specifically.
+    if (BAND_SEVERITY[band] >= BAND_SEVERITY[seekThresholdBand(c)]) {
       const p = nearestKnownPylon(sim, c);
       if (p) {
         if (c.goalKind !== "pylon") {

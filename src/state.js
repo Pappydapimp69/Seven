@@ -154,6 +154,30 @@ export const COMPANION_TEMPLATES = Object.freeze([
   { id: "c5", name: "PAO", role: "Geologist", drain: 1.1, stoic: 0.6, chatty: 0.6, wander: 0.95 },
 ]);
 
+// --- per-run trait variance ---------------------------------------------------
+// The four numbers above are each companion's BASE personality — the same five
+// named people every run, still recognizably themselves. What varies run to run
+// is a jitter around that base (seeded, so a given seed always rolls the same
+// VOSS), plus one new trait with no fixed base at all. Rolled once per campaign
+// at createRun() (see there) and then carried across a campaign's basins like
+// scars — a personality doesn't reset just because the party reached a new one.
+export const TRAIT_VARIANCE = 0.15; // how far drain/stoic/chatty/wander may drift from their base
+const clamp01 = (v) => Math.min(1, Math.max(0, v));
+
+export function rollTraits(rng, tpl) {
+  const jitter = () => rng.float(-TRAIT_VARIANCE, TRAIT_VARIANCE);
+  return {
+    drain: Math.min(1.4, Math.max(0.6, tpl.drain + jitter())),
+    stoic: clamp01(tpl.stoic + jitter()),
+    chatty: clamp01(tpl.chatty + jitter()),
+    wander: clamp01(tpl.wander + jitter()),
+    // No per-role base — this is a genuinely new trait, not a modifier on an
+    // existing one: how proactively a mind manages its OWN lucidity risk
+    // rather than only reacting once already brittle (see party.js).
+    selfCare: clamp01(rng.float(0, 1)),
+  };
+}
+
 // The kinds of hallucination a mind can fall into. Which one you draw changes
 // what the character DOES (companions) or what the screen SHOWS (the player).
 export const HALLUCINATION = Object.freeze({
@@ -187,6 +211,7 @@ function makeCharacter(tpl, spawn, index) {
     aliveTime: 0,
     goneTime: 0, // total seconds spent hallucinating (scored at the end)
     steadyUntil: 0, // sim.time until which a Tether reduces this mind's drain
+    selfCare: 0, // overwritten immediately below (rollTraits, or carried over) — never left at this default
   };
 }
 
@@ -245,13 +270,19 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
     const spot = { x: spawn.x + Math.sin(a) * r, z: spawn.z + Math.cos(a) * r };
     return makeCharacter(tpl, spot, i + 1);
   });
+  // Traits are rolled once per CAMPAIGN, not per basin — carryOver below
+  // restores them on every level after the first, so a personality doesn't
+  // reshuffle just because the party reached a new basin.
+  if (!carryOver) {
+    for (const ch of companions) Object.assign(ch, rollTraits(rng, ch));
+  }
 
   const diff = DIFFICULTY[difficulty] || DIFFICULTY.standard;
 
   // Carry the previous basin's party state forward by id — position/goal/path
   // still reset to a fresh spawn (below), but lucidity, scars, whether a mind
-  // is mid-hallucination, and total gone-time survive the jump. A companion
-  // roster is a fixed set of ids every run, so lookup by id is exact.
+  // is mid-hallucination, total gone-time, and rolled traits survive the jump.
+  // A companion roster is a fixed set of ids every run, so lookup by id is exact.
   if (carryOver) {
     for (const saved of carryOver.party) {
       const ch = saved.id === player.id ? player : companions.find((c) => c.id === saved.id);
@@ -261,6 +292,13 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
       ch.hallucinating = saved.hallucinating;
       ch.hallucination = saved.hallucination;
       ch.goneTime = saved.goneTime;
+      if (!ch.isPlayer) {
+        ch.drain = saved.drain;
+        ch.stoic = saved.stoic;
+        ch.chatty = saved.chatty;
+        ch.wander = saved.wander;
+        ch.selfCare = saved.selfCare;
+      }
     }
   }
 
@@ -395,12 +433,39 @@ export function tickLucidity(sim, ch, dt) {
   return rate;
 }
 
+/**
+ * Which kind of hallucination this mind falls into. The player has no trait
+ * vector to weight by (they're not a rolled character), so they keep a flat
+ * roll — only a companion's own personality tilts the odds, never certainty:
+ * every kind stays reachable for everyone, just more or less likely. Each
+ * kind is pushed by the trait it's thematically closest to; DOUBLED_PARTY
+ * carries no push at all, so it's relatively likelier for a companion whose
+ * traits don't lean anywhere in particular.
+ */
+export function pickHallucinationKind(sim, ch) {
+  if (ch.isPlayer) return sim.rng.pick(HALLUCINATION_LIST);
+  const weights = {
+    [HALLUCINATION.PHANTOM_MARKER]: 1 + ch.wander * 2, // out roving is where a fake discovery lands
+    [HALLUCINATION.WRONG_WAY]: 1 + ch.wander * 2, // ...and where a bad compass actually matters
+    [HALLUCINATION.CHORUS]: 1 + ch.chatty * 2, // the lie arrives in the register they already use
+    [HALLUCINATION.FALSE_ANCHOR]: 1 + ch.selfCare * 2, // hits exactly what they're anxious about
+    [HALLUCINATION.DOUBLED_PARTY]: 1, // flat baseline — the default for no particular lean
+  };
+  const total = Object.values(weights).reduce((a, b) => a + b, 0);
+  let r = sim.rng() * total;
+  for (const kind of HALLUCINATION_LIST) {
+    r -= weights[kind];
+    if (r <= 0) return kind;
+  }
+  return HALLUCINATION_LIST[HALLUCINATION_LIST.length - 1]; // float-rounding fallback, never reached in practice
+}
+
 export function beginHallucinating(sim, ch) {
   if (ch.hallucinating) return;
   ch.hallucinating = true;
   ch.lucidity = 0;
   ch.recoverProgress = 0;
-  ch.hallucination = sim.rng.pick(HALLUCINATION_LIST);
+  ch.hallucination = pickHallucinationKind(sim, ch);
   // A companion who has gone abandons the party's plan for their own.
   ch.goal = null;
   ch.goalKind = "hallucinating";
