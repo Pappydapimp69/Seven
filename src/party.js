@@ -9,7 +9,18 @@
 // to make an internal number legible from the outside without printing it.
 
 import { findPath, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, GRID } from "./world.js";
-import { BAND, bandOf, PYLON_RADIUS, emit } from "./state.js";
+import {
+  BAND,
+  bandOf,
+  PYLON_RADIUS,
+  emit,
+  ITEM_PICKUP_RADIUS,
+  ITEM_CAP,
+  CRAFT_RECIPES,
+  recipeKey,
+  companionPickup,
+  handoffToPlayer,
+} from "./state.js";
 
 // Higher band = worse. Lets a per-companion trait move the pylon-seeking
 // trigger EARLIER than the uniform BRITTLE tell everyone else gets, without
@@ -39,6 +50,7 @@ const LOST_SPEED = 3.1; // a hallucinating companion moves with unhurried certai
 const KNOWN_PYLON_DIST = 24; // how close they must have been to remember a pylon
 const SEEK_PYLON_DIST = 70; // and how far they will then travel back to one
 const REPATH_INTERVAL = 0.9; // seconds between path recomputes
+const SEEK_ITEM_DIST = 55; // how far an idle companion will travel on a fetch errand
 
 const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 
@@ -132,6 +144,39 @@ function nearestKnownPylon(sim, c) {
   return bestD <= SEEK_PYLON_DIST ? best : null;
 }
 
+/**
+ * The nearest discovered, untaken world item that would complete a recipe
+ * with something the lead ALREADY has in hand — the "search the world for
+ * ingredient drops" half of the errand. Reactive, not a shopping list: nobody
+ * decides what to craft ahead of time, a companion just notices that the lead
+ * is one item away from something and goes to close the gap. Excludes items
+ * another companion is already en route to, so two couriers never race for
+ * the same one.
+ */
+/**
+ * Would this item kind complete a recipe with something real the lead is
+ * already holding, and is there room to receive it? Shared by the search
+ * (findFetchableItem) and the in-progress check (updateCompanions) so an
+ * errand that finds a target and an errand that keeps chasing one never
+ * disagree about what still counts as "worth it".
+ */
+function completesSomething(sim, itemKind) {
+  if (sim.inventory.length >= ITEM_CAP) return false;
+  return sim.inventory.some((s) => s.real && CRAFT_RECIPES[recipeKey(s.kind, itemKind)]);
+}
+
+function findFetchableItem(sim, c) {
+  const claimed = new Set(sim.companions.filter((o) => o !== c && o.fetchItemId).map((o) => o.fetchItemId));
+  let best = null, bestD = Infinity;
+  for (const it of sim.items) {
+    if (it.taken || !it.discovered || claimed.has(it.id)) continue;
+    if (!completesSomething(sim, it.itemKind)) continue;
+    const d = dist(c, it);
+    if (d < bestD) { bestD = d; best = it; }
+  }
+  return bestD <= SEEK_ITEM_DIST ? best : null;
+}
+
 /** Where a hallucinating companion has decided to go. Confident, and wrong. */
 function phantomGoal(sim, c) {
   const rng = sim.rng;
@@ -167,6 +212,14 @@ export function updateCompanions(sim, dt) {
       continue;
     }
 
+    // A hallucinating mind still physically holds whatever it was carrying —
+    // it just won't reach out and hand it over until lucid again (see the
+    // `continue` above): nothing is lost or duplicated by the gap, delivery
+    // just resumes the moment this companion is back and close enough.
+    if (c.inventory.length && dist(c, sim.player) <= ITEM_PICKUP_RADIUS) {
+      handoffToPlayer(sim, c);
+    }
+
     const band = bandOf(c.lucidity);
 
     // BRITTLE is the loud, uniform tell: everyone breaks formation for a
@@ -194,6 +247,54 @@ export function updateCompanions(sim, dt) {
     if (standing && c.lucidity < 78) {
       c.goalKind = "resting";
       continue;
+    }
+
+    // Errand, part one: already chasing something for the lead. Keyed on
+    // `fetchItemId` alone, NOT on `goalKind` still reading "fetch" — a pylon
+    // break, a rest-in-pylon, or a hallucination episode all overwrite
+    // goalKind on top of this, and the errand must survive underneath and
+    // resume once that crisis clears, not get permanently stranded (and the
+    // item permanently unclaimable by anyone else — see findFetchableItem's
+    // `claimed` set) just because something more urgent briefly took over.
+    if (c.fetchItemId) {
+      const target = sim.items.find((it) => it.id === c.fetchItemId);
+      // Also abandon an errand the lead has already outgrown — used the
+      // ingredient, crafted it away, or filled the cap some other way — so a
+      // companion doesn't keep walking 50+ units for a delivery that no
+      // longer completes anything.
+      if (!target || target.taken || !completesSomething(sim, target.itemKind)) {
+        c.fetchItemId = null; // gone or pointless — reassessed fresh below
+      } else {
+        c.goalKind = "fetch";
+        if (dist(c, target) <= ITEM_PICKUP_RADIUS) {
+          companionPickup(sim, c, target.id);
+          c.fetchItemId = null;
+        } else {
+          stepToward(sim, c, target, WALK_SPEED, dt);
+          continue;
+        }
+      }
+    }
+
+    // Errand, part two: already carrying something for the lead. Delivering
+    // takes priority over ambient formation-following (a full hand only has
+    // one job) but never over this companion's own crisis, above.
+    if (c.inventory.length) {
+      c.goalKind = "deliver";
+      stepToward(sim, c, sim.player, WALK_SPEED, dt);
+      continue;
+    }
+
+    // Errand, part three: nothing to carry yet — is there something out there
+    // that would complete a recipe the lead is already halfway to?
+    if (!c.fetchItemId) {
+      const found = findFetchableItem(sim, c);
+      if (found) {
+        c.goalKind = "fetch";
+        c.fetchItemId = found.id;
+        stepToward(sim, c, found, WALK_SPEED, dt);
+        continue;
+      }
     }
 
     c.goalKind = "follow";

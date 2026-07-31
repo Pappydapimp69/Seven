@@ -10,11 +10,12 @@ import {
   createRun, tick, tickLucidity, bandOf, BAND, checkIn, useDose, logMarker, recover,
   beginHallucinating, debrief, trueLogCount, checkEndings, partyCentroid,
   pickupItem, useItem, craftItem, previewCraft, gatherResource, gatherTarget, emit,
-  rollTraits, pickHallucinationKind,
+  rollTraits, pickHallucinationKind, companionPickup, handoffToPlayer,
   PARTY_SIZE, MAX_LUCIDITY, DOSE_COUNT, RECOVER_AT, RECOVER_TIME, DISSOLVE_TIME,
   TIME_LIMIT, PYLON_RADIUS, LOG_RADIUS, ISOLATION_DIST,
   ITEM_CAP, ITEM_PICKUP_RADIUS, ITEM_INFO, PHANTOM_ITEM_COST, CRAFT_RECIPES, CAMPAIGN_LENGTH,
   GATHER_RADIUS, GATHER_HOLD_TIME, STAKE_COST, PYLON_MAX_CHARGE, TRAIT_VARIANCE, COMPANION_TEMPLATES,
+  COMPANION_ITEM_CAP,
 } from "../src/state.js";
 import { generateWorld, validate, findPath, isBlockedAt, GRID, ITEM_COUNT, ITEM_KINDS, TREE_COUNT, STONE_COUNT } from "../src/world.js";
 import {
@@ -1153,6 +1154,265 @@ check("using a stake plants a real, functioning pylon at the player's position",
   c.z = planted.z;
   tickLucidity(sim, c, 1);
   assert(c.lucidity > 20, "a planted stake should restore lucidity like any pylon");
+});
+
+// ---------------------------------------------------------------------------
+// companion couriers — a companion can carry ONE item for the lead
+// ---------------------------------------------------------------------------
+check("companionPickup gives a non-hallucinating companion a real slot and reports it", () => {
+  const sim = createRun({ seed: 120 });
+  const ch = sim.companions[0];
+  const it = sim.items[0];
+  it.discovered = true;
+  ch.hallucinating = false;
+  ch.x = it.x;
+  ch.z = it.z;
+  const res = companionPickup(sim, ch);
+  assert(res.ok && res.real, "companionPickup refused a valid, in-reach pickup");
+  eq(res.kind, it.itemKind, "wrong kind recorded");
+  eq(ch.inventory.length, 1, "the companion's inventory did not grow");
+  eq(ch.inventory[0].real, true, "slot not marked real");
+  eq(ch.inventory[0].kind, it.itemKind, "slot kind mismatch");
+  eq(ch.inventory[0].claimedKind, null, "a real slot must carry no claimedKind");
+  assert(it.taken, "the world item was not marked taken");
+  const ev = sim.events[sim.events.length - 1];
+  eq(ev.kind, "companionPickup", "expected a companionPickup event");
+});
+
+check("companionPickup can force a hallucinating companion's pickup into a phantom, same technique as pickupItem's own test", () => {
+  const sim = createRun({ seed: 121 });
+  const ch = sim.companions[0];
+  ch.hallucinating = true;
+  sim.rng.chance = () => true; // force the phantom branch deterministically
+  const it = sim.items[0];
+  it.discovered = true;
+  ch.x = it.x;
+  ch.z = it.z;
+  const res = companionPickup(sim, ch);
+  assert(res.ok && res.real === false, "expected a phantom pickup");
+  const slot = ch.inventory[0];
+  eq(slot.real, false, "phantom slot marked real");
+  assert(ITEM_KINDS.includes(slot.claimedKind), "phantom claimedKind not a real kind string");
+  eq(slot.kind, null, "a phantom has no true kind");
+  assert(it.taken, "the underlying world item was not consumed either way");
+  const ev = sim.events[sim.events.length - 1];
+  eq(ev.kind, "companionPickup", "expected a companionPickup event even for a phantom");
+});
+
+check("whichever branch a hallucinating companion's pickup resolves to, the slot shape is always internally consistent", () => {
+  const sim = createRun({ seed: 122 });
+  const ch = sim.companions[0];
+  ch.hallucinating = true;
+  for (let i = 0; i < 40; i++) {
+    // Reuse the small item list, resetting `.taken` each trial so "already
+    // gone" never masks the roll — the 45/55 split is what's under test.
+    const it = sim.items[i % sim.items.length];
+    it.taken = false;
+    it.discovered = true;
+    ch.inventory.length = 0;
+    ch.x = it.x;
+    ch.z = it.z;
+    const res = companionPickup(sim, ch);
+    assert(res.ok, "pickup unexpectedly refused with a discovered item in reach");
+    const slot = ch.inventory[0];
+    if (slot.real) {
+      assert(ITEM_KINDS.includes(slot.kind), "a real slot's kind should be one of the true item kinds");
+      eq(slot.claimedKind, null, "a real slot must carry no claimedKind");
+    } else {
+      assert(ITEM_KINDS.includes(slot.claimedKind), "a phantom's claimedKind should be one of the real kind strings");
+      eq(slot.kind, null, "a phantom has no true kind");
+    }
+  }
+});
+
+check("COMPANION_ITEM_CAP stops a companion already carrying something from picking up a second", () => {
+  const sim = createRun({ seed: 123 });
+  const ch = sim.companions[0];
+  ch.inventory.push({ id: "held", real: true, kind: "flare", claimedKind: null });
+  eq(ch.inventory.length, COMPANION_ITEM_CAP, "test setup: the companion should already sit at the cap");
+  const it = sim.items[0];
+  it.discovered = true;
+  ch.x = it.x;
+  ch.z = it.z;
+  const res = companionPickup(sim, ch);
+  eq(res.ok, false, "picked up over the companion cap");
+  eq(res.reason, "full", "wrong refusal reason");
+  eq(ch.inventory.length, 1, "a refused pickup should not grow the companion's inventory");
+  assert(!it.taken, "a refused pickup must not touch the world item");
+});
+
+check("handoffToPlayer moves a slot from the companion to the player and reports it", () => {
+  const sim = createRun({ seed: 124 });
+  const ch = sim.companions[0];
+  ch.inventory.push({ id: "cslot", real: true, kind: "flare", claimedKind: null });
+  const before = sim.inventory.length;
+  const res = handoffToPlayer(sim, ch);
+  assert(res.ok && res.real, "handoff refused a valid slot with room to receive it");
+  eq(ch.inventory.length, 0, "the companion is still shown as carrying it");
+  eq(sim.inventory.length, before + 1, "the player's inventory did not grow");
+  eq(sim.inventory[sim.inventory.length - 1].kind, "flare", "wrong item handed off");
+  const ev = sim.events[sim.events.length - 1];
+  eq(ev.kind, "handoff", "expected a handoff event");
+});
+
+check("handoffToPlayer names a phantom by its claimedKind, matching pickupFalse's own naming convention", () => {
+  const sim = createRun({ seed: 125 });
+  const ch = sim.companions[0];
+  ch.inventory.push({ id: "cslot", real: false, claimedKind: "lens", kind: null });
+  const res = handoffToPlayer(sim, ch);
+  assert(res.ok && res.real === false, "expected a phantom handoff to still succeed and report unreal");
+  eq(sim.inventory[sim.inventory.length - 1].claimedKind, "lens", "the phantom's claimed kind should ride along into the player's inventory");
+  const ev = sim.events[sim.events.length - 1];
+  eq(ev.kind, "handoff", "expected a handoff event for a phantom too");
+  assert(ev.phantom, "a phantom handoff event should be flagged, even though its text never says so");
+});
+
+check("handoffToPlayer refuses when the player's inventory is already full, without mutating either array", () => {
+  const sim = createRun({ seed: 126 });
+  const ch = sim.companions[0];
+  ch.inventory.push({ id: "cslot", real: true, kind: "flare", claimedKind: null });
+  for (let i = 0; i < ITEM_CAP; i++) sim.inventory.push({ id: `x${i}`, real: true, kind: "flare", claimedKind: null });
+  const res = handoffToPlayer(sim, ch);
+  eq(res.ok, false, "handoff succeeded over the player's item cap");
+  eq(res.reason, "full", "wrong refusal reason");
+  eq(ch.inventory.length, 1, "a refused handoff should not remove the companion's slot");
+  eq(sim.inventory.length, ITEM_CAP, "a refused handoff should not add to the player's inventory");
+});
+
+check("handoffToPlayer refuses an empty-handed companion", () => {
+  const sim = createRun({ seed: 127 });
+  const ch = sim.companions[0];
+  const res = handoffToPlayer(sim, ch);
+  eq(res.ok, false, "handoff succeeded with nothing to hand off");
+  eq(res.reason, "empty", "wrong refusal reason");
+});
+
+check("a full fetch-and-deliver errand completes end-to-end, driven only through tick()", () => {
+  const sim = createRun({ seed: 128 });
+  // The lead already holds one half of a recipe.
+  sim.inventory.push({ id: "held", real: true, kind: "flare", claimedKind: null });
+  eq(previewCraft(sim).ok, false, "test setup: nothing craftable yet with only a flare in hand");
+
+  // A discovered, untaken world item that completes the pair.
+  const it = sim.items[0];
+  it.itemKind = "tether"; // flare + tether -> ember
+  it.discovered = true;
+  it.taken = false;
+
+  // The lead stands right at the item's spot; the courier starts a short walk
+  // away. Every other companion is pushed out of range so only one courier is
+  // ever in play.
+  sim.player.x = it.x;
+  sim.player.z = it.z;
+  const courier = sim.companions[0];
+  courier.hallucinating = false;
+  courier.x = it.x + 6;
+  courier.z = it.z;
+  for (const c of sim.companions) {
+    if (c !== courier) { c.x = it.x + 500; c.z = it.z + 500; }
+  }
+
+  let delivered = false;
+  for (let i = 0; i < 600 && sim.status === "playing"; i++) {
+    tick(sim, 1 / 30);
+    if (sim.inventory.length >= 2) { delivered = true; break; }
+  }
+
+  assert(delivered, "the courier never delivered the fetched item back to the player");
+  eq(sim.inventory.length, 2, "the player should hold the original flare plus the delivered item");
+  assert(sim.inventory.some((s) => s.kind === "tether"), "the delivered slot should carry the fetched item's true kind");
+  assert(previewCraft(sim).ok, "flare + tether should now preview as craftable");
+});
+
+check("two idle companions never both claim the same fetchable item", () => {
+  const sim = createRun({ seed: 129 });
+  sim.inventory.push({ id: "held", real: true, kind: "flare", claimedKind: null });
+
+  const it = sim.items[0];
+  it.itemKind = "tether";
+  it.discovered = true;
+  it.taken = false;
+
+  const a = sim.companions[0];
+  const b = sim.companions[1];
+  a.hallucinating = false;
+  b.hallucinating = false;
+  a.x = it.x + 10; a.z = it.z;
+  b.x = it.x - 10; b.z = it.z;
+  for (const c of sim.companions) {
+    if (c !== a && c !== b) { c.x = it.x + 500; c.z = it.z + 500; }
+  }
+
+  for (let i = 0; i < 15; i++) tick(sim, 1 / 30);
+
+  const claimedBy = [a, b].filter((c) => c.fetchItemId === it.id || (c.inventory[0] && c.inventory[0].kind === "tether"));
+  assert(claimedBy.length <= 1, `both companions routed to the same item: ${claimedBy.map((c) => c.name).join(", ")}`);
+});
+
+check("a hallucinating companion holding something does not hand it off, even standing on the player", () => {
+  const sim = createRun({ seed: 130 });
+  const ch = sim.companions[0];
+  ch.inventory.push({ id: "cslot", real: true, kind: "flare", claimedKind: null });
+  beginHallucinating(sim, ch);
+  ch.x = sim.player.x;
+  ch.z = sim.player.z;
+  const before = sim.inventory.length;
+  for (let i = 0; i < 30; i++) tick(sim, 1 / 30);
+  eq(sim.inventory.length, before, "a hallucinating companion should not hand off while gone, even adjacent to the lead");
+  eq(ch.inventory.length, 1, "the item should still be with the hallucinating companion, not the lead");
+});
+
+check("a fetch errand survives being preempted by a pylon-break instead of permanently stranding the companion and the item", () => {
+  const sim = createRun({ seed: 131 });
+  sim.inventory.push({ id: "held", real: true, kind: "flare", claimedKind: null });
+
+  const it = sim.items[0];
+  it.itemKind = "tether"; // flare + tether -> ember
+  it.discovered = true;
+  it.taken = false;
+
+  const courier = sim.companions[0];
+  courier.hallucinating = false;
+  courier.x = it.x + 20;
+  courier.z = it.z;
+  sim.player.x = it.x + 20;
+  sim.player.z = it.z;
+  for (const c of sim.companions) {
+    if (c !== courier) { c.x = it.x + 500; c.z = it.z + 500; }
+  }
+
+  // Let the courier pick up the fetch errand naturally.
+  let gotErrand = false;
+  for (let i = 0; i < 30; i++) {
+    tick(sim, 1 / 30);
+    if (courier.fetchItemId === it.id) { gotErrand = true; break; }
+  }
+  assert(gotErrand, "test setup: the courier never picked up the fetch errand in the first place");
+
+  // Preempt it with a pylon crisis: a known, charged pylon right where the
+  // courier already is, and a lucidity low enough to trigger the uniform
+  // BRITTLE tell regardless of this companion's own selfCare roll.
+  sim.pylons.push({ id: "regr-pylon", x: courier.x, z: courier.z, charge: 100, live: true });
+  courier.lucidity = 1;
+
+  let brokeOff = false;
+  for (let i = 0; i < 5; i++) {
+    tick(sim, 1 / 30);
+    if (courier.goalKind === "pylon") { brokeOff = true; break; }
+  }
+  assert(brokeOff, "test setup: the pylon-break never actually preempted the fetch errand");
+  eq(courier.fetchItemId, it.id, "the fetch errand must still be remembered underneath the pylon-break, not cleared just because goalKind moved on");
+
+  // The pylon tops the courier back up; once healthy, the errand should
+  // resume on its own instead of leaving goalKind stuck on "follow" forever
+  // with the item permanently unclaimable by any OTHER companion either
+  // (see findFetchableItem's claimed-item exclusion).
+  let delivered = false;
+  for (let i = 0; i < 900 && sim.status === "playing"; i++) {
+    tick(sim, 1 / 30);
+    if (sim.inventory.length >= 2) { delivered = true; break; }
+  }
+  assert(delivered, "the fetch errand never resumed after the pylon crisis resolved — it was permanently stranded");
 });
 
 // ---------------------------------------------------------------------------

@@ -109,6 +109,8 @@ export function createHud(sim, percept) {
       else if (ev.kind === "gather") say(ev.text, "good");
       else if (ev.kind === "pickup") say(ev.text, "good");
       else if (ev.kind === "pickupFalse") say(ev.text, "gone");
+      else if (ev.kind === "companionPickup") say(ev.text, "");
+      else if (ev.kind === "handoff") say(ev.text, ev.phantom ? "gone" : "good");
       else if (ev.kind === "itemUsed") {
         say(ev.text, "good");
         if (ITEM_INFO[ev.itemKind]?.restore) flash();

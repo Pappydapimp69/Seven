@@ -295,6 +295,12 @@ export function rosterRead(percept, sim, companion) {
   if (companion.goalKind === "pylon") return { tag: "breaking off", note: "heading for a pylon", uncertain: false };
   if (band === BAND.BRITTLE) return { tag: "bad", note: "shaking", uncertain: false };
   if (lagging) return { tag: "lagging", note: "falling behind", uncertain: false };
+  // Below BRITTLE and lagging deliberately: an errand is a benign read and
+  // must never bury the one tell that means "this mind is about to go" — a
+  // brittle companion who happens to be mid-fetch (no known pylon to break
+  // for) still needs to show as brittle, not as "off running an errand".
+  if (companion.goalKind === "fetch") return { tag: "fetching", note: "gone to fetch something", uncertain: false };
+  if (companion.goalKind === "deliver") return { tag: "fetching", note: "bringing something back", uncertain: false };
   // A Tether's effect is otherwise invisible math (a reduced drain rate) — this
   // is the one place it becomes something the lead can actually see, and only
   // when nothing more urgent (brittle, lagging) is already competing for the

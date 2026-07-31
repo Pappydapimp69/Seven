@@ -83,7 +83,7 @@ export const CRAFT_RECIPES = Object.freeze({
   "flare+lens": "beacon",
   "lens+tether": "ward",
 });
-function recipeKey(a, b) {
+export function recipeKey(a, b) {
   return [a, b].sort().join("+");
 }
 
@@ -212,6 +212,12 @@ function makeCharacter(tpl, spawn, index) {
     goneTime: 0, // total seconds spent hallucinating (scored at the end)
     steadyUntil: 0, // sim.time until which a Tether reduces this mind's drain
     selfCare: 0, // overwritten immediately below (rollTraits, or carried over) — never left at this default
+    // What this companion is currently carrying for the lead — see
+    // companionPickup/handoffToPlayer. Always starts empty on a fresh basin,
+    // same as gatherHold: a half-run errand from the last basin means nothing
+    // here, the world items are all new.
+    inventory: [],
+    fetchItemId: null, // the world item id this companion is currently en route to, if any
   };
 }
 
@@ -709,6 +715,76 @@ export function pickupItem(sim) {
   sim.inventory.push({ id: `slot${sim.inventory.length}-${sim.time.toFixed(2)}`, real: true, kind: near.itemKind, claimedKind: null });
   emit(sim, "pickup", `${ITEM_INFO[near.itemKind].label} secured.`, { itemKind: near.itemKind });
   return { ok: true, real: true, kind: near.itemKind };
+}
+
+// --- companion couriering -----------------------------------------------------
+// A companion can carry ONE item for the lead — a courier's free hand, not a
+// second loadout — and closes on it the exact same way the lead's own
+// pickupItem does: if THIS companion is hallucinating when their hand closes
+// on something, what they end up carrying is a real:false slot with a
+// claimedKind and no true effect behind it, indistinguishable in shape from a
+// phantom the lead picked up themselves. Handing that off later costs nothing
+// extra to get right — useItem/craftItem/perceivedInventory already judge a
+// slot by `real`, never by whose hallucination put it there.
+export const COMPANION_ITEM_CAP = 1;
+
+/**
+ * A companion closing their hand on a reachable, discovered, untaken world
+ * item. Mirrors pickupItem, just addressed to `ch` instead of the lead, and
+ * writing into `ch.inventory` instead of `sim.inventory`. When `targetId` is
+ * given (an errand in party.js sent this companion after a SPECIFIC item),
+ * only that item counts — otherwise this would happily grab whatever nearer
+ * thing happened to be sitting next to the one it was actually sent for,
+ * coming home with an ingredient that completes nothing. With no `targetId`
+ * (a bare pickup, no errand behind it) it falls back to nearest, same as
+ * pickupItem.
+ */
+export function companionPickup(sim, ch, targetId = null) {
+  if (ch.inventory.length >= COMPANION_ITEM_CAP) return { ok: false, reason: "full" };
+
+  const candidates = sim.items.filter((it) => !it.taken && it.discovered && dist2D(it, ch) <= ITEM_PICKUP_RADIUS);
+  const near = targetId
+    ? candidates.find((it) => it.id === targetId)
+    : candidates.sort((a, b) => dist2D(a, ch) - dist2D(b, ch))[0];
+  if (!near) return { ok: false, reason: "nothing-here" };
+
+  near.taken = true;
+
+  // Deliberately kind-agnostic either way — naming what was picked up here
+  // would leak the truth (or the lie) to the lead before they've ever laid
+  // eyes on it, well before they were close enough to actually see. The label
+  // only ever gets named at handoff, the same beat the flashlight example
+  // hinges on: you don't find out what you were given until it's in your hand.
+  if (ch.hallucinating && sim.rng.chance(0.45)) {
+    const claimedKind = sim.rng.pick(ITEM_KINDS);
+    ch.inventory.push({ id: `cslot-${ch.id}-${sim.time.toFixed(2)}`, real: false, claimedKind, kind: null });
+    emit(sim, "companionPickup", `${ch.name} picks something up.`, { who: ch.id, phantom: true });
+    return { ok: true, real: false };
+  }
+
+  ch.inventory.push({ id: `cslot-${ch.id}-${sim.time.toFixed(2)}`, real: true, kind: near.itemKind, claimedKind: null });
+  emit(sim, "companionPickup", `${ch.name} picks something up.`, { who: ch.id, itemKind: near.itemKind });
+  return { ok: true, real: true, kind: near.itemKind };
+}
+
+/**
+ * Hand off whatever `ch` is carrying to the lead, if there's room. A
+ * real:false slot transfers exactly as it is: the deception already happened
+ * at companionPickup time and does not launder on the way over — useItem
+ * still reads `real`, never who carried it here.
+ */
+export function handoffToPlayer(sim, ch) {
+  if (!ch.inventory.length) return { ok: false, reason: "empty" };
+  if (sim.inventory.length >= ITEM_CAP) return { ok: false, reason: "full" };
+
+  const slot = ch.inventory.shift();
+  sim.inventory.push(slot);
+  if (slot.real) {
+    emit(sim, "handoff", `${ch.name} hands you the ${ITEM_INFO[slot.kind].label}.`, { who: ch.id, itemKind: slot.kind });
+  } else {
+    emit(sim, "handoff", `${ch.name} hands you ${ITEM_INFO[slot.claimedKind].label}.`, { who: ch.id, phantom: true });
+  }
+  return { ok: true, real: slot.real };
 }
 
 /**
