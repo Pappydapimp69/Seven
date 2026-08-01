@@ -344,6 +344,18 @@ function assert(cond, msg) {
   const gather = await page.evaluate(() => {
     const M = window.__mirage;
     const s = M.sim;
+    // Record the .gain pulse as it happens. M.advance() steps the sim
+    // synchronously in a tight loop, so BOTH gathers below land within a few
+    // real milliseconds — by the time this evaluate() returns, a pulse that
+    // was read directly could already have expired. An observer turns a
+    // fleeting class into a durable fact.
+    window.__gainSeen = { wood: false, stone: false };
+    for (const [key, id] of [["wood", "woodPill"], ["stone", "stonePill"]]) {
+      const pill = document.getElementById(id);
+      new MutationObserver(() => {
+        if (pill.classList.contains("gain")) window.__gainSeen[key] = true;
+      }).observe(pill, { attributes: true, attributeFilter: ["class"] });
+    }
     const t = s.trees.find((x) => !x.chopped);
     t.discovered = true;
     M.teleport(t.x, t.z);
@@ -366,6 +378,9 @@ function assert(cond, msg) {
       stoneAfterMine: s.stone,
       woodPill: document.getElementById("woodCount").textContent,
       stonePill: document.getElementById("stoneCount").textContent,
+      // Both dots are still mid-flight here (they live ~550ms of real time,
+      // and everything above took a few ms), so this is a safe read.
+      spawnedFlies: document.querySelectorAll(".gather-fly").length,
     };
   });
   assert(!gather.choppedAfterTap, "a bare tap should not chop a tree — gathering must be a hold");
@@ -375,6 +390,23 @@ function assert(cond, msg) {
   assert(gather.stoneAfterMine >= 1, "stone was not credited");
   assert(gather.woodPill !== "0", `wood pill did not update: ${gather.woodPill}`);
   assert(gather.stonePill !== "0", `stone pill did not update: ${gather.stonePill}`);
+
+  // The collect-fly animation (hud.js collectFly/pillGain) is the one part of
+  // this file that genuinely runs on WALL-CLOCK time — CSS transitions and
+  // setTimeout, not the sim clock — so M.advance() can't drive it. It is still
+  // asserted by POLLING for the end state (waitForFunction), never by sleeping
+  // a fixed span and reading once: the .gain pulse is only ~420ms wide, and a
+  // loaded headless box can easily slide a fixed read outside that window. The
+  // MutationObserver installed above is what makes "the pulse happened" a
+  // recorded fact rather than something that had to be caught mid-flight.
+  assert(gather.spawnedFlies > 0, "chopping/mining did not spawn a .gather-fly element");
+  await page.waitForFunction(() => document.querySelectorAll(".gather-fly").length === 0, null, { timeout: 5000 })
+    .catch(() => { throw new Error("gather-fly dot(s) were never cleaned up after landing"); });
+  const pulsed = await page.evaluate(() => window.__gainSeen);
+  assert(pulsed.wood, "wood pill never got its landing highlight (.gain)");
+  assert(pulsed.stone, "stone pill never got its landing highlight (.gain)");
+  await page.waitForFunction(() => !document.querySelector(".pill.gain"), null, { timeout: 5000 })
+    .catch(() => { throw new Error("a pill's landing highlight (.gain) never cleared") });
 
   const stake = await page.evaluate(() => {
     const M = window.__mirage;

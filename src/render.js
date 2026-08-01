@@ -450,6 +450,24 @@ export function createRenderer(canvas, sim) {
     camera.aspect = w / h || 1;
     camera.updateProjectionMatrix();
   }
+
+  /**
+   * Project a world point to CSS pixel coordinates against the canvas's own
+   * bounding rect, for HUD elements (fixed-position DOM, not WebGL) that need
+   * to line up with something in the 3D scene — e.g. a collected-resource fly
+   * animation starting where the tree/deposit actually stood. `visible` is
+   * false once the point is behind the camera, where the projected x/y are
+   * meaningless (they'd otherwise mirror to the wrong side of the screen).
+   */
+  function worldToScreen(x, y, z) {
+    const v = new THREE.Vector3(x, y, z).project(camera);
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: rect.left + (v.x * 0.5 + 0.5) * rect.width,
+      y: rect.top + (-v.y * 0.5 + 0.5) * rect.height,
+      visible: v.z < 1,
+    };
+  }
   window.addEventListener("resize", resize);
   resize();
 
@@ -470,5 +488,5 @@ export function createRenderer(canvas, sim) {
     renderer.dispose();
   }
 
-  return { renderer, scene, camera, rig, update, resize, dispose, terrainHeight, PALETTE };
+  return { renderer, scene, camera, rig, update, resize, dispose, terrainHeight, worldToScreen, PALETTE };
 }

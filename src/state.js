@@ -825,14 +825,17 @@ export function gatherResource(sim) {
     t.chopped = true;
     const n = sim.rng.int(GATHER_YIELD.min, GATHER_YIELD.max);
     sim.wood += n;
-    emit(sim, "gather", `Wood, cut and carried. (+${n})`, { resource: "wood", amount: n });
+    // x/z ride along on the event so the HUD can animate the haul from the
+    // node's own world position to the Wood pill, instead of the counter
+    // just silently ticking up.
+    emit(sim, "gather", `Wood, cut and carried. (+${n})`, { resource: "wood", amount: n, x: t.x, z: t.z });
     return { ok: true, resource: "wood", amount: n };
   }
   const s = sim.stones.find((x) => x.id === pick.id);
   s.mined = true;
   const n = sim.rng.int(GATHER_YIELD.min, GATHER_YIELD.max);
   sim.stone += n;
-  emit(sim, "gather", `Stone, broken free. (+${n})`, { resource: "stone", amount: n });
+  emit(sim, "gather", `Stone, broken free. (+${n})`, { resource: "stone", amount: n, x: s.x, z: s.z });
   return { ok: true, resource: "stone", amount: n };
 }
 

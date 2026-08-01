@@ -376,6 +376,14 @@ function step(dt, intent) {
     if (ev.kind === "hallucinate") audio.play("hallucinate");
     else if (ev.kind === "recover") audio.play("recover");
     else if (ev.kind === "break") audio.play("break");
+    else if (ev.kind === "gather") {
+      // Approximate world height of the tree/deposit's visual centre (trees
+      // read taller than deposits) — close enough for a dot the eye follows
+      // for half a second, not a precision hit-test.
+      const h = ev.resource === "wood" ? 1.4 : 0.3;
+      const from = renderer.worldToScreen(ev.x, renderer.terrainHeight(ev.x, ev.z) + h, ev.z);
+      hud.collectFly(ev.resource, from);
+    }
   }
 
   // Whispers only exist for a lead who is gone.
@@ -397,6 +405,23 @@ function step(dt, intent) {
 
   hud.update({ yaw, pitch: intent.pitch ?? 0 }, selected, selectedItem, actionEvents);
   renderer.update(percept, dt, { yaw, pitch: intent.pitch ?? 0 });
+
+  // sim.events is documented as "transient, drained by the HUD each frame"
+  // (createRun's own comment), but nothing actually drained it until now:
+  // tick() only clears it at the START of ITS OWN call, so whatever tick()
+  // emitted internally this frame (gather/discover/recover/hallucinate/
+  // chatter/...) was still sitting in sim.events when THIS frame ends. The
+  // next frame's `actionEvents = sim.events.slice()` (meant to rescue only
+  // THIS frame's own handleAction emits from tick()'s upcoming clear) would
+  // then mistake last frame's already-handled tick events for fresh ones and
+  // reprocess them a second time a frame late — a duplicate audio cue, a
+  // repeated subtitle line, or (caught by testing the new collect-fly
+  // animation) a second dot flying to a pill that already landed. Clearing
+  // here, once step() itself is done with `events`, is what actually fulfills
+  // the "drained each frame" contract without touching tick()'s own clear,
+  // which a few logic tests and the balance harness depend on when they call
+  // tick() directly in a loop.
+  sim.events.length = 0;
 
   if (sim.status === "levelComplete") advanceLevel();
   else if (sim.status !== "playing") finish();

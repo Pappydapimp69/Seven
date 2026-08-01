@@ -44,6 +44,8 @@ export function createHud(sim, percept) {
     flash: document.getElementById("flash"),
     wood: document.getElementById("woodCount"),
     stone: document.getElementById("stoneCount"),
+    woodPill: document.getElementById("woodPill"),
+    stonePill: document.getElementById("stonePill"),
     promptFill: document.getElementById("actionPromptFill"),
     promptText: document.getElementById("actionPromptText"),
     craftHint: document.getElementById("craftHint"),
@@ -85,6 +87,54 @@ export function createHud(sim, percept) {
     // "show" holds the instant jump to visible; removing it after a brief hold
     // hands back to the base .flash rule's own (eased) transition to fade out.
     setTimeout(() => el.flash.classList.remove("show"), 90);
+  }
+
+  /** Briefly highlight a resource pill when its count just went up — the
+   * landing beat for a chop/mine haul, whether or not collectFly's dot made
+   * the trip (e.g. the node was behind the camera when the hold completed).
+   * Same forced-reflow retrigger trick as flash(), so back-to-back gathers
+   * each get their own pulse instead of the first one's timeout cutting the
+   * second one's class short. */
+  function pillGain(resource) {
+    const pill = resource === "wood" ? el.woodPill : el.stonePill;
+    if (!pill) return;
+    pill.classList.remove("gain");
+    void pill.offsetWidth;
+    pill.classList.add("gain");
+    setTimeout(() => pill.classList.remove("gain"), 420);
+  }
+
+  /**
+   * Fly a small dot from `from` (a screen point render.js projected from the
+   * gathered tree/deposit's own world position) to the resource's pill, then
+   * land with a pillGain() pulse — a physical sense of the haul arriving,
+   * not just a counter that silently ticked up. Pure DOM/CSS: a transform
+   * transition on a throwaway fixed-position element. Cleanup is a timer, not
+   * transitionend, so a backgrounded tab (which can stall CSS transitions)
+   * can't leak the element or skip the landing pulse.
+   */
+  function collectFly(resource, from) {
+    if (!from || !from.visible) {
+      pillGain(resource);
+      return;
+    }
+    const pill = resource === "wood" ? el.woodPill : el.stonePill;
+    if (!pill) return;
+    const to = pill.getBoundingClientRect();
+    const DURATION = 550;
+    const dot = document.createElement("div");
+    dot.className = `gather-fly ${resource}`;
+    dot.style.transform = `translate(${from.x}px, ${from.y}px)`;
+    document.body.appendChild(dot);
+    // Force the start position to commit before moving the target, or the
+    // browser may coalesce both writes into one frame and skip the transition.
+    void dot.offsetWidth;
+    dot.style.transform = `translate(${to.left + to.width / 2}px, ${to.top + to.height / 2}px)`;
+    dot.style.opacity = "0";
+    setTimeout(() => {
+      dot.remove();
+      pillGain(resource);
+    }, DURATION);
   }
 
   /**
@@ -250,7 +300,7 @@ export function createHud(sim, percept) {
     paintHint(el.hints, text);
   }
 
-  return { update, say, showReport, setHints, el };
+  return { update, say, showReport, setHints, collectFly, el };
 }
 
 /** The debrief screen — the one and only place hidden state is revealed. */
