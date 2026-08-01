@@ -249,7 +249,10 @@ const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, L3: 10, START:
   // margin over GATHER_HOLD_TIME (1.2s of SIM time) to survive slow frames.
   await hold(BTN.A, 2500);
   const woodAfter = await page.evaluate(() => window.__mirage.sim.wood);
-  assert(woodAfter === woodBefore + 1, `holding [A] did not chop the tree in reach (${woodBefore} -> ${woodAfter})`);
+  assert(
+    woodAfter >= woodBefore + 2 && woodAfter <= woodBefore + 3,
+    `holding [A] did not chop the tree in reach for the documented 2-3 yield (${woodBefore} -> ${woodAfter})`,
+  );
 
   // Start pauses, and the pause screen is itself gamepad-navigable.
   await tap(BTN.START);

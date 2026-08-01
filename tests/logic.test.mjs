@@ -14,7 +14,7 @@ import {
   PARTY_SIZE, MAX_LUCIDITY, DOSE_COUNT, RECOVER_AT, RECOVER_TIME, DISSOLVE_TIME,
   TIME_LIMIT, PYLON_RADIUS, LOG_RADIUS, ISOLATION_DIST,
   ITEM_CAP, ITEM_PICKUP_RADIUS, ITEM_INFO, PHANTOM_ITEM_COST, CRAFT_RECIPES, CAMPAIGN_LENGTH,
-  GATHER_RADIUS, GATHER_HOLD_TIME, STAKE_COST, PYLON_MAX_CHARGE, TRAIT_VARIANCE, COMPANION_TEMPLATES,
+  GATHER_RADIUS, GATHER_HOLD_TIME, GATHER_YIELD, STAKE_COST, PYLON_MAX_CHARGE, TRAIT_VARIANCE, COMPANION_TEMPLATES,
   COMPANION_ITEM_CAP,
 } from "../src/state.js";
 import { generateWorld, validate, findPath, isBlockedAt, GRID, ITEM_COUNT, ITEM_KINDS, TREE_COUNT, STONE_COUNT } from "../src/world.js";
@@ -1002,7 +1002,8 @@ check("gathering requires being in reach of a discovered tree or deposit", () =>
   sim.player.z = t.z;
   const res = gatherResource(sim);
   assert(res.ok && res.resource === "wood", "failed to chop a discovered tree in reach");
-  eq(sim.wood, 1, "wood not credited");
+  assert(sim.wood >= GATHER_YIELD.min && sim.wood <= GATHER_YIELD.max, "wood not credited in the documented range");
+  eq(sim.wood, res.amount, "credited wood must match the reported amount");
   assert(t.chopped, "the tree was not marked chopped");
   eq(gatherResource(sim).ok, false, "chopped the same tree twice");
 });
@@ -1015,7 +1016,8 @@ check("mining a stone deposit credits stone the same way chopping credits wood",
   sim.player.z = s.z;
   const res = gatherResource(sim);
   assert(res.ok && res.resource === "stone", "failed to mine a discovered deposit in reach");
-  eq(sim.stone, 1, "stone not credited");
+  assert(sim.stone >= GATHER_YIELD.min && sim.stone <= GATHER_YIELD.max, "stone not credited in the documented range");
+  eq(sim.stone, res.amount, "credited stone must match the reported amount");
   assert(s.mined, "the deposit was not marked mined");
 });
 
@@ -1057,7 +1059,7 @@ check("holding for GATHER_HOLD_TIME completes the gather", () => {
   advance(sim, GATHER_HOLD_TIME - 0.1, { interact: true });
   eq(sim.wood, 0, "gathered before the hold time was reached");
   advance(sim, 0.2, { interact: true }); // crosses the threshold
-  eq(sim.wood, 1, "did not gather once the hold time was reached");
+  assert(sim.wood >= GATHER_YIELD.min && sim.wood <= GATHER_YIELD.max, "did not gather once the hold time was reached");
   assert(t.chopped, "the tree was not marked chopped");
   eq(sim.gatherHold.progress, 0, "hold progress should reset after completing");
   eq(sim.gatherHold.targetId, null, "hold target should clear after completing");

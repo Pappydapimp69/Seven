@@ -101,6 +101,9 @@ export const RESOURCE_SIGHT_RANGE = ITEM_SIGHT_RANGE; // same ground-clutter sig
 // real effort, short enough not to be a chore. Releasing early or switching
 // to a different tree/deposit resets progress to zero; see updateGatherHold.
 export const GATHER_HOLD_TIME = 1.2;
+// A bare-handed chop/mine yields a small random haul rather than a flat one —
+// a tree or deposit is worth reaching for on its own, not just as a Stake fee.
+export const GATHER_YIELD = Object.freeze({ min: 2, max: 3 });
 // 2 wood + 2 stone -> one Stake (a carried item like any other; see useItem's
 // "stake" case). With 5 of each per basin that's at most 2 stakes a run,
 // scarce enough to matter, not so scarce it's never worth reaching for.
@@ -820,15 +823,17 @@ export function gatherResource(sim) {
   if (pick.gatherKind === "tree") {
     const t = sim.trees.find((x) => x.id === pick.id);
     t.chopped = true;
-    sim.wood += 1;
-    emit(sim, "gather", "Wood, cut and carried.", { resource: "wood" });
-    return { ok: true, resource: "wood" };
+    const n = sim.rng.int(GATHER_YIELD.min, GATHER_YIELD.max);
+    sim.wood += n;
+    emit(sim, "gather", `Wood, cut and carried. (+${n})`, { resource: "wood", amount: n });
+    return { ok: true, resource: "wood", amount: n };
   }
   const s = sim.stones.find((x) => x.id === pick.id);
   s.mined = true;
-  sim.stone += 1;
-  emit(sim, "gather", "Stone, broken free.", { resource: "stone" });
-  return { ok: true, resource: "stone" };
+  const n = sim.rng.int(GATHER_YIELD.min, GATHER_YIELD.max);
+  sim.stone += n;
+  emit(sim, "gather", `Stone, broken free. (+${n})`, { resource: "stone", amount: n });
+  return { ok: true, resource: "stone", amount: n };
 }
 
 /**
