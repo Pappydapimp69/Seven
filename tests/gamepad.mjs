@@ -244,11 +244,27 @@ const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, L3: 10, START:
   await tap(BTN.A); // a bare tap must not chop
   const woodAfterTap = await page.evaluate(() => window.__mirage.sim.wood);
   assert(woodAfterTap === woodBefore, `a bare [A] tap should not gather (${woodBefore} -> ${woodAfterTap})`);
-  // Generous real-world hold: headless SwiftShader can run well under 10fps
-  // (see this file's own note on `tap`/`hold` timing), so this needs enough
-  // margin over GATHER_HOLD_TIME (1.2s of SIM time) to survive slow frames.
-  await hold(BTN.A, 2500);
-  const woodAfter = await page.evaluate(() => window.__mirage.sim.wood);
+  // A HOLD cannot be expressed as a fixed wall-clock press here, and that is
+  // not a tuning detail — it is this file's own lesson. The sim advances at
+  // most 0.1s per frame (tick() clamps dt so a stalled tab cannot teleport a
+  // run), so completing GATHER_HOLD_TIME's 1.2s needs at least 12 FRAMES, not
+  // 1.2 seconds. Under software GL this page can drop below 5fps, at which
+  // point a 2500ms press delivers fewer than 12 frames and the chop never
+  // finishes — which is what a fixed `hold(BTN.A, 2500)` was doing: failing on
+  // frame starvation while reading as "gathering is broken".
+  //
+  // So: keep the button genuinely held (the real pad path is the whole point
+  // of this test) and poll from NODE for the sim's own state to change, the
+  // same way the debrief check below sidesteps in-page rAF starvation. The
+  // bound is a generous frame budget, never an assertion about elapsed time.
+  await page.evaluate((i) => { window.__pad.buttons[i].pressed = true; }, BTN.A);
+  let woodAfter = woodBefore;
+  for (let i = 0; i < 150 && woodAfter === woodBefore; i++) {
+    await page.waitForTimeout(100);
+    woodAfter = await page.evaluate(() => window.__mirage.sim.wood);
+  }
+  await page.evaluate((i) => { window.__pad.buttons[i].pressed = false; }, BTN.A);
+  await page.waitForTimeout(150);
   assert(
     woodAfter >= woodBefore + 2 && woodAfter <= woodBefore + 3,
     `holding [A] did not chop the tree in reach for the documented 2-3 yield (${woodBefore} -> ${woodAfter})`,
