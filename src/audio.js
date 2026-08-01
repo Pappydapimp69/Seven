@@ -139,6 +139,10 @@ export function createAudio() {
     dose: () => blip({ freq: 660, dur: 0.3, type: "sine", gain: 0.15, slide: 240 }),
     recover: () => { blip({ freq: 300, dur: 0.3, type: "sine", slide: 200 }); setTimeout(() => blip({ freq: 620, dur: 0.35 }), 140); },
     hallucinate: () => blip({ freq: 180, dur: 0.9, type: "sawtooth", gain: 0.16, slide: -70 }),
+    // A brief, low, guttural stinger for the monster-flicker reveal — deliberately
+    // distinct from "hallucinate" (that one marks going under; this one marks a
+    // single wrong instant inside an episode already underway).
+    monster: () => blip({ freq: 85, dur: 0.5, type: "sawtooth", gain: 0.17, slide: -35 }),
     break: () => blip({ freq: 240, dur: 0.25, type: "square", gain: 0.08 }),
     deny: () => blip({ freq: 150, dur: 0.12, type: "square", gain: 0.07 }),
   };

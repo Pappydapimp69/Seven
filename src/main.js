@@ -13,7 +13,7 @@ import { createInput, ACTIONS } from "./input.js";
 import { createAudio } from "./audio.js";
 import { hashSeed } from "./rng.js";
 
-const BUILD = "mirage-0.5.0";
+const BUILD = "mirage-0.6.0";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -386,7 +386,7 @@ function makeLocalPlayer(slot, eye, percept) {
   // companion am I aiming this tether at" and "which slot am I holding" are
   // each player's own pointer into it. Sharing them would make one player's
   // cycle silently move the other's selection mid-reach.
-  return { slot, eye, percept, yaw: eye.yaw || 0, pitch: 0, selected: 0, selectedItem: 0 };
+  return { slot, eye, percept, yaw: eye.yaw || 0, pitch: 0, selected: 0, selectedItem: 0, lastMonsterId: null };
 }
 
 /** Split the canvas into one viewport per player, in DEVICE pixels for Three. */
@@ -504,7 +504,16 @@ function step(dt, intent) {
 
   tick(sim, dt, { move, run: intent.run, yaw, interact: intent.interact, others });
   const events = actionEvents.concat(sim.events);
-  for (const p of run.players) updatePercept(p.percept, sim, dt);
+  for (const p of run.players) {
+    updatePercept(p.percept, sim, dt);
+    // A one-shot stinger on ONSET only — the id persisting across frames
+    // while the flicker holds must not replay the cue every frame, and the
+    // id clearing back to null must not play it either (that's relief, not a
+    // scare). One shared bed, so whichever player's own mind goes, the couch
+    // hears it.
+    if (p.percept.monsterId !== null && p.percept.monsterId !== p.lastMonsterId) audio.play("monster");
+    p.lastMonsterId = p.percept.monsterId;
+  }
 
   for (const ev of events) {
     if (ev.kind === "hallucinate") audio.play("hallucinate");

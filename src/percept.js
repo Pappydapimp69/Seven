@@ -44,6 +44,15 @@ export function createPercept(eye = null) {
     // stable for as long as this hallucination episode lasts (cleared on
     // recovery, same lifetime as the other phantom* fields).
     itemLabels: new Map(),
+    // Camera-turn tracking for shiftOneUnseenPhantom: the eye's own yaw last
+    // tick (null until the first tick has run) and radians turned since the
+    // last drift check.
+    lastYaw: null,
+    turnAccum: 0,
+    // Which real companion (if any) is currently showing as a monster, and
+    // when that flicker ends. See updateMonsterFlicker.
+    monsterId: null,
+    monsterUntil: 0,
   };
 }
 
@@ -136,11 +145,93 @@ function seedHallucination(percept, sim) {
   }
 }
 
+/**
+ * Signed angle from `b` to `a`, wrapped to (-π, π]. The building block for
+ * "is this bearing currently on screen."
+ */
+function angularDelta(a, b) {
+  let d = (a - b) % (Math.PI * 2);
+  if (d > Math.PI) d -= Math.PI * 2;
+  if (d < -Math.PI) d += Math.PI * 2;
+  return d;
+}
+
+/**
+ * Is a point at world-space offset (dx, dz) within `halfAngle` of dead-centre
+ * for a head facing `yaw`? Three's camera looks down -Z, so after a yaw
+ * rotation θ the forward basis is (-sinθ, -cosθ) (same derivation main.js's
+ * own movement-rotation comment uses) — inverted here to recover the bearing
+ * a target sits at, then compared against facing.
+ */
+function inView(yaw, dx, dz, halfAngle) {
+  if (dx === 0 && dz === 0) return true;
+  const bearing = Math.atan2(-dx, -dz);
+  return Math.abs(angularDelta(bearing, yaw)) <= halfAngle;
+}
+
+// A camera turn of this many radians (~63°) between checks is what lets one
+// unseen phantom drift — see the comment at the call site below for why this
+// is gated on TURNING rather than on elapsed time.
+const TURN_SHIFT_ANGLE = 1.1;
+// Generous vs. the renderer's actual 72° FOV (half = 0.63 rad): near-peripheral
+// counts as "seen" too, so nothing visibly pops right at the screen edge.
+const VIEW_HALF_ANGLE = 0.85;
+
+/**
+ * Nudge ONE currently-unwatched phantom monolith/pylon to a new nearby spot.
+ * Never touches anything on screen right now, and never touches sim truth —
+ * only percept's own phantom lists. A hallucination that holds still reads as
+ * a place (seedHallucination's own rule); this is the exception that proves
+ * it: a place can still be wrong about what's behind you.
+ */
+function shiftOneUnseenPhantom(percept, sim, p) {
+  const candidates = [];
+  for (const m of percept.phantomMonoliths) if (!inView(p.yaw, m.x - p.x, m.z - p.z, VIEW_HALF_ANGLE)) candidates.push(m);
+  for (const ph of percept.phantomPylons) if (!inView(p.yaw, ph.x - p.x, ph.z - p.z, VIEW_HALF_ANGLE)) candidates.push(ph);
+  if (!candidates.length) return;
+  const rng = sim.rng;
+  const target = rng.pick(candidates);
+  const a = rng.float(0, Math.PI * 2);
+  const r = rng.float(12, 28);
+  target.x = p.x + Math.cos(a) * r;
+  target.z = p.z + Math.sin(a) * r;
+}
+
+// A monster-flicker attempt is rolled at most this often per second of
+// hallucinating — rare enough to be "at times," not a constant flicker.
+const MONSTER_CHANCE_PER_SEC = 0.07;
+const MONSTER_SIGHT = 20; // only a companion actually nearby can wear it
+const MONSTER_MIN_DUR = 0.35;
+const MONSTER_MAX_DUR = 0.85;
+
+/**
+ * Briefly make ONE nearby real companion read as a monster instead of
+ * themselves — the same kind of lie perceivedWorldItems already tells about a
+ * carried item's kind, aimed at a person instead: the position and behaviour
+ * underneath are entirely real, only the shown identity is wrong for a beat.
+ */
+function updateMonsterFlicker(percept, sim, p, dt, lying) {
+  if (!lying) { percept.monsterId = null; return; }
+  if (percept.monsterId !== null && sim.time < percept.monsterUntil) return; // mid-flicker, hold
+  percept.monsterId = null; // any prior flicker has ended
+  if (!sim.rng.chance(MONSTER_CHANCE_PER_SEC * dt)) return;
+  const near = sim.companions.filter((c) => Math.hypot(c.x - p.x, c.z - p.z) <= MONSTER_SIGHT);
+  if (!near.length) return;
+  percept.monsterId = sim.rng.pick(near).id;
+  percept.monsterUntil = sim.time + sim.rng.float(MONSTER_MIN_DUR, MONSTER_MAX_DUR);
+}
+
 /** Advance the perceived world. Call once per tick, after state.tick. */
 export function updatePercept(percept, sim, dt) {
   const p = eyeOf(percept, sim);
+  // Set only on the tick a hallucination begins — the same beat
+  // seedHallucination gets to place its phantoms before anything else reacts
+  // to them. The monster flicker gets one tick's grace too: it must not fire
+  // on the very frame the screen starts lying.
+  let justOnset = false;
   if (p.hallucinating && !percept.active) {
     percept.active = true;
+    justOnset = true;
     percept.kind = p.hallucination;
     percept.since = sim.time;
     seedHallucination(percept, sim);
@@ -149,13 +240,34 @@ export function updatePercept(percept, sim, dt) {
     percept.kind = null;
     percept.whisper = null;
     percept.itemLabels.clear();
+    percept.monsterId = null;
   }
+  // Computed AFTER the transition above, not before: on the exact tick
+  // recovery happens, `percept.active` just flipped false, and the turn/
+  // monster logic below must see that immediately rather than re-arming
+  // off a stale "was still hallucinating a moment ago" read.
+  const lying = percept.active && !isClear(percept, sim);
 
   const target = percept.active ? 1 : 0;
   // Ramp in over ~2.5s, out over ~1.2s.
   const rate = target > percept.intensity ? 0.4 : 0.85;
   percept.intensity += Math.sign(target - percept.intensity) * Math.min(Math.abs(target - percept.intensity), rate * dt);
   percept.swayPhase += dt * (0.6 + percept.intensity * 1.8);
+
+  // Turning the camera is what takes a phantom OUT of view in the first
+  // place, so gating drift on ACCUMULATED TURN — not elapsed time — ties the
+  // environment changing directly to the player's own action: sweep your
+  // view around and the half of the world you just left may not be where you
+  // left it. Whatever is on screen right now never moves.
+  if (percept.lastYaw !== null && lying) percept.turnAccum += Math.abs(angularDelta(p.yaw, percept.lastYaw));
+  percept.lastYaw = p.yaw;
+  if (!lying) percept.turnAccum = 0;
+  while (lying && percept.turnAccum >= TURN_SHIFT_ANGLE) {
+    percept.turnAccum -= TURN_SHIFT_ANGLE;
+    shiftOneUnseenPhantom(percept, sim, p);
+  }
+
+  updateMonsterFlicker(percept, sim, p, dt, lying && !justOnset);
 
   // A doubled companion keeps station like a real one, which is why it works.
   for (const ph of percept.phantomCompanions) {
@@ -201,6 +313,7 @@ export function perceivedPylons(percept, sim) {
 
 /** Companions as the lead sees them, phantoms included. */
 export function perceivedCompanions(percept, sim) {
+  const lying = percept.active && !isClear(percept, sim);
   const real = sim.companions.map((c) => ({
     id: c.id,
     name: c.name,
@@ -210,8 +323,11 @@ export function perceivedCompanions(percept, sim) {
     hallucinating: c.hallucinating,
     goalKind: c.goalKind,
     phantom: false,
+    // A brief lie about WHO this is, never about where they are or what
+    // they're doing — see updateMonsterFlicker. Only ever true for a real
+    // companion; a phantom is already fully fake and gains nothing from it.
+    monstrous: lying && c.id === percept.monsterId,
   }));
-  const lying = percept.active && !isClear(percept, sim);
   return lying ? [...real, ...percept.phantomCompanions] : real;
 }
 

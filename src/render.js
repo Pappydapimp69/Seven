@@ -25,6 +25,8 @@ const PALETTE = {
   camp: 0xffb562,
   body: 0x8d97a8,
   bodyLost: 0xb06a72,
+  monster: 0x140a0d, // near-black with a red undertone — wrong, not just "gone"
+  monsterEye: 0xff2a2a,
   itemFlare: 0xff8a3d,
   itemTether: 0x5fe0c0,
   itemLens: 0xbfe6ff,
@@ -464,8 +466,19 @@ export function createRenderer(canvas, sim) {
       const dx = px - c.x;
       const dz = pz - c.z;
       obj.rotation.y = Math.atan2(dx, dz);
-      obj.userData.mat.color.set(c.hallucinating ? PALETTE.bodyLost : PALETTE.body);
-      obj.userData.light.material.color.set(c.hallucinating ? 0xff8a94 : 0xffd9a0);
+      if (c.monstrous) {
+        // A lie about identity, not position — the figure keeps its real
+        // spot and facing, only reads wrong for a beat. Wrong proportions
+        // (looms taller and wider) rather than just a new colour, so it
+        // reads as "not them" at a glance, not merely "them, but red."
+        obj.scale.set(1.15, 1.6, 1.1);
+        obj.userData.mat.color.set(PALETTE.monster);
+        obj.userData.light.material.color.set(PALETTE.monsterEye);
+      } else {
+        obj.scale.set(1, 1, 1);
+        obj.userData.mat.color.set(c.hallucinating ? PALETTE.bodyLost : PALETTE.body);
+        obj.userData.light.material.color.set(c.hallucinating ? 0xff8a94 : 0xffd9a0);
+      }
     }
 
     renderer.render(scene, camera);

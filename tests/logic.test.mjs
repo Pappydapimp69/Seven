@@ -2168,7 +2168,151 @@ check("slot ids keep climbing across a basin transition", () => {
   second.player.x = it2.x; second.player.z = it2.z;
   pickupItem(second);
   const nextId = second.inventory[second.inventory.length - 1].id;
-  assert(nextId !== firstId, `basin 2 reissued ${nextId}, colliding with a carried slot`);
+  assert(nextId !== firstId, `basin 2 reissued ${nextId}, colliding with a basin's carried slot`);
+});
+
+// ---------------------------------------------------------------------------
+// camera-turn phantom drift — "don't look away" for phantom monoliths/pylons
+// ---------------------------------------------------------------------------
+check("camera-turn phantom drift only ever moves what is currently off-screen", () => {
+  const sim = createRun({ seed: 504 });
+  sim.player.x = 0; sim.player.z = 0; sim.player.yaw = 0;
+  sim.player.hallucination = HALLUCINATION.PHANTOM_MARKER;
+  sim.player.hallucinating = true;
+  const percept = createPercept(sim.player);
+  updatePercept(percept, sim, 0.1); // onset — seeds the real phantom list, overridden below
+
+  percept.phantomMonoliths = [
+    { id: "ph-front", name: "Front", x: 0, z: -10, phantom: true }, // bearing 0: dead ahead at yaw 0
+    { id: "ph-back", name: "Back", x: 0, z: 10, phantom: true }, // bearing π: directly behind
+  ];
+  percept.phantomPylons = [];
+  const front0 = { x: percept.phantomMonoliths[0].x, z: percept.phantomMonoliths[0].z };
+  const back0 = { x: percept.phantomMonoliths[1].x, z: percept.phantomMonoliths[1].z };
+
+  // Turn the camera back and forth inside a narrow arc that keeps "front" on
+  // screen throughout (the view cone is ±0.85 rad) while still accumulating
+  // plenty of total turn. "back" (bearing π) is never inside that cone at
+  // either extreme, so it stays the only eligible candidate whenever a shift
+  // actually fires.
+  for (let i = 0; i < 8; i++) {
+    sim.player.yaw = i % 2 === 0 ? 0.3 : -0.3;
+    updatePercept(percept, sim, 0.05);
+  }
+
+  const front1 = percept.phantomMonoliths.find((m) => m.id === "ph-front");
+  const back1 = percept.phantomMonoliths.find((m) => m.id === "ph-back");
+  eq(front1.x, front0.x, "a phantom kept on screen the whole time must never move (x)");
+  eq(front1.z, front0.z, "a phantom kept on screen the whole time must never move (z)");
+  assert(back1.x !== back0.x || back1.z !== back0.z, "a phantom held off-screen the whole time should have drifted");
+  const r = Math.hypot(back1.x - sim.player.x, back1.z - sim.player.z);
+  assert(r >= 12 && r <= 28, `a drifted phantom should land within its documented reseed radius, got ${r.toFixed(1)}`);
+});
+
+check("turning the camera while lucid banks no turn credit for a later hallucination", () => {
+  const sim = createRun({ seed: 505 });
+  sim.player.x = 0; sim.player.z = 0; sim.player.yaw = 0;
+  sim.player.hallucinating = false;
+  const percept = createPercept(sim.player);
+  // Spin all the way around, several times, while perfectly lucid.
+  for (let i = 0; i < 20; i++) {
+    sim.player.yaw += 1.4;
+    updatePercept(percept, sim, 0.05);
+  }
+  eq(percept.turnAccum, 0, "turn accumulated while lucid must not persist");
+
+  // Go under, then turn only a hair — nowhere near TURN_SHIFT_ANGLE. If lucid
+  // turning had been silently banked, this tiny turn would instantly cash it
+  // in the moment the hallucination begins.
+  sim.player.hallucination = HALLUCINATION.PHANTOM_MARKER;
+  sim.player.hallucinating = true;
+  updatePercept(percept, sim, 0.05); // onset
+  percept.phantomMonoliths = [{ id: "ph-x", x: 0, z: 10, phantom: true }]; // behind, off-screen
+  const before = { x: percept.phantomMonoliths[0].x, z: percept.phantomMonoliths[0].z };
+  sim.player.yaw += 0.05;
+  updatePercept(percept, sim, 0.05);
+  eq(percept.phantomMonoliths[0].x, before.x, "a tiny turn just after onset must not trigger a shift");
+  eq(percept.phantomMonoliths[0].z, before.z, "a tiny turn just after onset must not trigger a shift");
+});
+
+// ---------------------------------------------------------------------------
+// monster flicker — a real companion briefly reads as something else
+// ---------------------------------------------------------------------------
+check("monster flicker fires only while hallucinating, holds its pick, and clears on schedule", () => {
+  const sim = createRun({ seed: 502 });
+  sim.player.x = 0; sim.player.z = 0;
+  const near = sim.companions[0];
+  near.x = 5; near.z = 0; // well within MONSTER_SIGHT
+  for (let i = 1; i < sim.companions.length; i++) { sim.companions[i].x = 9999; sim.companions[i].z = 9999; }
+  const percept = createPercept(sim.player);
+
+  // Force every chance roll to succeed, isolating hallucinating-state and
+  // distance as the only remaining gates under test.
+  sim.rng.chance = () => true;
+
+  sim.player.hallucinating = false;
+  updatePercept(percept, sim, 0.1);
+  eq(percept.monsterId, null, "a forced-success roll must still not flicker while lucid");
+
+  sim.player.hallucination = HALLUCINATION.WRONG_WAY; // any kind — the flicker is independent of it
+  sim.player.hallucinating = true;
+  updatePercept(percept, sim, 0.1); // onset tick: `lying` was computed false before this tick's flip
+  eq(percept.monsterId, null, "the onset tick itself must not roll a flicker yet");
+  updatePercept(percept, sim, 0.1); // now percept.active is already true -> lying is true
+  eq(percept.monsterId, near.id, "the only nearby companion should be the one picked");
+  assert(percept.monsterUntil > sim.time, "a fresh flicker must have a future end time");
+
+  const list = perceivedCompanions(percept, sim);
+  const seenNear = list.find((c) => c.id === near.id);
+  assert(seenNear.monstrous, "the flickering companion must be reported as monstrous");
+  for (const c of list) if (c.id !== near.id) assert(!c.monstrous, `only ${near.id} should read as monstrous, not ${c.id}`);
+
+  // Mid-flicker, even with the roll still forced true, the SAME id must hold
+  // — no re-picking a different companion out from under an active flicker.
+  const heldId = percept.monsterId;
+  updatePercept(percept, sim, 0.05);
+  eq(percept.monsterId, heldId, "a flicker in progress must not be replaced by a new roll");
+
+  // Push past the flicker's own end and force the reroll to fail — it must
+  // actually clear, not silently re-arm forever.
+  sim.time = percept.monsterUntil + 0.01;
+  sim.rng.chance = () => false;
+  updatePercept(percept, sim, 0.01);
+  eq(percept.monsterId, null, "an expired flicker with a failed reroll must clear");
+
+  // Recovering ends an in-progress flicker immediately, not at its own timer.
+  sim.rng.chance = () => true;
+  updatePercept(percept, sim, 0.01);
+  assert(percept.monsterId !== null, "sanity check: a new flicker should have started");
+  sim.player.hallucinating = false;
+  updatePercept(percept, sim, 0.01);
+  eq(percept.monsterId, null, "recovering must clear an in-progress flicker immediately");
+});
+
+check("monster flicker never picks a companion outside sight range, however often the roll succeeds", () => {
+  const sim = createRun({ seed: 503 });
+  sim.player.x = 0; sim.player.z = 0;
+  for (const c of sim.companions) { c.x = 500; c.z = 500; } // nobody is near
+  const percept = createPercept(sim.player);
+  sim.rng.chance = () => true; // force every roll to succeed
+  sim.player.hallucination = HALLUCINATION.CHORUS;
+  sim.player.hallucinating = true;
+  for (let i = 0; i < 21; i++) updatePercept(percept, sim, 0.1);
+  eq(percept.monsterId, null, "with nobody in sight, a flicker must never fire regardless of the roll");
+});
+
+check("a phantom companion is never reported as monstrous — it's already fully fake", () => {
+  const sim = createRun({ seed: 506 });
+  sim.player.x = 0; sim.player.z = 0;
+  sim.player.hallucination = HALLUCINATION.DOUBLED_PARTY;
+  sim.player.hallucinating = true;
+  const percept = createPercept(sim.player);
+  updatePercept(percept, sim, 0.1);
+  assert(percept.phantomCompanions.length > 0, "DOUBLED_PARTY should seed a phantom companion");
+  const list = perceivedCompanions(percept, sim);
+  const phantoms = list.filter((c) => c.phantom);
+  assert(phantoms.length > 0, "the phantom companion should appear in the perceived list");
+  for (const ph of phantoms) assert(!ph.monstrous, "a phantom companion must never also read as monstrous");
 });
 
 // ---------------------------------------------------------------------------
