@@ -1875,6 +1875,132 @@ check("possession survives a basin transition — a joined pad must not go dead"
 });
 
 // ---------------------------------------------------------------------------
+// co-op verbs — a joined player's action acts on THEM, not on the lead
+// ---------------------------------------------------------------------------
+check("a joined player surveys the marker THEY are standing at", () => {
+  const sim = createRun({ seed: 320 });
+  const c = sim.companions[0];
+  possess(sim, c.id);
+  const m = sim.monoliths[0];
+  // The lead is nowhere near it; player two is standing on it.
+  sim.player.x = m.x + 400; sim.player.z = m.z + 400;
+  c.x = m.x; c.z = m.z;
+  eq(logMarker(sim, null, sim.player).ok, false, "the lead is far away and must not be able to log it");
+  const res = logMarker(sim, null, c);
+  assert(res.ok && res.real, "player two standing at the marker should log it");
+  assert(m.logged, "the marker should be marked logged");
+});
+
+check("a joined player picks up the item THEY walked to", () => {
+  const sim = createRun({ seed: 321 });
+  const c = sim.companions[0];
+  possess(sim, c.id);
+  const it = sim.items[0];
+  it.discovered = true;
+  sim.player.x = it.x + 400; sim.player.z = it.z + 400;
+  c.x = it.x; c.z = it.z;
+  eq(pickupItem(sim, sim.player).ok, false, "the lead is nowhere near the item");
+  const res = pickupItem(sim, c);
+  assert(res.ok, "player two standing on the item should pick it up");
+  assert(it.taken, "the world item should be consumed");
+  eq(sim.inventory.length, 1, "the pack is shared — the item lands in the one inventory");
+});
+
+check("a flare used by a joined player restores THEIR lucidity, not the lead's", () => {
+  const sim = createRun({ seed: 322 });
+  const c = sim.companions[0];
+  possess(sim, c.id);
+  sim.player.lucidity = 50;
+  c.lucidity = 20;
+  sim.inventory.push({ id: "s0", real: true, kind: "flare", claimedKind: null });
+  const res = useItem(sim, 0, null, c);
+  assert(res.ok && res.real, "the flare should have been used");
+  eq(sim.player.lucidity, 50, "the lead's meter must be untouched");
+  assert(c.lucidity > 20, "the user's own meter should have risen");
+});
+
+check("a phantom item used by a joined player costs THEM, and can tip THEM under", () => {
+  const sim = createRun({ seed: 323 });
+  const c = sim.companions[0];
+  possess(sim, c.id);
+  sim.player.lucidity = 90;
+  c.lucidity = PHANTOM_ITEM_COST - 1; // just enough that using it takes them to 0
+  sim.inventory.push({ id: "s0", real: false, claimedKind: "flare", kind: null });
+  useItem(sim, 0, null, c);
+  eq(sim.player.lucidity, 90, "the lead must not pay for someone else's phantom");
+  eq(c.lucidity, 0, "the user pays the phantom cost");
+  assert(c.hallucinating, "being taken to zero by a phantom should tip that mind under");
+  assert(!sim.player.hallucinating, "the lead must not be dragged under with them");
+});
+
+check("a lens used by a joined player clears THEIR screen only", () => {
+  const sim = createRun({ seed: 324 });
+  const c = sim.companions[0];
+  possess(sim, c.id);
+  sim.inventory.push({ id: "s0", real: true, kind: "lens", claimedKind: null });
+  useItem(sim, 0, null, c);
+  assert((c.lensUntil || 0) > sim.time, "the user should get the truth window");
+  assert(!(sim.player.lensUntil > sim.time), "the lead must not get a lens they didn't use");
+  // ...and percept.js must agree about who is clear.
+  assert(isClear(createPercept(c), sim), "the user's percept should read as clear");
+  assert(!isClear(createPercept(sim.player), sim), "the lead's percept must not");
+});
+
+check("a stake planted by a joined player lands at THEIR feet", () => {
+  const sim = createRun({ seed: 325 });
+  const c = sim.companions[0];
+  possess(sim, c.id);
+  sim.player.x = 0; sim.player.z = 0;
+  c.x = 77; c.z = 88;
+  sim.inventory.push({ id: "s0", real: true, kind: "stake", claimedKind: null });
+  const before = sim.pylons.length;
+  useItem(sim, 0, null, c);
+  eq(sim.pylons.length, before + 1, "a stake should add a pylon");
+  const planted = sim.pylons[sim.pylons.length - 1];
+  eq(planted.x, 77, "the pylon should be planted at the planter's position");
+  eq(planted.z, 88, "the pylon should be planted at the planter's position");
+});
+
+check("two humans can corroborate each other's surveys, but never their own", () => {
+  const sim = createRun({ seed: 326 });
+  const c = sim.companions[0];
+  possess(sim, c.id);
+  const m = sim.monoliths[0];
+  // Park every AI companion far away so the only possible witness is the lead.
+  for (const other of sim.companions) { other.x = m.x + 500; other.z = m.z + 500; }
+  c.x = m.x; c.z = m.z;
+  sim.player.x = m.x + 2; sim.player.z = m.z; // the lead is at player two's shoulder
+  const res = logMarker(sim, null, c);
+  assert(res.ok && res.real, "player two should log the marker");
+  assert(res.corroborated, "the lead standing alongside should corroborate it");
+  // Now the reverse: nobody but the surveyor in range at all.
+  const m2 = sim.monoliths[1];
+  sim.player.x = m2.x; sim.player.z = m2.z;
+  c.x = m2.x + 500; c.z = m2.z + 500;
+  const res2 = logMarker(sim, null, sim.player);
+  assert(res2.ok && res2.real, "the lead should log the second marker");
+  assert(!res2.corroborated, "a surveyor alone must not be their own witness");
+});
+
+check("each human holds their own chop — one release does not cancel the other", () => {
+  const sim = createRun({ seed: 327 });
+  const c = sim.companions[0];
+  possess(sim, c.id);
+  const t1 = sim.trees[0], t2 = sim.trees[1];
+  t1.discovered = true; t2.discovered = true;
+  sim.player.x = t1.x; sim.player.z = t1.z;
+  c.x = t2.x; c.z = t2.z;
+  // Both hold; then the LEAD lets go while player two keeps holding.
+  advance(sim, GATHER_HOLD_TIME - 0.3, { interact: true, others: [{ interact: true }] });
+  assert(sim.gatherHold.progress > 0, "the lead should have progress");
+  assert(c.gatherHold.progress > 0, "player two should have their own progress");
+  advance(sim, 0.4, { interact: false, others: [{ interact: true }] });
+  eq(sim.gatherHold.progress, 0, "the lead released, so the lead's hold resets");
+  assert(t2.chopped, "player two kept holding and should have finished their chop");
+  assert(!t1.chopped, "the lead released early and must NOT have chopped");
+});
+
+// ---------------------------------------------------------------------------
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length) {
   for (const f of failures) console.log("  ✗ " + f);

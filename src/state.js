@@ -667,19 +667,25 @@ export const discoveredCount = (sim) => sim.monoliths.filter((m) => m.discovered
  * counterfeit: a hallucinating lead with nobody lucid nearby to contradict them
  * writes down a monolith that does not exist.
  */
-export function logMarker(sim, phantom = null) {
+export function logMarker(sim, phantom = null, actor = sim.player) {
   if (sim.status !== "playing") return { ok: false, reason: "over" };
 
   const near = sim.monoliths
-    .filter((m) => !m.logged && dist2D(m, sim.player) <= LOG_RADIUS)
-    .sort((a, b) => dist2D(a, sim.player) - dist2D(b, sim.player))[0];
+    .filter((m) => !m.logged && dist2D(m, actor) <= LOG_RADIUS)
+    .sort((a, b) => dist2D(a, actor) - dist2D(b, actor))[0];
 
-  const lucidWitness = sim.companions.find(
-    (c) => !c.hallucinating && bandOf(c.lucidity) !== BAND.BRITTLE && dist2D(c, sim.player) <= CORROBORATE_RADIUS,
+  // Anyone in the party but the surveyor themselves can corroborate — you
+  // cannot be your own witness. Searching `party` rather than `companions` is
+  // what lets a second human vouch for the lead (and the lead for them); in
+  // single player the actor IS the lead, so party-minus-actor is exactly the
+  // companion list this used to search.
+  const lucidWitness = sim.party.find(
+    (c) => c !== actor && !c.hallucinating && bandOf(c.lucidity) !== BAND.BRITTLE
+      && dist2D(c, actor) <= CORROBORATE_RADIUS,
   );
 
-  // Hallucinating lead, standing at nothing, nobody to say so: a false entry.
-  if (!near && sim.player.hallucinating && phantom && !lucidWitness) {
+  // Hallucinating surveyor, standing at nothing, nobody to say so: a false entry.
+  if (!near && actor.hallucinating && phantom && !lucidWitness) {
     sim.logEntries.push({ name: phantom.name, real: false, t: sim.time, corroborated: false });
     sim.stats.falseLogs += 1;
     emit(sim, "logFalse", `Logged ${phantom.name}.`, { phantom: true });
@@ -687,8 +693,8 @@ export function logMarker(sim, phantom = null) {
   }
   if (!near) return { ok: false, reason: "nothing-here" };
 
-  // A lucid companion at your shoulder is what keeps the record honest.
-  if (sim.player.hallucinating && !lucidWitness && sim.rng() < 0.5) {
+  // A lucid mind at your shoulder is what keeps the record honest.
+  if (actor.hallucinating && !lucidWitness && sim.rng() < 0.5) {
     sim.logEntries.push({ name: near.name, real: false, t: sim.time, corroborated: false });
     sim.stats.falseLogs += 1;
     emit(sim, "logFalse", `Logged ${near.name}.`, { phantom: true });
@@ -721,30 +727,34 @@ export const trueLogCount = (sim) => sim.monoliths.filter((m) => m.logged).lengt
  *     is percept.js's business, not this function's — this only ever records
  *     the truth.
  */
-export function pickupItem(sim) {
+export function pickupItem(sim, actor = sim.player) {
   if (sim.status !== "playing") return { ok: false, reason: "over" };
   if (sim.inventory.length >= ITEM_CAP) return { ok: false, reason: "full" };
 
   const near = sim.items
-    .filter((it) => !it.taken && it.discovered && dist2D(it, sim.player) <= ITEM_PICKUP_RADIUS)
-    .sort((a, b) => dist2D(a, sim.player) - dist2D(b, sim.player))[0];
+    .filter((it) => !it.taken && it.discovered && dist2D(it, actor) <= ITEM_PICKUP_RADIUS)
+    .sort((a, b) => dist2D(a, actor) - dist2D(b, actor))[0];
   if (!near) return { ok: false, reason: "nothing-here" };
 
   // Deactivate the instant it's taken — no despawn animation gates a second
   // pickup attempt racing in behind this one.
   near.taken = true;
 
-  // A hallucinating lead has a real (not certain) chance that what their hand
-  // closed on was never there at all.
-  if (sim.player.hallucinating && sim.rng.chance(0.45)) {
+  // A hallucinating picker-up has a real (not certain) chance that what their
+  // hand closed on was never there at all.
+  if (actor.hallucinating && sim.rng.chance(0.45)) {
     const claimedKind = sim.rng.pick(ITEM_KINDS);
     sim.inventory.push({ id: `slot${sim.inventory.length}-${sim.time.toFixed(2)}`, real: false, claimedKind, kind: null });
-    emit(sim, "pickupFalse", `You pick up ${ITEM_INFO[claimedKind].label}. It's warm in your hand.`, { phantom: true });
+    emit(sim, "pickupFalse",
+      actor.isPlayer
+        ? `You pick up ${ITEM_INFO[claimedKind].label}. It's warm in your hand.`
+        : `${actor.name} picks up ${ITEM_INFO[claimedKind].label}.`,
+      { phantom: true, who: actor.id });
     return { ok: true, real: false };
   }
 
   sim.inventory.push({ id: `slot${sim.inventory.length}-${sim.time.toFixed(2)}`, real: true, kind: near.itemKind, claimedKind: null });
-  emit(sim, "pickup", `${ITEM_INFO[near.itemKind].label} secured.`, { itemKind: near.itemKind });
+  emit(sim, "pickup", `${ITEM_INFO[near.itemKind].label} secured.`, { itemKind: near.itemKind, who: actor.id });
   return { ok: true, real: true, kind: near.itemKind };
 }
 
@@ -904,22 +914,22 @@ export function release(sim, slot) {
   return true;
 }
 
-export function gatherTarget(sim) {
+export function gatherTarget(sim, actor = sim.player) {
   const nearTree = sim.trees
-    .filter((t) => !t.chopped && t.discovered && dist2D(t, sim.player) <= GATHER_RADIUS)
-    .sort((a, b) => dist2D(a, sim.player) - dist2D(b, sim.player))[0];
+    .filter((t) => !t.chopped && t.discovered && dist2D(t, actor) <= GATHER_RADIUS)
+    .sort((a, b) => dist2D(a, actor) - dist2D(b, actor))[0];
   const nearStone = sim.stones
-    .filter((s) => !s.mined && s.discovered && dist2D(s, sim.player) <= GATHER_RADIUS)
-    .sort((a, b) => dist2D(a, sim.player) - dist2D(b, sim.player))[0];
-  const pick = [nearTree, nearStone].filter(Boolean).sort((a, b) => dist2D(a, sim.player) - dist2D(b, sim.player))[0];
+    .filter((s) => !s.mined && s.discovered && dist2D(s, actor) <= GATHER_RADIUS)
+    .sort((a, b) => dist2D(a, actor) - dist2D(b, actor))[0];
+  const pick = [nearTree, nearStone].filter(Boolean).sort((a, b) => dist2D(a, actor) - dist2D(b, actor))[0];
   if (!pick) return null;
   return { ...pick, gatherKind: pick === nearTree ? "tree" : "stone" };
 }
 
-export function gatherResource(sim) {
+export function gatherResource(sim, actor = sim.player) {
   if (sim.status !== "playing") return { ok: false, reason: "over" };
 
-  const pick = gatherTarget(sim);
+  const pick = gatherTarget(sim, actor);
   if (!pick) return { ok: false, reason: "nothing-here" };
 
   if (pick.gatherKind === "tree") {
@@ -948,22 +958,22 @@ export function gatherResource(sim) {
  * out of reach, or switching to a different node all reset progress to zero
  * — a hold is a commitment to ONE node, not a meter you can bank partway.
  */
-function updateGatherHold(sim, dt, interacting) {
-  const target = interacting ? gatherTarget(sim) : null;
+function updateGatherHold(sim, dt, interacting, actor = sim.player, hold = sim.gatherHold) {
+  const target = interacting ? gatherTarget(sim, actor) : null;
   if (!target) {
-    sim.gatherHold.targetId = null;
-    sim.gatherHold.progress = 0;
+    hold.targetId = null;
+    hold.progress = 0;
     return;
   }
-  if (sim.gatherHold.targetId !== target.id) {
-    sim.gatherHold.targetId = target.id;
-    sim.gatherHold.progress = 0;
+  if (hold.targetId !== target.id) {
+    hold.targetId = target.id;
+    hold.progress = 0;
   }
-  sim.gatherHold.progress += dt;
-  if (sim.gatherHold.progress >= GATHER_HOLD_TIME) {
-    gatherResource(sim);
-    sim.gatherHold.targetId = null;
-    sim.gatherHold.progress = 0;
+  hold.progress += dt;
+  if (hold.progress >= GATHER_HOLD_TIME) {
+    gatherResource(sim, actor);
+    hold.targetId = null;
+    hold.progress = 0;
   }
 }
 
@@ -974,17 +984,26 @@ function updateGatherHold(sim, dt, interacting) {
  * to fall back on, so it always costs instead of helping: reaching for
  * something that was never there is worse than not reaching at all.
  */
-export function useItem(sim, slotIndex, targetCompanionId) {
+export function useItem(sim, slotIndex, targetCompanionId, actor = sim.player) {
   if (sim.status !== "playing") return { ok: false, reason: "over" };
   const slot = sim.inventory[slotIndex];
   if (!slot) return { ok: false, reason: "empty" };
   sim.inventory.splice(slotIndex, 1);
 
+  // "self" is whoever reached for the item, not always the lead: the pack is
+  // shared (one inventory, one dose supply), but the EFFECT lands on the mind
+  // that used it.
+  const self = actor;
+  // A tether-like item can't be spent on the user themselves — steadying your
+  // own hand is what a flare is for — so the fallback target skips them.
+  const otherThan = (id) => sim.companions.find((c) => c.id === id && c !== self)
+    || sim.companions.find((c) => c !== self);
+
   if (!slot.real) {
-    sim.player.lucidity = Math.max(0, sim.player.lucidity - PHANTOM_ITEM_COST);
+    self.lucidity = Math.max(0, self.lucidity - PHANTOM_ITEM_COST);
     sim.stats.phantomItemsUsed += 1;
-    emit(sim, "itemPhantom", "It wasn't there. It was never there.", {});
-    if (sim.player.lucidity <= 0) beginHallucinating(sim, sim.player);
+    emit(sim, "itemPhantom", "It wasn't there. It was never there.", { who: self.id });
+    if (self.lucidity <= 0) beginHallucinating(sim, self);
     return { ok: true, real: false, kind: null };
   }
 
@@ -992,38 +1011,39 @@ export function useItem(sim, slotIndex, targetCompanionId) {
   const info = ITEM_INFO[slot.kind];
   switch (slot.kind) {
     case "flare":
-      sim.player.lucidity = Math.min(MAX_LUCIDITY, sim.player.lucidity + info.restore);
-      emit(sim, "itemUsed", "The flare catches. Your head clears, sharply.", { itemKind: "flare" });
+      self.lucidity = Math.min(MAX_LUCIDITY, self.lucidity + info.restore);
+      emit(sim, "itemUsed", "The flare catches. Your head clears, sharply.", { itemKind: "flare", who: self.id });
       break;
     case "tether": {
-      const target = sim.companions.find((c) => c.id === targetCompanionId) || sim.companions[0];
+      const target = otherThan(targetCompanionId);
+      if (!target) break;
       target.steadyUntil = sim.time + info.steadySeconds;
       emit(sim, "itemUsed", `${target.name} steadies.`, { itemKind: "tether", who: target.id });
       break;
     }
     case "lens":
-      sim.player.lensUntil = sim.time + info.clearSeconds;
-      emit(sim, "itemUsed", "For a while, you can trust your own eyes again.", { itemKind: "lens" });
+      self.lensUntil = sim.time + info.clearSeconds;
+      emit(sim, "itemUsed", "For a while, you can trust your own eyes again.", { itemKind: "lens", who: self.id });
       break;
     // Crafted items do both parent effects at once — the payoff for spending
     // two carried slots and a craft action instead of using them separately.
     case "ember": {
-      sim.player.lucidity = Math.min(MAX_LUCIDITY, sim.player.lucidity + info.restore);
-      const target = sim.companions.find((c) => c.id === targetCompanionId) || sim.companions[0];
-      target.steadyUntil = sim.time + info.steadySeconds;
-      emit(sim, "itemUsed", `The ember flares. Your head clears, and ${target.name} steadies.`, { itemKind: "ember", who: target.id });
+      self.lucidity = Math.min(MAX_LUCIDITY, self.lucidity + info.restore);
+      const target = otherThan(targetCompanionId);
+      if (target) target.steadyUntil = sim.time + info.steadySeconds;
+      emit(sim, "itemUsed", `The ember flares. Your head clears${target ? `, and ${target.name} steadies` : ""}.`, { itemKind: "ember", who: target ? target.id : self.id });
       break;
     }
     case "beacon":
-      sim.player.lucidity = Math.min(MAX_LUCIDITY, sim.player.lucidity + info.restore);
-      sim.player.lensUntil = sim.time + info.clearSeconds;
-      emit(sim, "itemUsed", "The beacon burns bright. Your head clears, and so does the screen.", { itemKind: "beacon" });
+      self.lucidity = Math.min(MAX_LUCIDITY, self.lucidity + info.restore);
+      self.lensUntil = sim.time + info.clearSeconds;
+      emit(sim, "itemUsed", "The beacon burns bright. Your head clears, and so does the screen.", { itemKind: "beacon", who: self.id });
       break;
     case "ward": {
-      const target = sim.companions.find((c) => c.id === targetCompanionId) || sim.companions[0];
-      target.steadyUntil = sim.time + info.steadySeconds;
-      sim.player.lensUntil = sim.time + info.clearSeconds;
-      emit(sim, "itemUsed", `The ward holds. ${target.name} steadies, and you can trust your own eyes again.`, { itemKind: "ward", who: target.id });
+      const target = otherThan(targetCompanionId);
+      if (target) target.steadyUntil = sim.time + info.steadySeconds;
+      self.lensUntil = sim.time + info.clearSeconds;
+      emit(sim, "itemUsed", `The ward holds.${target ? ` ${target.name} steadies, and` : ""} you can trust your own eyes again.`, { itemKind: "ward", who: target ? target.id : self.id });
       break;
     }
     // Doesn't affect the player or a companion directly — it plants a pylon
@@ -1034,8 +1054,8 @@ export function useItem(sim, slotIndex, targetCompanionId) {
     case "stake":
       sim.pylons.push({
         id: `stake${sim.pylons.length}-${sim.time.toFixed(2)}`,
-        x: sim.player.x,
-        z: sim.player.z,
+        x: self.x,
+        z: self.z,
         charge: info.charge,
         live: true,
       });
@@ -1243,6 +1263,15 @@ export function tick(sim, dt, input = {}) {
   for (const c of sim.companions) companionRemark(sim, c, step);
 
   updateGatherHold(sim, step, !!input.interact);
+  for (let slot = 1; slot < sim.humans.length; slot++) {
+    const ch = sim.humans[slot];
+    const intent = (input.others || [])[slot - 1];
+    // Each human holds their own chop/mine independently — a shared progress
+    // counter would let one player's release cancel the other's swing. Slot 0
+    // keeps sim.gatherHold so nothing that already reads it has to change.
+    if (!ch.gatherHold) ch.gatherHold = { targetId: null, progress: 0 };
+    updateGatherHold(sim, step, !!(intent && intent.interact), ch, ch.gatherHold);
+  }
 
   checkEndings(sim);
   return sim;

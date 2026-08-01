@@ -27,8 +27,9 @@ const audio = createAudio();
 const input = createInput(canvas, { sensitivity: 1, onScheme: refreshSchemeUI });
 let run = null; // { sim, percept, renderer, hud }
 let paused = false;
-let selected = 0; // companion index — shared by check-in/dose AND tether's target
-let selectedItem = 0; // inventory slot index — cycled independently of `selected`
+// Slot 0's selection, mirrored out for the HUD, the touch buttons and the
+// debug hooks. The authoritative copy lives on each player (makeLocalPlayer).
+const lead = () => (run && run.players[0]) || { selected: 0, selectedItem: 0 };
 let whisperTimer = 0;
 let lastFrame = 0;
 let campaignSeed = 0; // the seed the player actually entered/rolled — each basin in the campaign derives its own seed from this so "New basin" always starts a fresh campaign
@@ -135,8 +136,6 @@ function startRun({ seed, difficulty } = {}) {
   const percept = createPercept(sim.player);
   const renderer = createRenderer(canvas, sim);
   const hud = createHud(sim, percept);
-  selected = 0;
-  selectedItem = 0;
   paused = false;
   whisperTimer = 0;
   run = { sim, percept, renderer, hud, players: [makeLocalPlayer(0, sim.player, percept)] };
@@ -212,16 +211,14 @@ function advanceLevel() {
   const players = sim.humans.map((ch, slot) =>
     slot === 0 ? makeLocalPlayer(0, ch, percept) : makeLocalPlayer(slot, ch, createPercept(ch)));
   run = { sim, percept, renderer, hud, players };
-  selected = 0;
-  selectedItem = 0;
   lastFrame = 0;
 }
 
-function nearestPhantom(sim, percept) {
+function nearestPhantom(sim, percept, actor = sim.player) {
   if (!percept.active) return null;
   let best = null, bestD = Infinity;
   for (const ph of percept.phantomMonoliths) {
-    const d = Math.hypot(ph.x - sim.player.x, ph.z - sim.player.z);
+    const d = Math.hypot(ph.x - actor.x, ph.z - actor.z);
     if (d < bestD) { bestD = d; best = ph; }
   }
   return bestD <= LOG_RADIUS ? best : null;
@@ -229,14 +226,27 @@ function nearestPhantom(sim, percept) {
 
 /** Is there a pickup within reach right now? Checked before falling back to a
  * marker survey — one contextual "interact" verb, not a separate pickup button. */
-function nearestPickupItem(sim) {
+function nearestPickupItem(sim, actor = sim.player) {
   return sim.items
-    .filter((it) => it.discovered && !it.taken && Math.hypot(it.x - sim.player.x, it.z - sim.player.z) <= ITEM_PICKUP_RADIUS)
-    .sort((a, b) => Math.hypot(a.x - sim.player.x, a.z - sim.player.z) - Math.hypot(b.x - sim.player.x, b.z - sim.player.z))[0] || null;
+    .filter((it) => it.discovered && !it.taken && Math.hypot(it.x - actor.x, it.z - actor.z) <= ITEM_PICKUP_RADIUS)
+    .sort((a, b) => Math.hypot(a.x - actor.x, a.z - actor.z) - Math.hypot(b.x - actor.x, b.z - actor.z))[0] || null;
 }
 
-function handleAction(action, arg) {
-  const { sim, percept, hud } = run;
+/**
+ * Run one verb. `player` is the local player pressing the button — slot 0 (the
+ * lead) by default. Every verb below takes the acting CHARACTER, so a joined
+ * player surveys the marker THEY are standing at and picks up the item THEY
+ * walked to, rather than firing the lead's action from across the basin.
+ *
+ * What stays shared is the pack, not the position: one inventory, one dose
+ * supply, one wood/stone pile. Two people reaching into the same bag is the
+ * intended co-op texture — the argument about who gets the last flare is the
+ * point — so only the reach itself is per-actor.
+ */
+function handleAction(action, arg, player = run.players[0]) {
+  const { sim, hud } = run;
+  const actor = player.eye;
+  const percept = player.percept;
   if (sim.status !== "playing") return;
   switch (action) {
     case ACTIONS.SURVEY: {
@@ -244,9 +254,9 @@ function handleAction(action, arg) {
       // sit much closer to the ground than a monolith you can stand inside the
       // radius of, so this only ever matters when the player deliberately
       // walked up to something small.
-      const item = nearestPickupItem(sim);
+      const item = nearestPickupItem(sim, actor);
       if (item) {
-        const pres = pickupItem(sim);
+        const pres = pickupItem(sim, actor);
         if (!pres.ok) {
           audio.play("deny");
           hud.say(pres.reason === "full" ? "Hands are full. Use or drop something first." : "Nothing to pick up here.", "warn");
@@ -258,8 +268,8 @@ function handleAction(action, arg) {
       // Gathering is next in the priority chain, but it's a HOLD now (see
       // tick()'s updateGatherHold), not a tap — a bare press here just needs
       // to not fall through to a confusing "nothing to survey" message.
-      if (gatherTarget(sim)) break;
-      const res = logMarker(sim, nearestPhantom(sim, percept));
+      if (gatherTarget(sim, actor)) break;
+      const res = logMarker(sim, nearestPhantom(sim, percept, actor), actor);
       if (!res.ok) {
         // A failed survey used to be silent-but-for-a-sound-cue — indistinguishable
         // from the button doing nothing at all if audio hadn't started or wasn't
@@ -277,28 +287,28 @@ function handleAction(action, arg) {
       // with it. Without updating `selected` here, a gamepad's X/Y buttons —
       // which carry no arg and rely on this shared value — would act on
       // whatever LB/RB last cycled to, never on a digit-picked companion.
-      if (typeof arg === "number") selected = arg;
-      const target = sim.companions[selected];
+      if (typeof arg === "number") player.selected = arg;
+      const target = sim.companions[player.selected];
       if (!target) return;
       hud.showReport(checkIn(sim, target.id));
       break;
     }
     case ACTIONS.DOSE: {
-      if (typeof arg === "number") selected = arg;
-      const target = sim.companions[selected];
+      if (typeof arg === "number") player.selected = arg;
+      const target = sim.companions[player.selected];
       if (!target) return;
       if (useDose(sim, target.id)) audio.play("dose");
       else audio.play("deny");
       break;
     }
     case ACTIONS.NEXT_TARGET:
-      selected = (selected + 1) % (PARTY_SIZE - 1);
+      player.selected = (player.selected + 1) % (PARTY_SIZE - 1);
       break;
     case ACTIONS.PREV_TARGET:
-      selected = (selected + PARTY_SIZE - 2) % (PARTY_SIZE - 1);
+      player.selected = (player.selected + PARTY_SIZE - 2) % (PARTY_SIZE - 1);
       break;
     case ACTIONS.CYCLE_ITEM:
-      if (sim.inventory.length) selectedItem = (selectedItem + 1) % sim.inventory.length;
+      if (sim.inventory.length) player.selectedItem = (player.selectedItem + 1) % sim.inventory.length;
       break;
     case ACTIONS.USE_ITEM: {
       if (!sim.inventory.length) {
@@ -306,12 +316,12 @@ function handleAction(action, arg) {
         hud.say("Nothing carried to use.", "warn");
         break;
       }
-      if (selectedItem >= sim.inventory.length) selectedItem = 0;
-      const target = sim.companions[selected];
-      const ures = useItem(sim, selectedItem, target?.id);
+      if (player.selectedItem >= sim.inventory.length) player.selectedItem = 0;
+      const target = sim.companions[player.selected];
+      const ures = useItem(sim, player.selectedItem, target?.id, actor);
       if (!ures.ok) { audio.play("deny"); break; }
       audio.play(ures.real ? "dose" : "logFalse");
-      if (selectedItem >= sim.inventory.length && selectedItem > 0) selectedItem -= 1;
+      if (player.selectedItem >= sim.inventory.length && player.selectedItem > 0) player.selectedItem -= 1;
       break;
     }
     case ACTIONS.CRAFT: {
@@ -325,7 +335,7 @@ function handleAction(action, arg) {
         break;
       }
       audio.play("log");
-      selectedItem = Math.max(0, sim.inventory.length - 1); // land selection on the new item
+      player.selectedItem = Math.max(0, sim.inventory.length - 1); // land selection on the new item
       break;
     }
     case ACTIONS.PAUSE:
@@ -355,7 +365,11 @@ function togglePause() {
 // the other lacks).
 
 function makeLocalPlayer(slot, eye, percept) {
-  return { slot, eye, percept, yaw: eye.yaw || 0, pitch: 0 };
+  // selected/selectedItem are PER PLAYER: the pack is shared, but "which
+  // companion am I aiming this tether at" and "which slot am I holding" are
+  // each player's own pointer into it. Sharing them would make one player's
+  // cycle silently move the other's selection mid-reach.
+  return { slot, eye, percept, yaw: eye.yaw || 0, pitch: 0, selected: 0, selectedItem: 0 };
 }
 
 /** Split the canvas into one viewport per player, in DEVICE pixels for Three. */
@@ -457,17 +471,9 @@ function step(dt, intent) {
       yaw: p.yaw,
       interact: raw.interact,
     });
-    // NOTE: raw.queue is deliberately DROPPED for now. Every verb
-    // (logMarker/pickupItem/useItem/craftItem) is written against sim.player,
-    // so forwarding a joined player's button press here would silently fire
-    // the LEAD's survey or pickup from the other side of the basin — two
-    // inputs driving one action, which is exactly the edge-sharing bug that
-    // bites local multiplayer (Brain: lockstep#E4 — gate by context or give it
-    // its own button). Until those functions take an actor, player two's role
-    // is to move, look, and be a second pair of eyes: their sightings already
-    // feed the party's shared discovery through updateMemory, and their own
-    // lucidity and hallucination are fully live and independent.
-    void raw.queue;
+    // Verbs now take the acting character, so a joined player's press acts on
+    // THEIR position and THEIR hallucination state — not the lead's.
+    for (const action of raw.queue) handleAction(action, undefined, p);
   }
 
   tick(sim, dt, { move, run: intent.run, yaw, interact: intent.interact, others });
@@ -505,7 +511,7 @@ function step(dt, intent) {
   }
   audio.update(distortion(percept, sim), prox);
 
-  hud.update({ yaw, pitch: intent.pitch ?? 0 }, selected, selectedItem, actionEvents);
+  hud.update({ yaw, pitch: intent.pitch ?? 0 }, run.players[0].selected, run.players[0].selectedItem, actionEvents);
 
   // One draw per player, each from that player's OWN percept — which is what
   // lets the two halves of the screen legitimately disagree about the basin.
@@ -607,8 +613,8 @@ function boot() {
   el("btnSurvey").addEventListener("pointerup", () => input.setTouchInteractHeld(false));
   el("btnSurvey").addEventListener("pointerleave", () => input.setTouchInteractHeld(false));
   el("btnSurvey").addEventListener("pointercancel", () => input.setTouchInteractHeld(false));
-  el("btnCheck").addEventListener("click", () => run && handleAction(ACTIONS.CHECK_IN, selected));
-  el("btnDose").addEventListener("click", () => run && handleAction(ACTIONS.DOSE, selected));
+  el("btnCheck").addEventListener("click", () => run && handleAction(ACTIONS.CHECK_IN, lead().selected));
+  el("btnDose").addEventListener("click", () => run && handleAction(ACTIONS.DOSE, lead().selected));
   el("btnNext").addEventListener("click", () => run && handleAction(ACTIONS.NEXT_TARGET));
   el("btnItem")?.addEventListener("click", () => run && handleAction(ACTIONS.CYCLE_ITEM));
   el("btnUse")?.addEventListener("click", () => run && handleAction(ACTIONS.USE_ITEM));
@@ -633,8 +639,8 @@ if (typeof window !== "undefined") {
     // Three's own draw-call counter instead.
     get renderer() { return run?.renderer ?? null; },
     get paused() { return paused; },
-    get selected() { return selected; },
-    get selectedItem() { return selectedItem; },
+    get selected() { return lead().selected; },
+    get selectedItem() { return lead().selectedItem; },
     act: (action, arg) => run && handleAction(action, arg),
     // Couch co-op, driven without physical controllers. The real join path is
     // a pad press (pollCoopJoin); this is the same possession + percept +
