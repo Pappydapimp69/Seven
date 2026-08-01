@@ -106,18 +106,19 @@ const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, L3: 10, START:
   assert(/select/i.test(menuHintText), `title menu hint didn't switch to a gamepad-appropriate line: ${JSON.stringify(menuHintText)}`);
   assert(/A/.test(menuHintText), `expected an [A] badge in the menu hint, got: ${JSON.stringify(menuHintText)}`);
 
-  // D-pad down should walk focus from the difficulty row down to Start.
+  // D-pad down should walk focus from the difficulty row down to the Party
+  // row (the couch co-op option), then Start, then How to play.
   const focusRowBefore = await page.evaluate(() => document.querySelector("#title .gpfocus")?.dataset.row);
   assert(focusRowBefore === "0", `expected initial gamepad focus on row 0 (difficulty), got ${focusRowBefore}`);
   await tap(BTN.DOWN);
   const focusRowAfterOne = await page.evaluate(() => document.querySelector("#title .gpfocus")?.dataset.row);
-  assert(focusRowAfterOne === "1", `dpad-down did not move focus to row 1 (Start), got ${focusRowAfterOne}`);
+  assert(focusRowAfterOne === "1", `dpad-down did not move focus to row 1 (Party), got ${focusRowAfterOne}`);
 
   // Left stick should do the SAME thing D-pad does (debounced into one pulse),
-  // moving focus on to "How to play".
+  // moving focus on to Start.
   await stick(0, 1);
   const focusRowAfterStick = await page.evaluate(() => document.querySelector("#title .gpfocus")?.dataset.row);
-  assert(focusRowAfterStick === "2", `left stick down did not advance focus to row 2 (How to play), got ${focusRowAfterStick}`);
+  assert(focusRowAfterStick === "2", `left stick down did not advance focus to row 2 (Start), got ${focusRowAfterStick}`);
 
   // Back up to the difficulty row and pick "Bleak" with dpad-right + A, purely
   // on the gamepad, then confirm it actually took (no mouse ever touched this).
@@ -129,7 +130,17 @@ const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, L3: 10, START:
   const pickedDiff = await page.evaluate(() => document.querySelector('[data-diff].sel')?.dataset.diff);
   assert(pickedDiff === "bleak", `gamepad-only difficulty pick failed, got ${pickedDiff}`);
 
-  // Now walk down to Start and confirm — this must actually launch a run.
+  // The Party row sits between difficulty and Start now — prove the co-op
+  // option is reachable on the pad, land it back on Solo, then walk to Start.
+  await tap(BTN.DOWN);
+  await tap(BTN.RIGHT);
+  await tap(BTN.A);
+  assert(await page.evaluate(() => window.__mirage.coopAllowed === true),
+    "gamepad-only couch co-op pick failed");
+  await tap(BTN.LEFT);
+  await tap(BTN.A);
+  assert(await page.evaluate(() => window.__mirage.coopAllowed === false),
+    "gamepad-only return to Solo failed");
   await tap(BTN.DOWN);
   await tap(BTN.A);
   await page.waitForFunction(() => !!window.__mirage.sim, null, { timeout: 10000 });

@@ -60,6 +60,15 @@ function assert(cond, msg) { if (!cond) failures.push(msg); }
 
   await page.goto(`http://localhost:${PORT}/index.html`, { waitUntil: "networkidle" });
   await page.waitForFunction(() => !!window.__mirage, null, { timeout: 15000 });
+  // Co-op is an explicit title-screen OPTION, default solo — assert the
+  // default, then opt in the way a couch player would.
+  assert(await page.evaluate(() => window.__mirage.coopAllowed === false),
+    "co-op must default OFF");
+  assert(await page.evaluate(() => document.querySelector('[data-coop-opt="solo"]').classList.contains("sel")),
+    "the title screen should show Solo selected by default");
+  await page.click('[data-coop-opt="couch"]');
+  assert(await page.evaluate(() => window.__mirage.coopAllowed === true),
+    "picking Couch co-op should arm the join poll");
   await page.click('[data-diff="standard"]');
   await page.fill("#seedInput", "4242");
   await page.click("#startBtn");

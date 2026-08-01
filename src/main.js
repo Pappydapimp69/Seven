@@ -13,7 +13,7 @@ import { createInput, ACTIONS } from "./input.js";
 import { createAudio } from "./audio.js";
 import { hashSeed } from "./rng.js";
 
-const BUILD = "mirage-0.3.0";
+const BUILD = "mirage-0.4.0";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -27,6 +27,7 @@ const audio = createAudio();
 const input = createInput(canvas, { sensitivity: 1, onScheme: refreshSchemeUI });
 let run = null; // { sim, percept, renderer, hud }
 let paused = false;
+let coopAllowed = false; // title-screen Party option; gates the mid-run join poll
 // Slot 0's selection, mirrored out for the HUD, the touch buttons and the
 // debug hooks. The authoritative copy lives on each player (makeLocalPlayer).
 const lead = () => (run && run.players[0]) || { selected: 0, selectedItem: 0 };
@@ -391,6 +392,7 @@ function viewportsFor(n) {
 
 /** Poll for someone on the couch pressing Start on an unclaimed pad. */
 function pollCoopJoin() {
+  if (!coopAllowed) return;
   const { sim } = run;
   const padIndex = input.pendingJoinPad();
   if (padIndex === null) return;
@@ -592,6 +594,15 @@ function boot() {
       for (const b of document.querySelectorAll("[data-diff]")) b.classList.toggle("sel", b === btn);
     });
   }
+  // Couch co-op is an OPTION, chosen on the title screen — never something a
+  // stray second controller can spring on a solo run. Solo is the default;
+  // the mid-run join poll runs only when "Couch co-op" was picked.
+  for (const btn of document.querySelectorAll("[data-coop-opt]")) {
+    btn.addEventListener("click", () => {
+      coopAllowed = btn.dataset.coopOpt === "couch";
+      for (const b of document.querySelectorAll("[data-coop-opt]")) b.classList.toggle("sel", b === btn);
+    });
+  }
   el("startBtn").addEventListener("click", () => {
     const raw = el("seedInput").value.trim();
     const seed = raw ? (/^\d+$/.test(raw) ? Number(raw) : hashSeed(raw)) : undefined;
@@ -673,6 +684,7 @@ if (typeof window !== "undefined") {
       return slot;
     },
     debugDrop(slot) { if (run) dropCoopPlayer(slot); },
+    get coopAllowed() { return coopAllowed; },
     /** Per-player views, so a test can compare what each human is SHOWN. */
     perceivedMonolithsFor(slot) {
       const p = run && run.players[slot];

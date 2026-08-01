@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0a0f16" />
   <title>MIRAGE — five minds and yours</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230a0f16'/%3E%3Cpath d='M4 22h24' stroke='%23596579' stroke-width='2'/%3E%3Crect x='9' y='8' width='4' height='14' fill='%2374e0ff'/%3E%3Crect x='19' y='11' width='4' height='11' fill='%23b06a72'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="css/style.css?v=mirage-0.3.0" />
+  <link rel="stylesheet" href="css/style.css?v=mirage-0.4.0" />
 </head>
 <body>
   <canvas id="gl"></canvas>
@@ -43,8 +43,16 @@
         </div>
       </div>
 
-      <button id="startBtn" class="big-btn" data-row="1" data-col="0">Walk in</button>
-      <button id="howBtn" class="text-btn" data-row="2" data-col="0">How to play</button>
+      <div class="field" style="margin-bottom:20px">
+        <label class="field-label">Party</label>
+        <div class="diff-row">
+          <button class="diff sel" data-coop-opt="solo" data-row="1" data-col="0">Solo</button>
+          <button class="diff" data-coop-opt="couch" data-row="1" data-col="1">Couch co-op</button>
+        </div>
+      </div>
+
+      <button id="startBtn" class="big-btn" data-row="2" data-col="0">Walk in</button>
+      <button id="howBtn" class="text-btn" data-row="3" data-col="0">How to play</button>
 
       <p id="menuHints" class="menu-hints"></p>
 
@@ -84,6 +92,10 @@
         into the next, harder basin — carrying doses, items, materials, and
         every scar with them. The campaign ends when you fail one, or clear
         the last.</p>
+        <p><b>Couch co-op.</b> Pick it on the title screen, then a second
+        controller presses Start mid-run to take over a companion — split
+        screen, and each of you hallucinates on your own. They can drop back
+        out with Select; the party AI simply resumes that mind.</p>
         <p class="howto-keys">WASD move · Shift run · mouse look · <b>E</b> survey/pick up, hold to gather ·
         <b>Z</b> cycle item · <b>X</b> use item · <b>C</b> craft ·
         <b>1–5</b> check in · <b>Shift+1–5</b> dose · <b>Q/R</b> select · <b>Esc</b> pause</p>
@@ -177,7 +189,7 @@
   <!-- DEBRIEF -->
   <div id="debriefLayer" class="screen hidden"></div>
 
-  <script type="module" src="src/main.js?v=mirage-0.3.0"></script>
+  <script type="module" src="src/main.js?v=mirage-0.4.0"></script>
   <noscript><p style="color:#ccd">MIRAGE needs JavaScript and WebGL.</p></noscript>
 </body>
 </html>
