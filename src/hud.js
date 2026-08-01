@@ -48,6 +48,9 @@ export function createHud(sim, percept) {
     stonePill: document.getElementById("stonePill"),
     promptFill: document.getElementById("actionPromptFill"),
     promptText: document.getElementById("actionPromptText"),
+    prompt2: document.getElementById("actionPrompt2"),
+    promptFill2: document.getElementById("actionPromptFill2"),
+    promptText2: document.getElementById("actionPromptText2"),
     craftHint: document.getElementById("craftHint"),
   };
 
@@ -172,23 +175,28 @@ export function createHud(sim, percept) {
   }
 
   /** A check-in the player asked for, passed through the lead's own filter. */
-  function showReport(report) {
-    const filtered = filterReport(percept, sim, report);
+  /** `viewer` is the percept of whoever ASKED — the listener is the second
+   * filter (see percept.filterReport), so player two's check-ins must pass
+   * through player two's own state, not the lead's. Defaults to the lead. */
+  function showReport(report, viewer = percept) {
+    const filtered = filterReport(viewer, sim, report);
     if (!filtered) return;
     say(`${filtered.name}: ${filtered.text}`, filtered.claim === "gone" ? "gone" : "");
   }
 
-  function nearestUnloggedName() {
+  function nearestUnloggedName(viewer = percept, actor = sim.player) {
     let best = null, bestD = Infinity;
     for (const m of sim.monoliths) {
       if (m.logged) continue;
-      const d = Math.hypot(m.x - sim.player.x, m.z - sim.player.z);
+      const d = Math.hypot(m.x - actor.x, m.z - actor.z);
       if (d < bestD) { bestD = d; best = m; }
     }
-    // Phantoms count for the prompt — the whole point is that the lead cannot
-    // tell the difference from where they are standing.
-    for (const ph of percept.active ? percept.phantomMonoliths : []) {
-      const d = Math.hypot(ph.x - sim.player.x, ph.z - sim.player.z);
+    // Phantoms count for the prompt — the whole point is that this mind cannot
+    // tell the difference from where they are standing. Each player's prompt
+    // reads THEIR OWN phantoms; one player's hallucination never leaks into
+    // the other half of the screen.
+    for (const ph of viewer.active ? viewer.phantomMonoliths : []) {
+      const d = Math.hypot(ph.x - actor.x, ph.z - actor.z);
       if (d < bestD) { bestD = d; best = ph; }
     }
     return bestD <= LOG_RADIUS ? best : null;
@@ -196,13 +204,43 @@ export function createHud(sim, percept) {
 
   /** Nearest pickup in reach, shown through PERCEPTION — the prompt names the
    * item the lead believes they see, never the true kind underneath it. */
-  function nearestPickupItem() {
+  function nearestPickupItem(viewer = percept, actor = sim.player) {
     let best = null, bestD = Infinity;
-    for (const it of perceivedWorldItems(percept, sim)) {
-      const d = Math.hypot(it.x - sim.player.x, it.z - sim.player.z);
+    for (const it of perceivedWorldItems(viewer, sim)) {
+      const d = Math.hypot(it.x - actor.x, it.z - actor.z);
       if (d < bestD) { bestD = d; best = it; }
     }
     return bestD <= ITEM_PICKUP_RADIUS ? best : null;
+  }
+
+  /**
+   * Paint one player's contextual action prompt. ONE resolver drives the whole
+   * surface (Brain: dog#E20 — a single "what can happen right now" answer keeps
+   * every prompt honest as verbs are added), and the same priority order
+   * handleAction uses: pickup, then gather, then survey.
+   */
+  function paintPrompt(els, viewer, actor, hold) {
+    if (!els.prompt) return;
+    const pickup = nearestPickupItem(viewer, actor);
+    const gatherable = gatherTarget(sim, actor);
+    const near = nearestUnloggedName(viewer, actor);
+    if (pickup && sim.status === "playing") {
+      els.text.textContent = `Pick up ${ITEM_INFO[pickup.shownKind].label}`;
+      els.prompt.classList.add("show");
+      els.fill.style.width = "0%";
+    } else if (gatherable && sim.status === "playing") {
+      els.text.textContent = gatherable.gatherKind === "tree" ? "Hold to chop the tree" : "Hold to mine the stone";
+      els.prompt.classList.add("show");
+      const pct = hold && hold.targetId === gatherable.id ? (hold.progress / GATHER_HOLD_TIME) * 100 : 0;
+      els.fill.style.width = `${Math.min(100, Math.max(0, pct))}%`;
+    } else if (near && sim.status === "playing") {
+      els.text.textContent = `Survey ${near.name}`;
+      els.prompt.classList.add("show");
+      els.fill.style.width = "0%";
+    } else {
+      els.prompt.classList.remove("show");
+      els.fill.style.width = "0%";
+    }
   }
 
   function renderInventory(selectedItem) {
@@ -213,7 +251,7 @@ export function createHud(sim, percept) {
       : `<div class="item-slot empty">—</div>`;
   }
 
-  function update(view, selected, selectedItem = 0, actionEvents = []) {
+  function update(view, selected, selectedItem = 0, actionEvents = [], coop = null) {
     pumpEvents(actionEvents);
 
     for (const c of sim.companions) {
@@ -251,31 +289,14 @@ export function createHud(sim, percept) {
 
     renderInventory(selectedItem);
 
-    // Same priority handleAction gives it in main.js — pickup, then gather,
-    // then survey — so the on-screen text never promises one verb while the
-    // button actually does another.
-    const pickup = nearestPickupItem();
-    const gatherable = gatherTarget(sim);
-    const near = nearestUnloggedName();
-    if (pickup && sim.status === "playing") {
-      el.promptText.textContent = `Pick up ${ITEM_INFO[pickup.shownKind].label}`;
-      el.prompt.classList.add("show");
-      el.promptFill.style.width = "0%";
-    } else if (gatherable && sim.status === "playing") {
-      const verb = gatherable.gatherKind === "tree" ? "Hold to chop the tree" : "Hold to mine the stone";
-      el.promptText.textContent = verb;
-      el.prompt.classList.add("show");
-      // Only reflects progress toward THIS target — a hold on a different
-      // node (or none) reads as 0%, same rule updateGatherHold itself uses.
-      const pct = sim.gatherHold.targetId === gatherable.id ? (sim.gatherHold.progress / GATHER_HOLD_TIME) * 100 : 0;
-      el.promptFill.style.width = `${Math.min(100, Math.max(0, pct))}%`;
-    } else if (near && sim.status === "playing") {
-      el.promptText.textContent = `Survey ${near.name}`;
-      el.prompt.classList.add("show");
-      el.promptFill.style.width = "0%";
-    } else {
-      el.prompt.classList.remove("show");
-      el.promptFill.style.width = "0%";
+    paintPrompt({ prompt: el.prompt, text: el.promptText, fill: el.promptFill },
+      percept, sim.player, sim.gatherHold);
+    // Player two's prompt lives in their half of the screen and reads THEIR
+    // percept, THEIR position and THEIR OWN hold — nothing about it touches
+    // the lead's. Hidden entirely outside co-op (CSS keys off body[data-coop]).
+    if (coop) {
+      paintPrompt({ prompt: el.prompt2, text: el.promptText2, fill: el.promptFill2 },
+        coop.percept, coop.eye, coop.eye.gatherHold);
     }
 
     // Craft accessibility: name what's craftable the moment it's possible,

@@ -290,7 +290,9 @@ function handleAction(action, arg, player = run.players[0]) {
       if (typeof arg === "number") player.selected = arg;
       const target = sim.companions[player.selected];
       if (!target) return;
-      hud.showReport(checkIn(sim, target.id));
+      // The report filters through the ASKER's percept — a hallucinating
+      // player two garbles their own answers, and never the lead's.
+      hud.showReport(checkIn(sim, target.id), player.percept);
       break;
     }
     case ACTIONS.DOSE: {
@@ -459,6 +461,14 @@ function step(dt, intent) {
   const others = [];
   for (let i = 1; i < run.players.length; i++) {
     const p = run.players[i];
+    // A debug intent (the test harness's advance() hook) bypasses the pad
+    // entirely — already world-space, no look/queue. Real play polls the pad.
+    const dbg = intent.others && intent.others[i - 1];
+    if (dbg) {
+      if (typeof dbg.yaw === "number") p.yaw = dbg.yaw;
+      others.push({ move: dbg.move || { x: 0, z: 0 }, run: !!dbg.run, yaw: p.yaw, interact: !!dbg.interact });
+      continue;
+    }
     const raw = input.pollSlot(p.slot);
     if (!raw) { others.push(null); continue; }
     if (raw.leave) { dropCoopPlayer(p.slot); i--; continue; }
@@ -511,7 +521,7 @@ function step(dt, intent) {
   }
   audio.update(distortion(percept, sim), prox);
 
-  hud.update({ yaw, pitch: intent.pitch ?? 0 }, run.players[0].selected, run.players[0].selectedItem, actionEvents);
+  hud.update({ yaw, pitch: intent.pitch ?? 0 }, run.players[0].selected, run.players[0].selectedItem, actionEvents, run.players[1] || null);
 
   // One draw per player, each from that player's OWN percept — which is what
   // lets the two halves of the screen legitimately disagree about the basin.
@@ -685,6 +695,7 @@ if (typeof window !== "undefined") {
           pitch: 0,
           queue: [],
           interact: !!intent.interact,
+          others: intent.others || null,
         });
         done += slice;
       }

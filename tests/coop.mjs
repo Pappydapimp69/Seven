@@ -183,6 +183,36 @@ function assert(cond, msg) { if (!cond) failures.push(msg); }
     timeout: 90000,
   });
 
+  // ---- player two gets their own prompt, with their own hold progress ------
+  const prompt2 = await page.evaluate(() => {
+    const M = window.__mirage;
+    const s = M.sim;
+    const p2 = M.players[1].eye;
+    // Park the LEAD away from everything; stand P2 at a discovered tree.
+    const t = s.trees.find((x) => !x.chopped);
+    t.discovered = true;
+    M.teleport(t.x + 200, t.z + 200);
+    p2.x = t.x; p2.z = t.z;
+    M.advance(0.3, { others: [{}] });
+    const before = {
+      p2Shown: document.getElementById("actionPrompt2").classList.contains("show"),
+      p2Text: document.getElementById("actionPromptText2").textContent,
+      leadShown: document.getElementById("actionPrompt").classList.contains("show"),
+    };
+    // Hold P2's interact partway — progress must appear on P2's fill only.
+    M.advance(0.7, { others: [{ interact: true }] });
+    const fill = parseFloat(document.getElementById("actionPromptFill2").style.width) || 0;
+    const leadFill = parseFloat(document.getElementById("actionPromptFill").style.width) || 0;
+    return { ...before, fill, leadFill, chopped: t.chopped };
+  });
+  assert(prompt2.p2Shown, "player two's prompt should show at their own tree");
+  assert(/chop/i.test(prompt2.p2Text), `player two's prompt should offer the chop, got ${JSON.stringify(prompt2.p2Text)}`);
+  assert(!prompt2.leadShown, "the lead's prompt must not show player two's context");
+  assert(prompt2.fill > 0, "player two's hold progress should fill THEIR bar");
+  assert(prompt2.leadFill === 0, "player two's hold must not fill the lead's bar");
+  assert(!prompt2.chopped, "0.7s of a 1.2s hold must not have completed the chop");
+  notes.push(`p2 prompt "${prompt2.p2Text}" at ${prompt2.fill.toFixed(0)}%`);
+
   // ---- dropping out hands the mind back to the AI --------------------------
   const dropped = await page.evaluate(() => {
     const M = window.__mirage;

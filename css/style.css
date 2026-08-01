@@ -561,3 +561,11 @@ body[data-coop="2"] .hud::after {
    half, so pull them into it rather than letting them straddle the seam. */
 body[data-coop="2"] .hud-top { left: 25%; }
 body[data-coop="2"] .hud-left { max-width: 44%; }
+
+/* Player two's action prompt. Hidden outside co-op; in co-op each prompt is
+   centred in its own half so neither straddles the seam. The [A] suffix
+   mirrors the lead pill's [E] — player two is always on a pad. */
+.action-prompt.p2 { display: none; }
+body[data-coop="2"] .action-prompt.p2 { display: block; left: 75%; }
+body[data-coop="2"] #actionPrompt { left: 25%; }
+.action-prompt.p2::after { content: "  [A]"; color: var(--cyan); font-size: 12px; }
