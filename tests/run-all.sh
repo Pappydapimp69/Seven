@@ -21,6 +21,9 @@ if [ -d /opt/pw-browsers ] && node -e 'require("/opt/node22/lib/node_modules/pla
   echo
   echo "== gamepad (real browser, fake pad) =="
   node tests/gamepad.mjs
+  echo
+  echo "== coop (real browser, split-screen) =="
+  node tests/coop.mjs
 else
   echo "== smoke + gamepad: SKIPPED — Playwright/Chromium not available here =="
   echo "   (the 3D layer was NOT exercised in this run)"

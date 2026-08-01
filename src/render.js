@@ -341,13 +341,41 @@ export function createRenderer(canvas, sim) {
   const tmpColor = new THREE.Color();
   let elapsed = 0;
 
-  function update(percept, dt, view) {
+  /**
+   * Draw the basin as ONE mind perceives it.
+   *
+   * `opts.eye` is the character whose head the camera sits in (defaults to the
+   * lead, so single-player callers are unchanged). `opts.viewport` is a
+   * {x,y,w,h} rect in device pixels for couch co-op split-screen; omitted, the
+   * whole canvas is used.
+   *
+   * Couch co-op calls this once PER PLAYER per frame, with that player's own
+   * percept — which is the whole reason the two halves of the screen can
+   * legitimately disagree about what is in the basin. Pass dt only on the
+   * first call of a frame: `elapsed` is shared scene-animation time, and
+   * advancing it once per viewport would run the world at 2x for two players.
+   */
+  function update(percept, dt, view, opts = {}) {
     elapsed += dt;
+    const eye = opts.eye || sim.player;
+    const vp = opts.viewport || null;
     const dis = distortion(percept, sim);
 
+    if (vp) {
+      renderer.setScissorTest(true);
+      renderer.setViewport(vp.x, vp.y, vp.w, vp.h);
+      renderer.setScissor(vp.x, vp.y, vp.w, vp.h);
+      camera.aspect = vp.w / vp.h || 1;
+    } else {
+      renderer.setScissorTest(false);
+      const w = canvas.width, h = canvas.height;
+      renderer.setViewport(0, 0, w, h);
+      camera.aspect = (canvas.clientWidth || w) / (canvas.clientHeight || h) || 1;
+    }
+
     // ---- camera ----
-    const px = sim.player.x;
-    const pz = sim.player.z;
+    const px = eye.x;
+    const pz = eye.z;
     rig.position.set(px, terrainHeight(px, pz) + EYE_HEIGHT, pz);
     rig.rotation.y = view.yaw;
     camera.rotation.x = view.pitch;
@@ -459,12 +487,26 @@ export function createRenderer(canvas, sim) {
    * false once the point is behind the camera, where the projected x/y are
    * meaningless (they'd otherwise mirror to the wrong side of the screen).
    */
-  function worldToScreen(x, y, z) {
+  function worldToScreen(x, y, z, vp = null) {
     const v = new THREE.Vector3(x, y, z).project(camera);
     const rect = canvas.getBoundingClientRect();
+    // In split-screen the camera was last set up for ONE viewport, so the NDC
+    // it produces maps into that viewport's slice of the canvas, not the whole
+    // thing. `vp` is in device pixels (what Three wants); the DOM overlay is in
+    // CSS pixels, hence the ratio. Its y-origin is bottom-left, the DOM's is
+    // top-left, so the flip below is not the same flip as the NDC one.
+    let left = rect.left, top = rect.top, width = rect.width, height = rect.height;
+    if (vp) {
+      const sx = rect.width / (canvas.width || rect.width);
+      const sy = rect.height / (canvas.height || rect.height);
+      left = rect.left + vp.x * sx;
+      top = rect.top + (canvas.height - vp.y - vp.h) * sy;
+      width = vp.w * sx;
+      height = vp.h * sy;
+    }
     return {
-      x: rect.left + (v.x * 0.5 + 0.5) * rect.width,
-      y: rect.top + (-v.y * 0.5 + 0.5) * rect.height,
+      x: left + (v.x * 0.5 + 0.5) * width,
+      y: top + (-v.y * 0.5 + 0.5) * height,
       visible: v.z < 1,
     };
   }

@@ -400,12 +400,24 @@ function assert(cond, msg) {
   // MutationObserver installed above is what makes "the pulse happened" a
   // recorded fact rather than something that had to be caught mid-flight.
   assert(gather.spawnedFlies > 0, "chopping/mining did not spawn a .gather-fly element");
-  await page.waitForFunction(() => document.querySelectorAll(".gather-fly").length === 0, null, { timeout: 5000 })
-    .catch(() => { throw new Error("gather-fly dot(s) were never cleaned up after landing"); });
+  // Generous timeouts, on purpose. These wait on WALL-CLOCK browser timers
+  // (collectFly's ~550ms flight, pillGain's ~420ms pulse) in an environment
+  // that renders this scene at 8-10fps under software GL and saturates the
+  // main thread doing it — a 550ms timer routinely lands seconds late here,
+  // and a 5s budget failed on exactly that. What is being asserted is that
+  // the animation CLEANS UP, not that it is fast; picking a tight bound would
+  // be re-making this file's own lesson about wall-clock assertions.
+  // Report the live count on failure — "never cleaned up" alone doesn't say
+  // whether nothing was removed or something keeps spawning more.
+  await page.waitForFunction(() => document.querySelectorAll(".gather-fly").length === 0, null, { timeout: 30000 })
+    .catch(async () => {
+      const n = await page.evaluate(() => document.querySelectorAll(".gather-fly").length);
+      throw new Error(`gather-fly dot(s) were never cleaned up after landing (${n} still present, ${gather.spawnedFlies} spawned)`);
+    });
   const pulsed = await page.evaluate(() => window.__gainSeen);
   assert(pulsed.wood, "wood pill never got its landing highlight (.gain)");
   assert(pulsed.stone, "stone pill never got its landing highlight (.gain)");
-  await page.waitForFunction(() => !document.querySelector(".pill.gain"), null, { timeout: 5000 })
+  await page.waitForFunction(() => !document.querySelector(".pill.gain"), null, { timeout: 30000 })
     .catch(() => { throw new Error("a pill's landing highlight (.gain) never cleared") });
 
   const stake = await page.evaluate(() => {

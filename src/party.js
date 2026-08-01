@@ -202,6 +202,14 @@ export function updateCompanions(sim, dt) {
     c.aliveTime += dt;
     updateMemory(sim, c);
 
+    // A companion a human has taken over still SENSES the basin — the memory
+    // update above is what lets them keep sighting markers and remembering
+    // pylons — but nothing here may steer them. Their movement comes from
+    // that player's input in tick(), and notably their hallucination is NOT
+    // short-circuited into a phantom errand: a hallucinating human still has
+    // the wheel, they are just being lied to about where they are going.
+    if (c.humanSlot !== null) continue;
+
     if (c.hallucinating) {
       // No formation, no orders, no lead. Just the errand they have invented.
       if (!c.goal || dist(c, c.goal) < 2.2) {

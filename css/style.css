@@ -509,3 +509,55 @@ body[data-scheme="touch"] .touch-buttons { display: flex; }
   .item-bar { bottom: 18px; }
   .craft-hint { bottom: 52px; }
 }
+
+/* ---------- couch co-op ---------- */
+/* Split-screen is side-by-side, so each half keeps FULL viewport height and
+   every HUD text row stays at its single-player pixel height (Brain:
+   COUCH-MULTIPLAYER/ui — a top/bottom split halves height and silently drops
+   proportionally-sized text under the readable floor). */
+.coop-badges { display: none; }
+body[data-coop="2"] .coop-badges {
+  display: flex;
+  position: absolute;
+  bottom: 14px;
+  left: 0;
+  width: 100%;
+  pointer-events: none;
+}
+body[data-coop="2"] .coop-badge {
+  width: 50%;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: center;
+  /* Fixed px, never a viewport fraction — see the note above. */
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.coop-num {
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--edge);
+  background: var(--panel);
+  color: var(--ink);
+}
+.coop-badge.p1 .coop-num { border-color: var(--cyan); }
+.coop-badge.p2 .coop-num { border-color: var(--warm); }
+/* The seam between the two viewports. */
+body[data-coop="2"] .hud::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgba(140, 168, 200, 0.25);
+  transform: translateX(-1px);
+}
+/* In split-screen the shared top pills and the roster belong to the LEAD's
+   half, so pull them into it rather than letting them straddle the seam. */
+body[data-coop="2"] .hud-top { left: 25%; }
+body[data-coop="2"] .hud-left { max-width: 44%; }

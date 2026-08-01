@@ -17,9 +17,19 @@ import { ITEM_KINDS } from "./world.js";
 const PHANTOM_NAMES = ["the Sixth Stone", "the Watching Slab", "the Other Cairn", "the Hollow Tooth"];
 const PHANTOM_COMPANIONS = ["ODEN", "MARIS", "THE SEVENTH"];
 
-export function createPercept() {
+/**
+ * `eye` is the character this perception belongs to — the mind whose senses
+ * these are. It defaults to null and is resolved to `sim.player` lazily by
+ * eyeOf() below, so every existing single-player caller keeps working
+ * unchanged. Couch co-op passes a real character: a second human is a
+ * possessed companion with their OWN lucidity meter, so they hallucinate
+ * independently, and the whole point of the mode is that two players are
+ * shown different worlds and have to talk about it.
+ */
+export function createPercept(eye = null) {
   return {
-    active: false, // is the LEAD hallucinating
+    eye,
+    active: false, // is this percept's OWN mind hallucinating
     kind: null,
     since: 0,
     intensity: 0, // 0..1, ramps in and out so the shift is felt, not flicked
@@ -38,6 +48,15 @@ export function createPercept() {
 }
 
 /**
+ * The mind a percept belongs to. Falls back to `sim.player` when no eye was
+ * given, which is what keeps every single-player call site (and the whole
+ * existing test suite) working without passing an eye through.
+ */
+function eyeOf(percept, sim) {
+  return percept.eye || sim.player;
+}
+
+/**
  * Should the world currently be shown straight, regardless of the underlying
  * hallucinating flag? A Lens buys a temporary truth window WITHOUT curing
  * anything — the meter and `hallucinating` stay exactly as they are, only the
@@ -46,7 +65,7 @@ export function createPercept() {
  * mechanical state, not the temporary reprieve.
  */
 export function isClear(percept, sim) {
-  return sim.time < (sim.player.lensUntil || 0);
+  return sim.time < (eyeOf(percept, sim).lensUntil || 0);
 }
 
 // Build the specific lie once, at onset, so it is stable while it lasts. A
@@ -54,6 +73,7 @@ export function isClear(percept, sim) {
 // holds still reads as a place.
 function seedHallucination(percept, sim) {
   const rng = sim.rng;
+  const self = eyeOf(percept, sim); // phantoms are placed around THIS mind, not always the lead
   percept.phantomMonoliths = [];
   percept.phantomCompanions = [];
   percept.phantomPylons = [];
@@ -71,8 +91,8 @@ function seedHallucination(percept, sim) {
         percept.phantomMonoliths.push({
           id: `ph-m${i}`,
           name: rng.pick(PHANTOM_NAMES),
-          x: sim.player.x + Math.cos(a) * r,
-          z: sim.player.z + Math.sin(a) * r,
+          x: self.x + Math.cos(a) * r,
+          z: self.z + Math.sin(a) * r,
           phantom: true,
         });
       }
@@ -84,8 +104,8 @@ function seedHallucination(percept, sim) {
         id: "ph-c0",
         name: rng.pick(PHANTOM_COMPANIONS),
         role: "—",
-        x: sim.player.x - 3,
-        z: sim.player.z - 3,
+        x: self.x - 3,
+        z: self.z - 3,
         phantom: true,
         slot: rng.float(0, Math.PI * 2),
       });
@@ -97,8 +117,8 @@ function seedHallucination(percept, sim) {
       const a = rng.float(0, Math.PI * 2);
       percept.phantomPylons.push({
         id: "ph-p0",
-        x: sim.player.x + Math.cos(a) * rng.float(12, 24),
-        z: sim.player.z + Math.sin(a) * rng.float(12, 24),
+        x: self.x + Math.cos(a) * rng.float(12, 24),
+        z: self.z + Math.sin(a) * rng.float(12, 24),
         phantom: true,
         charge: 100,
       });
@@ -118,7 +138,7 @@ function seedHallucination(percept, sim) {
 
 /** Advance the perceived world. Call once per tick, after state.tick. */
 export function updatePercept(percept, sim, dt) {
-  const p = sim.player;
+  const p = eyeOf(percept, sim);
   if (p.hallucinating && !percept.active) {
     percept.active = true;
     percept.kind = p.hallucination;
@@ -156,7 +176,7 @@ export function updatePercept(percept, sim, dt) {
  */
 export function distortion(percept, sim) {
   if (isClear(percept, sim)) return 0;
-  const l = sim.player.lucidity;
+  const l = eyeOf(percept, sim).lucidity;
   const pre = l <= 0 ? 0 : l < 14 ? 0.3 : l < 36 ? 0.15 : l < 62 ? 0.05 : 0;
   return Math.max(pre, percept.intensity);
 }
@@ -198,7 +218,7 @@ export function perceivedCompanions(percept, sim) {
 /** The heading the lead thinks they are facing. */
 export function perceivedYaw(percept, sim) {
   const lying = percept.active && !isClear(percept, sim);
-  return sim.player.yaw + (lying ? percept.compassOffset : 0);
+  return eyeOf(percept, sim).yaw + (lying ? percept.compassOffset : 0);
 }
 
 /**
@@ -290,7 +310,8 @@ export function rosterRead(percept, sim, companion) {
   // greppable value; the player-facing text is the note.
   if (percept.active) return { tag: "unknown", note: "you can't tell", uncertain: true };
   const band = bandOf(companion.lucidity);
-  const lagging = Math.hypot(companion.x - sim.player.x, companion.z - sim.player.z) > 9;
+  const self = eyeOf(percept, sim);
+  const lagging = Math.hypot(companion.x - self.x, companion.z - self.z) > 9;
   if (companion.hallucinating) return { tag: "gone", note: "not with us", uncertain: false };
   if (companion.goalKind === "pylon") return { tag: "breaking off", note: "heading for a pylon", uncertain: false };
   if (band === BAND.BRITTLE) return { tag: "bad", note: "shaking", uncertain: false };

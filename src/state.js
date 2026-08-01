@@ -198,6 +198,12 @@ function makeCharacter(tpl, spawn, index) {
     ...tpl,
     index,
     isPlayer: false,
+    // Which human is driving this mind, if any (couch co-op). null = the AI in
+    // party.js owns it. `isPlayer` stays false for a possessed companion: it
+    // means "is the LEAD", which is a different question and is what the
+    // narration/scoring already keys off.
+    humanSlot: null,
+    yaw: 0, // only read while possessed; the AI steers by goal, not facing
     x: spawn.x,
     z: spawn.z,
     // Hidden state. Nothing in the HUD may read `lucidity` directly — see percept.js.
@@ -249,6 +255,7 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
     role: "Lead",
     index: 0,
     isPlayer: true,
+    humanSlot: 0, // the lead is always human slot 0
     drain: 1.0,
     stoic: 0.5,
     chatty: 0,
@@ -307,9 +314,22 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
         ch.chatty = saved.chatty;
         ch.wander = saved.wander;
         ch.selfCare = saved.selfCare;
+        // Couch co-op: whoever a second player was driving, they keep driving
+        // into the next basin. Without this a joined player would be silently
+        // dropped back to the AI at every level transition — their controller
+        // would just stop working, which reads as a broken pad rather than a
+        // lost slot (Brain: COUCH-MULTIPLAYER/input — a silently dead second
+        // controller is the classic local-multiplayer failure).
+        ch.humanSlot = saved.humanSlot ?? null;
       }
     }
   }
+  // Rebuild the human roster from the restored slots, densely and in slot
+  // order, so `humans[i]` still means "slot i" on the far side of a basin.
+  const rejoined = companions
+    .filter((c) => c.humanSlot !== null)
+    .sort((a, b) => a.humanSlot - b.humanSlot);
+  for (const c of rejoined) c.yaw = player.yaw; // re-form facing the lead, same as possess()
 
   return {
     seed,
@@ -323,6 +343,14 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
     // times per tick (drain, contagion, sightings, endings) and rebuilding it each
     // time was pure allocation churn in the long-run simulations.
     party: [player, ...companions],
+    // Human-controlled minds, indexed by couch-co-op slot. Slot 0 is always the
+    // lead, so `humans[0] === player` and every existing single-player call
+    // site that reads sim.player keeps meaning exactly what it meant. A second
+    // player POSSESSES an existing companion rather than adding a seventh body
+    // to the basin: the party size, the endings, the dissolve rule and the
+    // scoring all stay exactly as balanced, and dropping out is a handoff back
+    // to the AI that is already driving that character.
+    humans: [player, ...rejoined],
     pylons: world.pylons.map((p) => ({ ...p, charge: PYLON_MAX_CHARGE, live: true })),
     // `discovered` is what makes this a game about EXPLORING rather than about
     // walking a known route: a marker's position is not knowledge the party
@@ -802,6 +830,80 @@ export function handoffToPlayer(sim, ch) {
  * hit" — used by gatherResource itself, by the hold-progress tracker below,
  * and by main.js/hud.js so the prompt and the actual action never disagree.
  */
+// ---------------------------------------------------------------- couch co-op
+//
+// A second player does not add a body to the basin — they take the wheel of a
+// companion who is already in it. That keeps every balance-bearing number the
+// same (party of six, the dissolve rule, the "two companions still walking"
+// win condition) and makes drop-out trivially correct: the AI that was driving
+// that mind a moment ago simply resumes.
+//
+// The interesting half is that a possessed companion has their OWN lucidity
+// meter, which was already ticking down independently — so each human gets
+// their own percept and the two of you are shown DIFFERENT worlds. One of you
+// can be walking toward a marker the other cannot see.
+
+/** Companions the AI still owns — i.e. who a joining player could take over. */
+export function possessableCompanions(sim) {
+  return sim.companions.filter((c) => c.humanSlot === null);
+}
+
+/**
+ * Hand `companion` to a human. Returns the assigned slot, or null if the
+ * companion is already taken. The joining player inherits the mind exactly as
+ * the AI left it — lucidity, scars, whether it is mid-hallucination, and
+ * anything it was carrying — because that continuity IS the character.
+ */
+export function possess(sim, companionId) {
+  const c = sim.companions.find((x) => x.id === companionId);
+  if (!c || c.humanSlot !== null) return null;
+  const slot = sim.humans.length;
+  c.humanSlot = slot;
+  sim.humans.push(c);
+  // Drop the AI's in-flight intentions AT THE MOMENT control changes, not
+  // later when something happens to notice (Brain: lockstep#E2 — clear a
+  // relationship at the point you act on it). A stale goal/path left here
+  // would be resumed verbatim by the AI on release, steering the character
+  // toward somewhere it decided to go minutes ago.
+  c.goal = null;
+  c.goalKind = "follow";
+  c.path = null;
+  c.fetchItemId = null;
+  // Face where the lead is facing, so a joining player doesn't start pointed
+  // at a rock wall (Brain: lockstep#E1 — spawn co-op players together).
+  c.yaw = sim.player.yaw;
+  emit(sim, "join", `${c.name} is yours.`, { who: c.id, slot });
+  return slot;
+}
+
+/**
+ * Hand a possessed companion back to the AI. Explicit by design: an engine
+ * default that quietly destroys or abandons a dropped player's character is a
+ * known failure mode (Brain: COUCH-MULTIPLAYER/session-state — the handoff to
+ * AI is never automatic, and doing it too late leaves the pawn unrecoverable).
+ * Here the character simply stays in the basin and starts following again.
+ *
+ * Slots are released from the end only (the last player to join is the first
+ * to leave), which keeps `humans` densely indexed — no null holes for the
+ * renderer, HUD or input router to special-case.
+ */
+export function release(sim, slot) {
+  if (slot <= 0 || slot >= sim.humans.length) return false; // slot 0 is the lead; never released
+  if (slot !== sim.humans.length - 1) return false;
+  const c = sim.humans[slot];
+  sim.humans.pop();
+  c.humanSlot = null;
+  // Same clearing discipline as possess(), for the same reason: the AI must
+  // start from "where am I now", not from an intention formed before a human
+  // ever touched this character.
+  c.goal = null;
+  c.goalKind = "follow";
+  c.path = null;
+  c.fetchItemId = null;
+  emit(sim, "leave", `${c.name} drifts back to the party.`, { who: c.id });
+  return true;
+}
+
 export function gatherTarget(sim) {
   const nearTree = sim.trees
     .filter((t) => !t.chopped && t.discovered && dist2D(t, sim.player) <= GATHER_RADIUS)
@@ -1080,6 +1182,24 @@ export function checkEndings(sim) {
  * updateGatherHold, the only per-tick system that cares whether the verb is
  * currently down rather than whether it was just pressed.
  */
+/** Apply one human's movement intent to the mind they are driving. */
+function moveHuman(sim, ch, intent, step) {
+  if (!ch || !intent) return;
+  if (intent.move && (intent.move.x || intent.move.z)) {
+    const speed = (intent.run ? 7.4 : 4.3) * step;
+    const len = Math.hypot(intent.move.x, intent.move.z) || 1;
+    const next = moveWithCollision(
+      sim.world,
+      ch,
+      (intent.move.x / len) * speed,
+      (intent.move.z / len) * speed,
+    );
+    ch.x = next.x;
+    ch.z = next.z;
+  }
+  if (typeof intent.yaw === "number") ch.yaw = intent.yaw;
+}
+
 export function tick(sim, dt, input = {}) {
   if (sim.status !== "playing") return sim;
   const step = Math.min(dt, 0.1); // clamp: a background tab must not teleport the run
@@ -1087,20 +1207,16 @@ export function tick(sim, dt, input = {}) {
   sim.time += step;
   sim.events.length = 0;
 
-  // Player movement. `input.move` is already yaw-rotated by the caller.
-  if (input.move && (input.move.x || input.move.z)) {
-    const speed = (input.run ? 7.4 : 4.3) * step;
-    const len = Math.hypot(input.move.x, input.move.z) || 1;
-    const next = moveWithCollision(
-      sim.world,
-      sim.player,
-      (input.move.x / len) * speed,
-      (input.move.z / len) * speed,
-    );
-    sim.player.x = next.x;
-    sim.player.z = next.z;
+  // Human movement. `input` is the LEAD's intent (move already yaw-rotated by
+  // the caller); `input.others[i]` is the same shape for couch-co-op slot i+1.
+  // Keeping slot 0 at the top level rather than requiring an array is what
+  // lets every existing caller — the balance harness, the logic tests, the
+  // smoke test's advance() hook — pass exactly what they always did.
+  moveHuman(sim, sim.humans[0], input, step);
+  for (let slot = 1; slot < sim.humans.length; slot++) {
+    const intent = (input.others || [])[slot - 1];
+    if (intent) moveHuman(sim, sim.humans[slot], intent, step);
   }
-  if (typeof input.yaw === "number") sim.player.yaw = input.yaw;
 
   // Pylons recharge only while nobody is drawing on them.
   for (const p of sim.pylons) {

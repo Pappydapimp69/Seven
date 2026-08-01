@@ -3,9 +3,10 @@
 
 import {
   createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem, craftItem, gatherTarget,
+  possess, release, possessableCompanions,
   PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH,
 } from "./state.js";
-import { createPercept, updatePercept, distortion } from "./percept.js";
+import { createPercept, updatePercept, distortion, perceivedMonoliths } from "./percept.js";
 import { createRenderer } from "./render.js";
 import { createHud, renderDebrief, paintHint } from "./hud.js";
 import { createInput, ACTIONS } from "./input.js";
@@ -131,14 +132,14 @@ function startRun({ seed, difficulty } = {}) {
   const seedValue = seed ?? Math.floor(Math.random() * 0xffffff) + 1;
   campaignSeed = seedValue;
   const sim = createRun({ seed: seedValue, difficulty: difficulty || "standard", level: 1, campaignLength: CAMPAIGN_LENGTH });
-  const percept = createPercept();
+  const percept = createPercept(sim.player);
   const renderer = createRenderer(canvas, sim);
   const hud = createHud(sim, percept);
   selected = 0;
   selectedItem = 0;
   paused = false;
   whisperTimer = 0;
-  run = { sim, percept, renderer, hud };
+  run = { sim, percept, renderer, hud, players: [makeLocalPlayer(0, sim.player, percept)] };
   hud.setHints(input.activeScheme);
   hud.say("Six of you. One basin. Keep them together.", "warn");
   el("seedLabel").textContent = `seed ${seedValue}`;
@@ -184,6 +185,9 @@ function advanceLevel() {
       chatty: c.chatty,
       wander: c.wander,
       selfCare: c.selfCare,
+      // Couch co-op: carry who a second player is driving across the basin
+      // boundary, or their pad goes dead at the transition.
+      humanSlot: c.humanSlot,
     })),
     doses: old.doses,
     inventory: old.inventory,
@@ -196,13 +200,18 @@ function advanceLevel() {
   // given campaign seed always produces the same sequence of basins.
   const seed = campaignSeed + nextLevel * 104729;
   const sim = createRun({ seed, difficulty: old.difficulty, level: nextLevel, campaignLength: old.campaignLength, carryOver });
-  const percept = createPercept();
+  const percept = createPercept(sim.player);
   run.renderer.dispose();
   const renderer = createRenderer(canvas, sim);
   const hud = createHud(sim, percept);
   hud.setHints(input.activeScheme);
   hud.say(`Basin ${nextLevel} of ${sim.campaignLength}. The party pushes on.`, "warn");
-  run = { sim, percept, renderer, hud };
+  // createRun rebuilt every character object, so each joined player's percept
+  // has to be re-bound to the NEW object for the mind they are driving —
+  // sim.humans is already restored in slot order by carryOver.
+  const players = sim.humans.map((ch, slot) =>
+    slot === 0 ? makeLocalPlayer(0, ch, percept) : makeLocalPlayer(slot, ch, createPercept(ch)));
+  run = { sim, percept, renderer, hud, players };
   selected = 0;
   selectedItem = 0;
   lastFrame = 0;
@@ -334,6 +343,67 @@ function togglePause() {
   if (!paused && input.activeScheme !== "gamepad") input.requestLock();
 }
 
+// ---- couch co-op -----------------------------------------------------------
+//
+// A joined player drives an existing companion (see state.js possess), gets
+// their OWN percept, and gets their own half of the screen. Two humans in the
+// same basin are therefore shown two different worlds — the second player can
+// be walking confidently toward a marker the first cannot see. That asymmetry
+// is the mode: the information each of you holds is unreliable in a DIFFERENT
+// way, so you have to keep talking (Brain: COUCH-MULTIPLAYER/role-balance —
+// an asymmetric split only stays load-bearing while each side holds something
+// the other lacks).
+
+function makeLocalPlayer(slot, eye, percept) {
+  return { slot, eye, percept, yaw: eye.yaw || 0, pitch: 0 };
+}
+
+/** Split the canvas into one viewport per player, in DEVICE pixels for Three. */
+function viewportsFor(n) {
+  const W = canvas.width, H = canvas.height;
+  if (n <= 1) return [null]; // null = "use the whole canvas"
+  // Side-by-side, never stacked: a top/bottom split halves viewport HEIGHT,
+  // which is what breaks proportionally-sized HUD text (Brain:
+  // COUCH-MULTIPLAYER/ui — fixed-pixel text floor). Halving width instead
+  // keeps every text row at its full single-player height.
+  const w = Math.floor(W / 2);
+  return [
+    { x: 0, y: 0, w, h: H },
+    { x: w, y: 0, w: W - w, h: H },
+  ];
+}
+
+/** Poll for someone on the couch pressing Start on an unclaimed pad. */
+function pollCoopJoin() {
+  const { sim } = run;
+  const padIndex = input.pendingJoinPad();
+  if (padIndex === null) return;
+  const free = possessableCompanions(sim);
+  if (!free.length) return;
+  const target = free[0];
+  const slot = possess(sim, target.id);
+  if (slot === null) return;
+  input.claimPad(padIndex, slot);
+  run.players.push(makeLocalPlayer(slot, target, createPercept(target)));
+  run.hud.say(`${target.name} is player ${slot + 1} now.`, "good");
+  const nameEl = el(`coopName${slot + 1}`);
+  if (nameEl) nameEl.textContent = target.name;
+  document.body.dataset.coop = String(run.players.length);
+  run.renderer.resize();
+}
+
+/** Drop the last joined player, handing their mind back to the party AI. */
+function dropCoopPlayer(slot) {
+  const { sim } = run;
+  if (!release(sim, slot)) return;
+  input.releaseSlot(slot);
+  run.players = run.players.filter((p) => p.slot !== slot);
+  const nameEl = el(`coopName${slot + 1}`);
+  if (nameEl) nameEl.textContent = "—";
+  document.body.dataset.coop = String(run.players.length);
+  run.renderer.resize();
+}
+
 /** One simulation + presentation step. Separated from rAF so tests can drive it. */
 function step(dt, intent) {
   const { sim, percept, renderer, hud } = run;
@@ -368,9 +438,41 @@ function step(dt, intent) {
   // existed for a few statements and was gone before anything read it.
   const actionEvents = sim.events.slice();
 
-  tick(sim, dt, { move, run: intent.run, yaw, interact: intent.interact });
+  // Couch co-op: read each joined player's own pad and rotate their movement
+  // by THEIR facing, not the lead's. A slot whose pad has vanished (unplugged,
+  // flat battery) contributes no intent this frame — its character simply
+  // stands still rather than inheriting someone else's stick.
+  const others = [];
+  for (let i = 1; i < run.players.length; i++) {
+    const p = run.players[i];
+    const raw = input.pollSlot(p.slot);
+    if (!raw) { others.push(null); continue; }
+    if (raw.leave) { dropCoopPlayer(p.slot); i--; continue; }
+    p.yaw -= raw.look.dx * 0.0022;
+    p.pitch = Math.max(-1.2, Math.min(1.2, p.pitch - raw.look.dy * 0.0022));
+    const s2 = Math.sin(p.yaw), c2 = Math.cos(p.yaw);
+    others.push({
+      move: { x: raw.move.x * c2 + raw.move.z * s2, z: -raw.move.x * s2 + raw.move.z * c2 },
+      run: raw.run,
+      yaw: p.yaw,
+      interact: raw.interact,
+    });
+    // NOTE: raw.queue is deliberately DROPPED for now. Every verb
+    // (logMarker/pickupItem/useItem/craftItem) is written against sim.player,
+    // so forwarding a joined player's button press here would silently fire
+    // the LEAD's survey or pickup from the other side of the basin — two
+    // inputs driving one action, which is exactly the edge-sharing bug that
+    // bites local multiplayer (Brain: lockstep#E4 — gate by context or give it
+    // its own button). Until those functions take an actor, player two's role
+    // is to move, look, and be a second pair of eyes: their sightings already
+    // feed the party's shared discovery through updateMemory, and their own
+    // lucidity and hallucination are fully live and independent.
+    void raw.queue;
+  }
+
+  tick(sim, dt, { move, run: intent.run, yaw, interact: intent.interact, others });
   const events = actionEvents.concat(sim.events);
-  updatePercept(percept, sim, dt);
+  for (const p of run.players) updatePercept(p.percept, sim, dt);
 
   for (const ev of events) {
     if (ev.kind === "hallucinate") audio.play("hallucinate");
@@ -404,7 +506,18 @@ function step(dt, intent) {
   audio.update(distortion(percept, sim), prox);
 
   hud.update({ yaw, pitch: intent.pitch ?? 0 }, selected, selectedItem, actionEvents);
-  renderer.update(percept, dt, { yaw, pitch: intent.pitch ?? 0 });
+
+  // One draw per player, each from that player's OWN percept — which is what
+  // lets the two halves of the screen legitimately disagree about the basin.
+  // dt goes to the first draw only: `elapsed` is shared scene-animation time,
+  // and advancing it once per viewport would run the world at 2x in co-op.
+  const vps = viewportsFor(run.players.length);
+  run.players[0].yaw = yaw;
+  run.players[0].pitch = intent.pitch ?? 0;
+  for (let i = 0; i < run.players.length; i++) {
+    const p = run.players[i];
+    renderer.update(p.percept, i === 0 ? dt : 0, { yaw: p.yaw, pitch: p.pitch }, { eye: p.eye, viewport: vps[i] });
+  }
 
   // sim.events is documented as "transient, drained by the HUD each frame"
   // (createRun's own comment), but nothing actually drained it until now:
@@ -449,6 +562,7 @@ function frame(now) {
   // are pushed via the onScheme callback (refreshSchemeUI), not polled here.
   const intent = input.poll(dt);
   if (!run || paused || run.sim.status !== "playing" || !intent) return;
+  pollCoopJoin();
   step(dt, intent);
 }
 
@@ -522,6 +636,36 @@ if (typeof window !== "undefined") {
     get selected() { return selected; },
     get selectedItem() { return selectedItem; },
     act: (action, arg) => run && handleAction(action, arg),
+    // Couch co-op, driven without physical controllers. The real join path is
+    // a pad press (pollCoopJoin); this is the same possession + percept +
+    // viewport wiring with the device step skipped, so a test can exercise
+    // split-screen and independent hallucination in a headless browser.
+    get players() { return run ? run.players : []; },
+    debugJoin(companionId) {
+      if (!run) return null;
+      const target = companionId
+        ? run.sim.companions.find((c) => c.id === companionId)
+        : possessableCompanions(run.sim)[0];
+      if (!target) return null;
+      const slot = possess(run.sim, target.id);
+      if (slot === null) return null;
+      run.players.push(makeLocalPlayer(slot, target, createPercept(target)));
+      const nameEl = el(`coopName${slot + 1}`);
+      if (nameEl) nameEl.textContent = target.name;
+      document.body.dataset.coop = String(run.players.length);
+      run.renderer.resize();
+      return slot;
+    },
+    debugDrop(slot) { if (run) dropCoopPlayer(slot); },
+    /** Per-player views, so a test can compare what each human is SHOWN. */
+    perceivedMonolithsFor(slot) {
+      const p = run && run.players[slot];
+      return p ? perceivedMonoliths(p.percept, run.sim) : [];
+    },
+    distortionFor(slot) {
+      const p = run && run.players[slot];
+      return p ? distortion(p.percept, run.sim) : 0;
+    },
     /** Advance the sim by `seconds` in fixed slices, optionally holding movement. */
     advance(seconds, intent = {}) {
       if (!run) return null;

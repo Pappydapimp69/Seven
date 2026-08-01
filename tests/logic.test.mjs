@@ -11,6 +11,7 @@ import {
   beginHallucinating, debrief, trueLogCount, checkEndings, partyCentroid,
   pickupItem, useItem, craftItem, previewCraft, gatherResource, gatherTarget, emit,
   rollTraits, pickHallucinationKind, companionPickup, handoffToPlayer,
+  possess, release, possessableCompanions,
   PARTY_SIZE, MAX_LUCIDITY, DOSE_COUNT, RECOVER_AT, RECOVER_TIME, DISSOLVE_TIME,
   TIME_LIMIT, PYLON_RADIUS, LOG_RADIUS, ISOLATION_DIST,
   ITEM_CAP, ITEM_PICKUP_RADIUS, ITEM_INFO, PHANTOM_ITEM_COST, CRAFT_RECIPES, CAMPAIGN_LENGTH,
@@ -1700,6 +1701,178 @@ function farFromPylons(sim) {
   }
   return best;
 }
+
+// ---------------------------------------------------------------------------
+// couch co-op — a second player POSSESSES a companion; nobody is added
+// ---------------------------------------------------------------------------
+check("a fresh run has exactly one human, and it is the lead", () => {
+  const sim = createRun({ seed: 300 });
+  eq(sim.humans.length, 1, "a solo run should have one human");
+  assert(sim.humans[0] === sim.player, "humans[0] must BE the lead, not a copy");
+  eq(sim.player.humanSlot, 0, "the lead is always slot 0");
+  for (const c of sim.companions) eq(c.humanSlot, null, `${c.id} should start AI-driven`);
+});
+
+check("possessing a companion takes a seat without adding a body to the basin", () => {
+  const sim = createRun({ seed: 301 });
+  const partyBefore = sim.party.length;
+  const target = sim.companions[2];
+  const slot = possess(sim, target.id);
+  eq(slot, 1, "the second human should get slot 1");
+  eq(target.humanSlot, 1, "the companion should record its slot");
+  assert(sim.humans[1] === target, "humans[1] must be the possessed companion itself");
+  eq(sim.party.length, partyBefore, "possession must not change the party size");
+  eq(sim.companions.length, 5, "a possessed companion is still a companion");
+  assert(!target.isPlayer, "possession must not make a companion the LEAD");
+});
+
+check("a companion cannot be possessed twice", () => {
+  const sim = createRun({ seed: 302 });
+  const target = sim.companions[0];
+  eq(possess(sim, target.id), 1, "first possession should succeed");
+  eq(possess(sim, target.id), null, "second possession of the same mind must be refused");
+  eq(sim.humans.length, 2, "a refused possession must not grow the roster");
+  eq(possess(sim, "no-such-companion"), null, "an unknown id must be refused");
+});
+
+check("possessableCompanions only offers minds the AI still owns", () => {
+  const sim = createRun({ seed: 303 });
+  eq(possessableCompanions(sim).length, 5, "all five start available");
+  possess(sim, sim.companions[1].id);
+  const left = possessableCompanions(sim);
+  eq(left.length, 4, "a taken companion must drop out of the offer list");
+  assert(!left.includes(sim.companions[1]), "the taken companion must not be offered");
+});
+
+check("possession clears the AI's in-flight goal, and release clears it again", () => {
+  const sim = createRun({ seed: 304 });
+  const c = sim.companions[0];
+  c.goal = { x: 999, z: 999 };
+  c.goalKind = "pylon";
+  c.path = [{ x: 1, z: 1 }];
+  c.fetchItemId = "item-7";
+  possess(sim, c.id);
+  eq(c.goal, null, "a stale AI goal must not survive possession");
+  eq(c.goalKind, "follow", "goalKind must reset on possession");
+  eq(c.path, null, "a stale path must not survive possession");
+  eq(c.fetchItemId, null, "a stale fetch errand must not survive possession");
+  // ...and the same on the way out, so the AI restarts from where it is now.
+  c.goal = { x: 5, z: 5 };
+  c.path = [{ x: 2, z: 2 }];
+  release(sim, 1);
+  eq(c.goal, null, "a goal formed under human control must not be handed to the AI");
+  eq(c.path, null, "a path formed under human control must not be handed to the AI");
+});
+
+check("releasing hands the mind back to the AI, intact", () => {
+  const sim = createRun({ seed: 305 });
+  const c = sim.companions[3];
+  c.lucidity = 41;
+  c.scars = 2;
+  possess(sim, c.id);
+  assert(release(sim, 1), "release should succeed");
+  eq(c.humanSlot, null, "the companion must be AI-driven again");
+  eq(sim.humans.length, 1, "the roster should be back to the lead alone");
+  eq(c.lucidity, 41, "release must not reset the mind's state");
+  eq(c.scars, 2, "release must not reset scars");
+  assert(sim.companions.includes(c), "the character must STAY in the basin, not vanish");
+});
+
+check("the lead's slot can never be released", () => {
+  const sim = createRun({ seed: 306 });
+  eq(release(sim, 0), false, "slot 0 must be unreleasable");
+  assert(sim.humans[0] === sim.player, "the lead must still be human slot 0");
+  eq(release(sim, 5), false, "an out-of-range slot must be refused");
+});
+
+check("a possessed companion is steered by its own input, not by the party AI", () => {
+  const sim = createRun({ seed: 307 });
+  const c = sim.companions[0];
+  possess(sim, c.id);
+  // Park it far from everything so the AI, if it ran, would want to move.
+  const start = { x: c.x, z: c.z };
+  advance(sim, 0.5, { others: [{ move: { x: 1, z: 0 }, run: false, yaw: 0.3 }] });
+  assert(Math.abs(c.x - start.x) > 0.1, "slot-1 input should have moved the possessed companion");
+  eq(c.yaw, 0.3, "slot-1 input should set the possessed companion's facing");
+  // With NO input for slot 1 the AI must still not take the wheel back.
+  const held = { x: c.x, z: c.z };
+  advance(sim, 0.6, {});
+  eq(c.x, held.x, "a possessed companion must not drift under AI control");
+  eq(c.z, held.z, "a possessed companion must not drift under AI control");
+});
+
+check("releasing lets the party AI drive that companion again", () => {
+  const sim = createRun({ seed: 308 });
+  const c = sim.companions[0];
+  possess(sim, c.id);
+  advance(sim, 0.5, {});
+  release(sim, 1);
+  const start = { x: c.x, z: c.z };
+  // Put the lead well away so the follow AI has somewhere to go.
+  sim.player.x = c.x + 40;
+  advance(sim, 1.5, {});
+  assert(Math.hypot(c.x - start.x, c.z - start.z) > 0.1, "the AI should be driving the released companion again");
+});
+
+check("each human gets their own percept, so they can be shown different worlds", () => {
+  const sim = createRun({ seed: 309 });
+  const c = sim.companions[0];
+  possess(sim, c.id);
+  const pLead = createPercept(sim.player);
+  const pTwo = createPercept(c);
+  // Only the SECOND player's mind goes. The lead's must stay honest.
+  beginHallucinating(sim, c);
+  updatePercept(pLead, sim, 0.1);
+  updatePercept(pTwo, sim, 0.1);
+  assert(!pLead.active, "the lead must not hallucinate because someone else did");
+  assert(pTwo.active, "the possessed companion's own percept must go active");
+  eq(distortion(pLead, sim), 0, "a lucid lead's screen must stay undistorted");
+  assert(distortion(pTwo, sim) > 0, "the gone player's own screen must distort");
+});
+
+check("a phantom marker is placed around the mind that conjured it, not always the lead", () => {
+  const sim = createRun({ seed: 310 });
+  const c = sim.companions[0];
+  possess(sim, c.id);
+  // Move the two humans far apart, then send ONLY the second one under.
+  sim.player.x = 0; sim.player.z = 0;
+  c.x = 120; c.z = 120;
+  c.hallucination = HALLUCINATION.PHANTOM_MARKER;
+  c.hallucinating = true;
+  const pTwo = createPercept(c);
+  updatePercept(pTwo, sim, 0.1);
+  assert(pTwo.phantomMonoliths.length > 0, "a phantom-marker episode should seed phantoms");
+  for (const ph of pTwo.phantomMonoliths) {
+    const dSelf = Math.hypot(ph.x - c.x, ph.z - c.z);
+    const dLead = Math.hypot(ph.x - sim.player.x, ph.z - sim.player.z);
+    assert(dSelf < dLead, "a phantom must be conjured near ITS OWN mind, not near the lead");
+  }
+  // And the lead, being lucid, must not be shown it at all.
+  const pLead = createPercept(sim.player);
+  updatePercept(pLead, sim, 0.1);
+  eq(perceivedMonoliths(pLead, sim).filter((m) => m.phantom).length, 0,
+     "a lucid lead must not see another player's phantom");
+});
+
+check("possession survives a basin transition — a joined pad must not go dead", () => {
+  const first = createRun({ seed: 311, level: 1, campaignLength: 3 });
+  const c = first.companions[2];
+  possess(first, c.id);
+  const carryOver = {
+    party: first.party.map((ch) => ({
+      id: ch.id, lucidity: ch.lucidity, scars: ch.scars,
+      hallucinating: ch.hallucinating, hallucination: ch.hallucination, goneTime: ch.goneTime,
+      drain: ch.drain, stoic: ch.stoic, chatty: ch.chatty, wander: ch.wander,
+      selfCare: ch.selfCare, humanSlot: ch.humanSlot,
+    })),
+    doses: first.doses, inventory: first.inventory, wood: first.wood, stone: first.stone, stats: first.stats,
+  };
+  const second = createRun({ seed: 312, level: 2, campaignLength: 3, carryOver });
+  eq(second.humans.length, 2, "the second player must still be in the roster");
+  const same = second.companions.find((x) => x.id === c.id);
+  eq(same.humanSlot, 1, "the same companion must still be in slot 1");
+  assert(second.humans[1] === same, "humans[1] must point at the restored companion");
+});
 
 // ---------------------------------------------------------------------------
 console.log(`\n${passed} passed, ${failures.length} failed`);

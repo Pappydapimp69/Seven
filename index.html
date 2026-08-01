@@ -116,6 +116,16 @@
     <div id="itemBar" class="item-bar"></div>
     <div id="craftHint" class="craft-hint"></div>
     <div id="subtitles" class="subtitles"></div>
+    <!-- Couch co-op: one identity badge per half of the screen. Shown only
+         while body[data-coop="2"]. Each carries a NUMBER and a NAME, not just
+         a colour — player identity encoded in colour alone is unreadable for
+         a large share of players (Brain: COUCH-MULTIPLAYER/accessibility —
+         no single palette is safe across all three CVD types, so identity
+         must never rest on hue). -->
+    <div id="coopBadges" class="coop-badges">
+      <div class="coop-badge p1"><span class="coop-num">P1</span><span id="coopName1">YOU</span></div>
+      <div class="coop-badge p2"><span class="coop-num">P2</span><span id="coopName2">—</span></div>
+    </div>
     <!-- The fill is a separate element under the text so a hold-to-gather
          progress bar can grow behind the label without re-laying-out text. -->
     <div id="actionPrompt" class="action-prompt">
