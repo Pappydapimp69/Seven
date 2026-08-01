@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0a0f16" />
   <title>MIRAGE — five minds and yours</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230a0f16'/%3E%3Cpath d='M4 22h24' stroke='%23596579' stroke-width='2'/%3E%3Crect x='9' y='8' width='4' height='14' fill='%2374e0ff'/%3E%3Crect x='19' y='11' width='4' height='11' fill='%23b06a72'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="css/style.css?v=mirage-0.4.0" />
+  <link rel="stylesheet" href="css/style.css?v=mirage-0.5.0" />
 </head>
 <body>
   <canvas id="gl"></canvas>
@@ -75,11 +75,16 @@
         gone, and something you pick up while hallucinating might not be
         there at all. Either way it can be carried and used — you only find
         out which kind of surprise it was the moment you use it.</p>
+        <p><b>Carrying and dropping.</b> Three slots. <b>V</b> (or D-pad Down)
+        puts the selected one down at your feet — a real item stays there to be
+        picked up again, and a phantom simply stops being. Dropping is how you
+        make room without spending anything.</p>
         <p><b>Crafting.</b> Carrying two combinable items and pressing craft
         fuses them into something stronger — an Ember, a Beacon, or a Ward,
         each doing both of its parts' work at once. A small indicator names
         what's craftable the moment it's possible, so you never have to guess
-        and press blind. Crafting reads what you're ACTUALLY carrying, not
+        and press blind. Carrying three combinable items, the CYCLED slot picks
+        which pair fuses — the hint always names what you'll actually get. Crafting reads what you're ACTUALLY carrying, not
         what the item bar told you, so a hallucinating lead can still reach
         for a pair that doesn't combine — or doesn't exist.</p>
         <p><b>Trees and stone</b> turn up too — walk up and HOLD survey/pick up
@@ -97,7 +102,7 @@
         screen, and each of you hallucinates on your own. They can drop back
         out with Select; the party AI simply resumes that mind.</p>
         <p class="howto-keys">WASD move · Shift run · mouse look · <b>E</b> survey/pick up, hold to gather ·
-        <b>Z</b> cycle item · <b>X</b> use item · <b>C</b> craft ·
+        <b>Z</b> cycle item · <b>X</b> use item · <b>V</b> drop · <b>C</b> craft ·
         <b>1–5</b> check in · <b>Shift+1–5</b> dose · <b>Q/R</b> select · <b>Esc</b> pause</p>
       </div>
 
@@ -189,7 +194,7 @@
   <!-- DEBRIEF -->
   <div id="debriefLayer" class="screen hidden"></div>
 
-  <script type="module" src="src/main.js?v=mirage-0.4.0"></script>
+  <script type="module" src="src/main.js?v=mirage-0.5.0"></script>
   <noscript><p style="color:#ccd">MIRAGE needs JavaScript and WebGL.</p></noscript>
 </body>
 </html>

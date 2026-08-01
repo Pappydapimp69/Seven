@@ -261,13 +261,28 @@ export function generateWorld(seed = 1) {
     cz: c.cz,
     ...cellToWorld(c.cx, c.cz),
   }));
-  // Kinds cycle rather than randomise so every seed guarantees at least one of
-  // each — a world where the dice never deal a Lens is a worse world, not a
-  // harder one.
+  // Item kinds: a guaranteed one of each, then a random remainder, then a
+  // shuffle. Cycling `i % 3` guaranteed coverage but made every basin on every
+  // seed the identical 2/2/2 mix — only the positions ever changed, so the
+  // craft space was decided before you walked in. Seeding the remainder keeps
+  // coverage (a world where the dice never deal a Lens is a worse world, not a
+  // harder one) while letting a basin actually lean.
+  //
+  // The draw count here is CONSTANT — (ITEM_COUNT - kinds) remainder draws plus
+  // (ITEM_COUNT - 1) shuffle swaps, on every seed, with no branch that skips a
+  // roll. A pool whose roll count varies with its own contents desyncs every
+  // later consumer of the same stream (Brain: waiting-city#E9/E17 —
+  // constant-roll-count discipline; the desync shows up somewhere unrelated).
+  const bag = ITEM_KINDS.slice(0, Math.min(ITEM_KINDS.length, ITEM_COUNT));
+  for (let i = bag.length; i < ITEM_COUNT; i++) bag.push(rng.pick(ITEM_KINDS));
+  for (let i = bag.length - 1; i > 0; i--) {
+    const j = rng.int(0, i);
+    [bag[i], bag[j]] = [bag[j], bag[i]];
+  }
   const items = picks.slice(MONOLITH_COUNT + PYLON_COUNT, MONOLITH_COUNT + PYLON_COUNT + ITEM_COUNT).map((c, i) => ({
     id: `i${i}`,
     kind: FEATURE.ITEM,
-    itemKind: ITEM_KINDS[i % ITEM_KINDS.length],
+    itemKind: bag[i],
     cx: c.cx,
     cz: c.cz,
     ...cellToWorld(c.cx, c.cz),

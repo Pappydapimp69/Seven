@@ -9,7 +9,7 @@
 import {
   createRun, tick, tickLucidity, bandOf, BAND, checkIn, useDose, logMarker, recover,
   beginHallucinating, debrief, trueLogCount, checkEndings, partyCentroid,
-  pickupItem, useItem, craftItem, previewCraft, gatherResource, gatherTarget, emit,
+  pickupItem, useItem, dropItem, craftItem, previewCraft, gatherResource, gatherTarget, emit,
   rollTraits, pickHallucinationKind, companionPickup, handoffToPlayer,
   possess, release, possessableCompanions,
   PARTY_SIZE, MAX_LUCIDITY, DOSE_COUNT, RECOVER_AT, RECOVER_TIME, DISSOLVE_TIME,
@@ -136,14 +136,42 @@ check("markers stand on open ground", () => {
   }
 });
 
-check("items place at the documented count, cycling every kind, all reachable", () => {
+check("items place at the documented count, every kind present, all reachable", () => {
+  // The contract is COVERAGE, not a fixed order. Kinds used to cycle `i % 3`,
+  // which guaranteed coverage but made every basin on every seed the same
+  // 2/2/2 mix — only positions varied. The invariant that actually matters is
+  // that no seed can deal a basin missing a kind (a Lens you can never find is
+  // a worse world, not a harder one).
   for (const seed of [1, 2, 3, 17, 42]) {
     const w = generateWorld(seed);
     eq(w.items.length, ITEM_COUNT, `seed ${seed}: wrong item count`);
-    for (let i = 0; i < w.items.length; i++) eq(w.items[i].itemKind, ITEM_KINDS[i % ITEM_KINDS.length], `seed ${seed}: item ${i} kind`);
     const kinds = new Set(w.items.map((it) => it.itemKind));
-    assert(kinds.size === ITEM_KINDS.length, `seed ${seed}: not every kind appeared`);
+    eq(kinds.size, ITEM_KINDS.length, `seed ${seed}: not every kind appeared`);
+    for (const it of w.items)
+      assert(ITEM_KINDS.includes(it.itemKind), `seed ${seed}: unknown kind ${it.itemKind}`);
     assert(validate(w).ok, `seed ${seed}: an item was left unreachable`);
+  }
+});
+
+check("item kinds actually vary across seeds, and the draw count never varies", () => {
+  const mixes = new Set();
+  for (let seed = 1; seed <= 120; seed++) {
+    const w = generateWorld(seed);
+    const c = { flare: 0, tether: 0, lens: 0 };
+    for (const it of w.items) c[it.itemKind] += 1;
+    for (const k of ITEM_KINDS) assert(c[k] >= 1, `seed ${seed}: no ${k} in the basin`);
+    mixes.add(`${c.flare}/${c.tether}/${c.lens}`);
+  }
+  assert(mixes.size > 1, `item mix never changes across 120 seeds (got only ${[...mixes]})`);
+  // Constant roll count: the same seed must always produce the same world, and
+  // everything drawn AFTER the items (trees, stones) must be unmoved by the
+  // item draw — a pool whose roll count varies with its own contents desyncs
+  // every later consumer of the stream (Brain: waiting-city#E9/E17).
+  for (const seed of [5, 33, 91]) {
+    const a = generateWorld(seed), b = generateWorld(seed);
+    eq(JSON.stringify(a.items), JSON.stringify(b.items), `seed ${seed}: item draw not deterministic`);
+    eq(JSON.stringify(a.trees), JSON.stringify(b.trees), `seed ${seed}: trees moved between identical seeds`);
+    eq(JSON.stringify(a.stones), JSON.stringify(b.stones), `seed ${seed}: stones moved between identical seeds`);
   }
 });
 
@@ -1998,6 +2026,149 @@ check("each human holds their own chop — one release does not cancel the other
   eq(sim.gatherHold.progress, 0, "the lead released, so the lead's hold resets");
   assert(t2.chopped, "player two kept holding and should have finished their chop");
   assert(!t1.chopped, "the lead released early and must NOT have chopped");
+});
+
+// ---------------------------------------------------------------------------
+// dropping — the escape hatch the full-hands messages already promised
+// ---------------------------------------------------------------------------
+check("dropping a real item puts it back in the basin, pickable again", () => {
+  const sim = createRun({ seed: 400 });
+  sim.inventory.push({ id: "s0", real: true, kind: "flare", claimedKind: null });
+  sim.player.x = 12; sim.player.z = -7;
+  const worldBefore = sim.items.length;
+  const res = dropItem(sim, 0);
+  assert(res.ok && res.real, "dropping a real item should succeed");
+  eq(sim.inventory.length, 0, "the slot should be gone from the pack");
+  eq(sim.items.length, worldBefore + 1, "a dropped real item must exist in the world");
+  const put = sim.items[sim.items.length - 1];
+  eq(put.itemKind, "flare", "the dropped item keeps its TRUE kind");
+  eq(put.x, 12, "it lands at the dropper's feet");
+  assert(put.discovered && !put.taken, "a dropped item is already discovered and takeable");
+  // ...and it can be picked straight back up.
+  eq(pickupItem(sim).ok, true, "a dropped item should be pickable again");
+  eq(sim.inventory.length, 1, "picking it back up refills the slot");
+});
+
+check("dropping a phantom costs nothing and leaves nothing behind", () => {
+  const sim = createRun({ seed: 401 });
+  sim.inventory.push({ id: "s0", real: false, claimedKind: "lens", kind: null });
+  const worldBefore = sim.items.length;
+  const lucidBefore = sim.player.lucidity;
+  const res = dropItem(sim, 0);
+  assert(res.ok && !res.real, "dropping a phantom should succeed as a phantom");
+  eq(sim.inventory.length, 0, "the phantom slot should clear");
+  eq(sim.items.length, worldBefore, "a phantom must NOT become a real world item");
+  eq(sim.player.lucidity, lucidBefore, "dropping a phantom must cost nothing");
+});
+
+check("a hand full of phantoms can be cleared for free, not for a quarter of the meter", () => {
+  const sim = createRun({ seed: 402 });
+  for (let i = 0; i < ITEM_CAP; i++)
+    sim.inventory.push({ id: `p${i}`, real: false, claimedKind: "flare", kind: null });
+  const before = sim.player.lucidity;
+  while (sim.inventory.length) dropItem(sim, 0);
+  eq(sim.player.lucidity, before, "clearing phantoms by dropping must be free");
+  // Using them instead is what used to be the only way out.
+  const sim2 = createRun({ seed: 402 });
+  for (let i = 0; i < ITEM_CAP; i++)
+    sim2.inventory.push({ id: `p${i}`, real: false, claimedKind: "flare", kind: null });
+  while (sim2.inventory.length) useItem(sim2, 0, null);
+  assert(sim2.player.lucidity < before, "using phantoms should still cost — dropping is the free path");
+});
+
+check("dropping refuses an empty pack and an out-of-range slot", () => {
+  const sim = createRun({ seed: 403 });
+  eq(dropItem(sim, 0).reason, "empty", "dropping from an empty pack must refuse");
+  sim.inventory.push({ id: "s0", real: true, kind: "flare", claimedKind: null });
+  eq(dropItem(sim, 5).reason, "empty", "an out-of-range slot must refuse");
+  eq(sim.inventory.length, 1, "a refused drop must not consume the slot");
+});
+
+// ---------------------------------------------------------------------------
+// crafting — the selected slot decides which pair fuses
+// ---------------------------------------------------------------------------
+check("carrying all three kinds, the SELECTED slot picks the recipe", () => {
+  const build = () => {
+    const sim = createRun({ seed: 404 });
+    for (const k of ["flare", "tether", "lens"])
+      sim.inventory.push({ id: `s${sim.inventory.length}`, real: true, kind: k, claimedKind: null });
+    return sim;
+  };
+  // slot 0 = flare -> pairs with tether = ember
+  eq(previewCraft(build(), 0).kind, "ember", "selecting the flare should offer an ember");
+  eq(craftItem(build(), 0).kind, "ember", "selecting the flare should craft an ember");
+  // slot 2 = lens -> pairs with flare = beacon
+  eq(previewCraft(build(), 2).kind, "beacon", "selecting the lens should offer a beacon");
+  eq(craftItem(build(), 2).kind, "beacon", "selecting the lens should craft a beacon");
+  // Same three items, a different intent, a different result — the point.
+  assert(craftItem(build(), 0).kind !== craftItem(build(), 2).kind,
+    "the selected slot must be able to change the outcome");
+});
+
+check("the craft hint always names what the craft button will actually make", () => {
+  const sim = createRun({ seed: 405 });
+  for (const k of ["flare", "tether", "lens"])
+    sim.inventory.push({ id: `s${sim.inventory.length}`, real: true, kind: k, claimedKind: null });
+  for (const sel of [0, 1, 2]) {
+    const promised = previewCraft(sim, sel).kind;
+    const copy = createRun({ seed: 405 });
+    for (const k of ["flare", "tether", "lens"])
+      copy.inventory.push({ id: `s${copy.inventory.length}`, real: true, kind: k, claimedKind: null });
+    eq(craftItem(copy, sel).kind, promised, `slot ${sel}: hint promised ${promised} but craft made something else`);
+  }
+});
+
+check("selecting a slot with no valid partner still falls back to any craftable pair", () => {
+  const sim = createRun({ seed: 406 });
+  // A stake pairs with nothing; flare+tether behind it still combine.
+  sim.inventory.push({ id: "s0", real: true, kind: "stake", claimedKind: null });
+  sim.inventory.push({ id: "s1", real: true, kind: "flare", claimedKind: null });
+  sim.inventory.push({ id: "s2", real: true, kind: "tether", claimedKind: null });
+  eq(craftItem(sim, 0).kind, "ember", "an unpairable selection must not block a valid craft");
+});
+
+// ---------------------------------------------------------------------------
+// slot ids — never reused, so a stale hallucinated label can't be inherited
+// ---------------------------------------------------------------------------
+check("slot ids are never reused, even across use-then-repickup in one tick", () => {
+  const sim = createRun({ seed: 407 });
+  const seen = new Set();
+  for (let n = 0; n < 4; n++) {
+    const it = sim.items[n];
+    it.discovered = true;
+    sim.player.x = it.x; sim.player.z = it.z;
+    pickupItem(sim);
+    const id = sim.inventory[sim.inventory.length - 1].id;
+    assert(!seen.has(id), `slot id ${id} was reused — a stale percept label could ride along`);
+    seen.add(id);
+    useItem(sim, sim.inventory.length - 1, null); // same tick, same resulting length
+  }
+  eq(seen.size, 4, "four pickups should have issued four distinct ids");
+});
+
+check("slot ids keep climbing across a basin transition", () => {
+  const first = createRun({ seed: 408, level: 1, campaignLength: 3 });
+  const it = first.items[0];
+  it.discovered = true;
+  first.player.x = it.x; first.player.z = it.z;
+  pickupItem(first);
+  const firstId = first.inventory[0].id;
+  const carryOver = {
+    party: first.party.map((ch) => ({
+      id: ch.id, lucidity: ch.lucidity, scars: ch.scars, hallucinating: ch.hallucinating,
+      hallucination: ch.hallucination, goneTime: ch.goneTime, drain: ch.drain, stoic: ch.stoic,
+      chatty: ch.chatty, wander: ch.wander, selfCare: ch.selfCare, humanSlot: ch.humanSlot,
+    })),
+    doses: first.doses, inventory: first.inventory, wood: first.wood, stone: first.stone,
+    stats: first.stats, slotSeq: first.slotSeq,
+  };
+  const second = createRun({ seed: 409, level: 2, campaignLength: 3, carryOver });
+  const it2 = second.items[0];
+  it2.discovered = true;
+  second.player.x = it2.x; second.player.z = it2.z;
+  pickupItem(second);
+  const nextId = second.inventory[second.inventory.length - 1].id;
+  assert(nextId !== firstId, `basin 2 reissued ${nextId}, colliding with a carried slot`);
 });
 
 // ---------------------------------------------------------------------------

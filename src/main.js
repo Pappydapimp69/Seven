@@ -2,7 +2,7 @@
 // input into the sim, the sim into perception, and perception into the screen.
 
 import {
-  createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem, craftItem, gatherTarget,
+  createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem, dropItem, craftItem, gatherTarget,
   possess, release, possessableCompanions,
   PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH,
 } from "./state.js";
@@ -13,7 +13,7 @@ import { createInput, ACTIONS } from "./input.js";
 import { createAudio } from "./audio.js";
 import { hashSeed } from "./rng.js";
 
-const BUILD = "mirage-0.4.0";
+const BUILD = "mirage-0.5.0";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -191,6 +191,7 @@ function advanceLevel() {
     })),
     doses: old.doses,
     inventory: old.inventory,
+    slotSeq: old.slotSeq,
     wood: old.wood,
     stone: old.stone,
     stats: old.stats,
@@ -327,11 +328,24 @@ function handleAction(action, arg, player = run.players[0]) {
       if (player.selectedItem >= sim.inventory.length && player.selectedItem > 0) player.selectedItem -= 1;
       break;
     }
+    case ACTIONS.DROP_ITEM: {
+      if (!sim.inventory.length) {
+        audio.play("deny");
+        hud.say("Nothing carried to put down.", "warn");
+        break;
+      }
+      if (player.selectedItem >= sim.inventory.length) player.selectedItem = 0;
+      const dres = dropItem(sim, player.selectedItem, actor);
+      if (!dres.ok) { audio.play("deny"); break; }
+      audio.play(dres.real ? "log" : "logFalse");
+      if (player.selectedItem >= sim.inventory.length && player.selectedItem > 0) player.selectedItem -= 1;
+      break;
+    }
     case ACTIONS.CRAFT: {
       // Works off the sim's own truth (state.js), never the item bar's
       // possibly-lying labels — see craftItem's own comment. A hallucinating
       // lead who thinks they're holding a matching pair can still fail here.
-      const cres = craftItem(sim);
+      const cres = craftItem(sim, player.selectedItem);
       if (!cres.ok) {
         audio.play("deny");
         hud.say(cres.reason === "full" ? "Hands are full. Use or drop something first." : "Nothing here combines.", "warn");

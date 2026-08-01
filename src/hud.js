@@ -169,6 +169,8 @@ export function createHud(sim, percept) {
         if (ITEM_INFO[ev.itemKind]?.restore) flash();
       } else if (ev.kind === "itemPhantom") say(ev.text, "gone");
       else if (ev.kind === "craft") say(ev.text, "good");
+      else if (ev.kind === "drop") say(ev.text, "");
+      else if (ev.kind === "dropPhantom") say(ev.text, "gone");
       else if (ev.kind === "advance") say(ev.text, "good");
       else if (ev.kind === "end") say(ev.text, "warn");
     }
@@ -302,7 +304,9 @@ export function createHud(sim, percept) {
     // Craft accessibility: name what's craftable the moment it's possible,
     // rather than making the player guess and press blind.
     if (el.craftHint) {
-      const preview = previewCraft(sim);
+      // Same selected slot craftItem will use, so the hint can never name a
+      // different result than the button produces.
+      const preview = previewCraft(sim, selectedItem);
       if (preview.ok && sim.status === "playing") {
         el.craftHint.textContent = `Craft ready: ${ITEM_INFO[preview.kind].label}`;
         el.craftHint.classList.add("show");
@@ -314,8 +318,8 @@ export function createHud(sim, percept) {
 
   function setHints(scheme) {
     const text = {
-      keyboard: "WASD move · Shift run · E survey/pick up, hold to gather · Z cycle item · X use item · C craft · 1–5 check in · Shift+1–5 dose · Esc pause",
-      gamepad: "Stick move · [A] survey/pick up, hold to gather · [RT] cycle item · [B] use item · D-pad Up craft · [X] check in · [Y] dose · [LB]/[RB] select · [Start] pause",
+      keyboard: "WASD move · Shift run · E survey/pick up, hold to gather · Z cycle item · X use item · V drop · C craft · 1–5 check in · Shift+1–5 dose · Esc pause",
+      gamepad: "Stick move · [A] survey/pick up, hold to gather · [RT] cycle item · [B] use item · D-pad Up craft · D-pad Down drop · [X] check in · [Y] dose · [LB]/[RB] select · [Start] pause",
       touch: "Left half steers · right half looks · buttons bottom-right",
     }[scheme] || "";
     paintHint(el.hints, text);

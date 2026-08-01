@@ -14,7 +14,7 @@
 // The sim's job is to keep an honest, testable record of what is TRUE; `percept.js`
 // is the only place allowed to lie about it.
 
-import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS } from "./world.js";
+import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js";
 import { makeRng } from "./rng.js";
 import { updateCompanions, companionRemark } from "./party.js";
 
@@ -375,6 +375,12 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
     // crafting fuel, never carried or used on their own. Carry forward too.
     wood: carryOver ? carryOver.wood : 0,
     stone: carryOver ? carryOver.stone : 0,
+    // Monotonic slot-id counter. Ids used to be `slot{length}-{time}`, which
+    // repeats the moment a use-then-pickup lands in the same 0.01s tick at the
+    // same inventory length — and percept.itemLabels is keyed by slot id, so a
+    // reused id inherited the PREVIOUS slot's hallucinated label. Carried
+    // across basins so a campaign never recycles one either.
+    slotSeq: carryOver ? (carryOver.slotSeq || 0) : 0,
     // Hold-to-gather progress. Always fresh — a half-finished hold from the
     // last basin means nothing here; the trees/deposits are all new.
     gatherHold: { targetId: null, progress: 0 },
@@ -660,6 +666,11 @@ export function discover(sim) {
   }
 }
 
+/** Issue a slot id that is never reused for the life of a campaign. */
+function nextSlotId(sim) {
+  return `slot${sim.slotSeq++}`;
+}
+
 export const discoveredCount = (sim) => sim.monoliths.filter((m) => m.discovered).length;
 
 /**
@@ -744,7 +755,7 @@ export function pickupItem(sim, actor = sim.player) {
   // hand closed on was never there at all.
   if (actor.hallucinating && sim.rng.chance(0.45)) {
     const claimedKind = sim.rng.pick(ITEM_KINDS);
-    sim.inventory.push({ id: `slot${sim.inventory.length}-${sim.time.toFixed(2)}`, real: false, claimedKind, kind: null });
+    sim.inventory.push({ id: nextSlotId(sim), real: false, claimedKind, kind: null });
     emit(sim, "pickupFalse",
       actor.isPlayer
         ? `You pick up ${ITEM_INFO[claimedKind].label}. It's warm in your hand.`
@@ -753,7 +764,7 @@ export function pickupItem(sim, actor = sim.player) {
     return { ok: true, real: false };
   }
 
-  sim.inventory.push({ id: `slot${sim.inventory.length}-${sim.time.toFixed(2)}`, real: true, kind: near.itemKind, claimedKind: null });
+  sim.inventory.push({ id: nextSlotId(sim), real: true, kind: near.itemKind, claimedKind: null });
   emit(sim, "pickup", `${ITEM_INFO[near.itemKind].label} secured.`, { itemKind: near.itemKind, who: actor.id });
   return { ok: true, real: true, kind: near.itemKind };
 }
@@ -798,12 +809,12 @@ export function companionPickup(sim, ch, targetId = null) {
   // hinges on: you don't find out what you were given until it's in your hand.
   if (ch.hallucinating && sim.rng.chance(0.45)) {
     const claimedKind = sim.rng.pick(ITEM_KINDS);
-    ch.inventory.push({ id: `cslot-${ch.id}-${sim.time.toFixed(2)}`, real: false, claimedKind, kind: null });
+    ch.inventory.push({ id: nextSlotId(sim), real: false, claimedKind, kind: null });
     emit(sim, "companionPickup", `${ch.name} picks something up.`, { who: ch.id, phantom: true });
     return { ok: true, real: false };
   }
 
-  ch.inventory.push({ id: `cslot-${ch.id}-${sim.time.toFixed(2)}`, real: true, kind: near.itemKind, claimedKind: null });
+  ch.inventory.push({ id: nextSlotId(sim), real: true, kind: near.itemKind, claimedKind: null });
   emit(sim, "companionPickup", `${ch.name} picks something up.`, { who: ch.id, itemKind: near.itemKind });
   return { ok: true, real: true, kind: near.itemKind };
 }
@@ -1068,6 +1079,44 @@ export function useItem(sim, slotIndex, targetCompanionId, actor = sim.player) {
 }
 
 /**
+ * Put a carried slot down. The game told the player to "use or drop" in two
+ * different full-hands messages while having no drop verb at all — so a hand
+ * full of phantoms could only be cleared by USING them, at PHANTOM_ITEM_COST
+ * each (three of them cost a quarter of the meter). The escape hatch the
+ * messages already named now exists.
+ *
+ * A REAL item goes back into the basin at the dropper's feet, discovered, so
+ * it can be picked up again — dropping is a decision about carry space, not a
+ * way to destroy supplies. A PHANTOM has nothing to put down: opening your
+ * hand simply ends the fiction, at no cost. That asymmetry is the honest one —
+ * the phantom was never a thing, so it cannot become a thing on the ground.
+ */
+export function dropItem(sim, slotIndex, actor = sim.player) {
+  if (sim.status !== "playing") return { ok: false, reason: "over" };
+  const slot = sim.inventory[slotIndex];
+  if (!slot) return { ok: false, reason: "empty" };
+  sim.inventory.splice(slotIndex, 1);
+
+  if (!slot.real) {
+    emit(sim, "dropPhantom", "You open your hand. There was nothing in it.",
+      { phantom: true, who: actor.id });
+    return { ok: true, real: false };
+  }
+  sim.items.push({
+    id: `drop${sim.slotSeq++}`,
+    kind: FEATURE.ITEM,
+    itemKind: slot.kind,
+    x: actor.x,
+    z: actor.z,
+    discovered: true,
+    taken: false,
+  });
+  emit(sim, "drop", `${ITEM_INFO[slot.kind].label} set down.`,
+    { itemKind: slot.kind, who: actor.id });
+  return { ok: true, real: true, kind: slot.kind };
+}
+
+/**
  * Combine two carried REAL items into a stronger one. Works off the sim's own
  * truth (like everything else in this file) — never the lead's PERCEIVED
  * inventory labels. That split is what makes a hallucinating lead's craft
@@ -1086,14 +1135,35 @@ export function useItem(sim, slotIndex, targetCompanionId, actor = sim.player) {
  * itself and by previewCraft, so the HUD's "craft available" indicator can
  * never claim something craftItem then refuses.
  */
-function findCraftMatch(sim) {
+/**
+ * Which craft is on offer. `prefer` is the player's SELECTED slot: carrying a
+ * Flare, a Tether and a Lens, all three pairs are valid recipes, and a plain
+ * first-match scan silently picked one by pickup order — the same three items
+ * became an Ember or a Ward depending on which you happened to grab first,
+ * with nothing on screen explaining why. Anchoring the pair to the selected
+ * slot turns that into a choice the player already has a control for (cycle
+ * item), and previewCraft reads the same function, so the hint always names
+ * exactly what the craft button will make (Brain: dog#E20 — one resolver, and
+ * every surface driven off its single answer).
+ */
+function findCraftMatch(sim, prefer = -1) {
+  const pairFrom = (i, j) => {
+    const a = sim.inventory[i], b = sim.inventory[j];
+    if (!a || !b || !a.real || !b.real) return null;
+    const kind = CRAFT_RECIPES[recipeKey(a.kind, b.kind)];
+    return kind ? { type: "pair", i: Math.min(i, j), j: Math.max(i, j), kind } : null;
+  };
+  if (prefer >= 0 && prefer < sim.inventory.length) {
+    for (let k = 0; k < sim.inventory.length; k++) {
+      if (k === prefer) continue;
+      const m = pairFrom(prefer, k);
+      if (m) return m;
+    }
+  }
   for (let i = 0; i < sim.inventory.length; i++) {
     for (let j = i + 1; j < sim.inventory.length; j++) {
-      const a = sim.inventory[i];
-      const b = sim.inventory[j];
-      if (!a.real || !b.real) continue;
-      const kind = CRAFT_RECIPES[recipeKey(a.kind, b.kind)];
-      if (kind) return { type: "pair", i, j, kind };
+      const m = pairFrom(i, j);
+      if (m) return m;
     }
   }
   if (sim.wood >= STAKE_COST.wood && sim.stone >= STAKE_COST.stone) {
@@ -1107,23 +1177,23 @@ function findCraftMatch(sim) {
  * what would it be? Mirrors craftItem()'s eventual success exactly, cap
  * check included, so the indicator is never a promise craftItem breaks.
  */
-export function previewCraft(sim) {
-  const match = findCraftMatch(sim);
+export function previewCraft(sim, prefer = -1) {
+  const match = findCraftMatch(sim, prefer);
   if (!match) return { ok: false };
   if (match.type === "material" && sim.inventory.length >= ITEM_CAP) return { ok: false };
   return { ok: true, kind: match.kind };
 }
 
-export function craftItem(sim) {
+export function craftItem(sim, prefer = -1) {
   if (sim.status !== "playing") return { ok: false, reason: "over" };
 
-  const match = findCraftMatch(sim);
+  const match = findCraftMatch(sim, prefer);
   if (!match) return { ok: false, reason: "no-recipe" };
 
   if (match.type === "pair") {
     sim.inventory.splice(match.j, 1);
     sim.inventory.splice(match.i, 1);
-    sim.inventory.push({ id: `slot${sim.inventory.length}-${sim.time.toFixed(2)}`, real: true, kind: match.kind, claimedKind: null });
+    sim.inventory.push({ id: nextSlotId(sim), real: true, kind: match.kind, claimedKind: null });
     sim.stats.itemsCrafted += 1;
     emit(sim, "craft", `The two combine. ${ITEM_INFO[match.kind].label} forms in your hands.`, { itemKind: match.kind });
     return { ok: true, kind: match.kind };
@@ -1134,7 +1204,7 @@ export function craftItem(sim) {
   if (sim.inventory.length >= ITEM_CAP) return { ok: false, reason: "full" };
   sim.wood -= STAKE_COST.wood;
   sim.stone -= STAKE_COST.stone;
-  sim.inventory.push({ id: `slot${sim.inventory.length}-${sim.time.toFixed(2)}`, real: true, kind: "stake", claimedKind: null });
+  sim.inventory.push({ id: nextSlotId(sim), real: true, kind: "stake", claimedKind: null });
   sim.stats.itemsCrafted += 1;
   emit(sim, "craft", "Wood and stone lash together. A stake, ready to plant.", { itemKind: "stake" });
   return { ok: true, kind: "stake" };

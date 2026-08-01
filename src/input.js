@@ -31,6 +31,7 @@ export const ACTIONS = Object.freeze({
   PREV_TARGET: "prevTarget",
   CYCLE_ITEM: "cycleItem",
   USE_ITEM: "useItem",
+  DROP_ITEM: "dropItem",
   CRAFT: "craft",
   PAUSE: "pause",
 });
@@ -121,6 +122,7 @@ export function createInput(canvas, opts = {}) {
       case "KeyZ": push(ACTIONS.CYCLE_ITEM); break;
       case "KeyX": push(ACTIONS.USE_ITEM); break;
       case "KeyC": push(ACTIONS.CRAFT); break;
+      case "KeyV": push(ACTIONS.DROP_ITEM); break;
       case "Escape": push(ACTIONS.PAUSE); break;
       case "Space": e.preventDefault(); break;
       default: return;
@@ -280,6 +282,7 @@ export function createInput(canvas, opts = {}) {
     if (edges[3]) queue.push(ACTIONS.DOSE);
     if (edges[7]) queue.push(ACTIONS.CYCLE_ITEM);
     if (edges[12]) queue.push(ACTIONS.CRAFT);
+    if (edges[13]) queue.push(ACTIONS.DROP_ITEM);
 
     return {
       move: { x: lx, z: ly },
@@ -341,7 +344,8 @@ export function createInput(canvas, opts = {}) {
     if (edges[4]) push(ACTIONS.PREV_TARGET); // LB
     if (edges[5]) push(ACTIONS.NEXT_TARGET); // RB
     if (edges[7]) push(ACTIONS.CYCLE_ITEM); // RT
-    if (edges[12]) push(ACTIONS.CRAFT); // D-pad Up — unused in "game" mode otherwise
+    if (edges[12]) push(ACTIONS.CRAFT); // D-pad Up
+    if (edges[13]) push(ACTIONS.DROP_ITEM); // D-pad Down — mirrors craft above it
     if (edges[9]) push(ACTIONS.PAUSE); // Start
     state.look.dx += rx * 13;
     state.look.dy += ry * 9;
