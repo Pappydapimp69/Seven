@@ -569,3 +569,6 @@ body[data-coop="2"] .hud-left { max-width: 44%; }
 body[data-coop="2"] .action-prompt.p2 { display: block; left: 75%; }
 body[data-coop="2"] #actionPrompt { left: 25%; }
 .action-prompt.p2::after { content: "  [A]"; color: var(--cyan); font-size: 12px; }
+
+.item-bar.p2 { display: none; left: auto; right: 16px; }
+body[data-coop="2"] .item-bar.p2 { display: flex; }

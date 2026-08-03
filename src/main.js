@@ -4,7 +4,7 @@
 import {
   createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem, dropItem, craftItem, gatherTarget,
   possess, release, possessableCompanions,
-  PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH,
+  PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
 } from "./state.js";
 import { createPercept, updatePercept, distortion, perceivedMonoliths } from "./percept.js";
 import { createRenderer } from "./render.js";
@@ -13,7 +13,7 @@ import { createInput, ACTIONS } from "./input.js";
 import { createAudio } from "./audio.js";
 import { hashSeed } from "./rng.js";
 
-const BUILD = "mirage-0.6.0";
+const BUILD = "mirage-0.7.0";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -322,9 +322,26 @@ function handleAction(action, arg, player = run.players[0]) {
       }
       if (player.selectedItem >= sim.inventory.length) player.selectedItem = 0;
       const target = sim.companions[player.selected];
+      // Read what THIS ACTOR believed the slot was, before useItem consumes it
+      // and the slot id stops meaning anything. useItem itself never sees
+      // percept (state.js stays honest) — this is the one glue point allowed
+      // to compare what percept.js told them against what state.js actually
+      // does, and only to pick a cue/message, never to change the outcome.
+      const slot = sim.inventory[player.selectedItem];
+      const shownKind = slot?.real ? percept.itemLabels.get(slot.id) : null;
+      const misidentified = !!shownKind && shownKind !== slot.kind;
       const ures = useItem(sim, player.selectedItem, target?.id, actor);
       if (!ures.ok) { audio.play("deny"); break; }
-      audio.play(ures.real ? "dose" : "logFalse");
+      if (!ures.real || misidentified) {
+        // The hallucination just broke on contact: either there was nothing
+        // there at all (useItem already said so), or the item was real but
+        // not what this actor believed. Either way, a distinct cue — not the
+        // ordinary "dose" chime a correctly-seen item gets.
+        audio.play("reveal");
+        if (misidentified) hud.say(`That wasn't ${ITEM_INFO[shownKind].label}. It was ${ITEM_INFO[ures.kind].label}.`, "warn");
+      } else {
+        audio.play("dose");
+      }
       if (player.selectedItem >= sim.inventory.length && player.selectedItem > 0) player.selectedItem -= 1;
       break;
     }

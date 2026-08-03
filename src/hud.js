@@ -40,6 +40,7 @@ export function createHud(sim, percept) {
     hints: document.getElementById("hints"),
     selection: document.getElementById("selectionLabel"),
     items: document.getElementById("itemBar"),
+    items2: document.getElementById("itemBar2"),
     level: document.getElementById("levelLabel"),
     flash: document.getElementById("flash"),
     wood: document.getElementById("woodCount"),
@@ -245,10 +246,19 @@ export function createHud(sim, percept) {
     }
   }
 
-  function renderInventory(selectedItem) {
-    if (!el.items) return;
-    const slots = perceivedInventory(percept, sim);
-    el.items.innerHTML = slots.length
+  /**
+   * Paint one player's read of the shared pack into `container`. The pack
+   * itself is ONE array (see state.js's own comment on that), but each viewer
+   * is handed a DIFFERENT `viewerPercept` — so the same physical slot can
+   * legitimately show two different labels at once, one per screen half.
+   * That is the whole mechanism behind "show it to someone who isn't gone":
+   * nothing is transferred, nobody performs a hand-off, a lucid partner's own
+   * panel was reading the truth about that slot the entire time.
+   */
+  function renderSlots(container, selectedItem, viewerPercept) {
+    if (!container) return;
+    const slots = perceivedInventory(viewerPercept, sim);
+    container.innerHTML = slots.length
       ? slots.map((s, i) => `<div class="item-slot${i === selectedItem ? " sel" : ""}">${s.label}</div>`).join("")
       : `<div class="item-slot empty">—</div>`;
   }
@@ -289,7 +299,7 @@ export function createHud(sim, percept) {
     el.vignette.style.opacity = String(Math.min(0.92, dis * 0.9));
     el.vignette.classList.toggle("lost", percept.active);
 
-    renderInventory(selectedItem);
+    renderSlots(el.items, selectedItem, percept);
 
     paintPrompt({ prompt: el.prompt, text: el.promptText, fill: el.promptFill },
       percept, sim.player, sim.gatherHold);
@@ -299,6 +309,9 @@ export function createHud(sim, percept) {
     if (coop) {
       paintPrompt({ prompt: el.prompt2, text: el.promptText2, fill: el.promptFill2 },
         coop.percept, coop.eye, coop.eye.gatherHold);
+      // Same shared inventory as el.items, painted through player two's OWN
+      // percept — see renderSlots' own comment.
+      renderSlots(el.items2, coop.selectedItem, coop.percept);
     }
 
     // Craft accessibility: name what's craftable the moment it's possible,

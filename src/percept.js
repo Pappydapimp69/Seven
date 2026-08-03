@@ -343,7 +343,9 @@ export function perceivedYaw(percept, sim) {
  * thing sitting in the world — but a REAL item's displayed kind can still be
  * wrong: assigned once per item id per hallucination episode (lazy, so it
  * settles the moment it's first seen rather than reassigning every frame) and
- * cleared on recovery.
+ * cleared on recovery. Drawn from the full kind list, truth included — a
+ * hallucinating lead is lied to about MOST things, not everything; sometimes
+ * what you see is exactly what is there, and you have no way to tell which.
  */
 export function perceivedWorldItems(percept, sim) {
   const lying = percept.active && !isClear(percept, sim);
@@ -351,10 +353,7 @@ export function perceivedWorldItems(percept, sim) {
     .filter((it) => it.discovered && !it.taken)
     .map((it) => {
       if (!lying) return { ...it, shownKind: it.itemKind, misidentified: false };
-      if (!percept.itemLabels.has(it.id)) {
-        const wrong = sim.rng.pick(ITEM_KINDS.filter((k) => k !== it.itemKind));
-        percept.itemLabels.set(it.id, wrong || it.itemKind);
-      }
+      if (!percept.itemLabels.has(it.id)) percept.itemLabels.set(it.id, sim.rng.pick(ITEM_KINDS));
       const shownKind = percept.itemLabels.get(it.id);
       return { ...it, shownKind, misidentified: shownKind !== it.itemKind };
     });
@@ -365,7 +364,10 @@ export function perceivedWorldItems(percept, sim) {
  * in permanently at pickup time (state.js) and always shown as-is — that
  * deception already happened and does not un-happen on recovery. A REAL slot
  * gets the same live per-episode mislabeling as a world item, keyed by the
- * slot's own id.
+ * slot's own id, drawn from every displayable kind INCLUDING its own true
+ * one — a hallucinating lead usually sees the wrong item, but not always, and
+ * has no way to tell which case they're in until they use it (see state.js
+ * useItem and main.js's reveal-on-use check).
  */
 export function perceivedInventory(percept, sim) {
   const lying = percept.active && !isClear(percept, sim);
@@ -375,14 +377,12 @@ export function perceivedInventory(percept, sim) {
     }
     if (!lying) return { index, real: true, shownKind: slot.kind, label: ITEM_INFO[slot.kind].label, misidentified: false };
     if (!percept.itemLabels.has(slot.id)) {
-      // The carried-item lie draws from every displayable kind, crafted
-      // included — a hallucinating lead can believe they're holding an Ember
-      // they never crafted. World items stay restricted to ITEM_KINDS (see
-      // perceivedWorldItems): a crafted item has no ground mesh to mistake it
-      // for, so that lie only makes sense once something is already in hand.
-      const pool = Object.keys(ITEM_INFO).filter((k) => k !== slot.kind);
-      const wrong = sim.rng.pick(pool);
-      percept.itemLabels.set(slot.id, wrong || slot.kind);
+      // Crafted kinds included — a hallucinating lead can believe they're
+      // holding an Ember they never crafted. World items stay restricted to
+      // ITEM_KINDS (see perceivedWorldItems): a crafted item has no ground
+      // mesh to mistake it for, so that lie only makes sense once something
+      // is already in hand.
+      percept.itemLabels.set(slot.id, sim.rng.pick(Object.keys(ITEM_INFO)));
     }
     const shownKind = percept.itemLabels.get(slot.id);
     return { index, real: true, shownKind, label: ITEM_INFO[shownKind].label, misidentified: shownKind !== slot.kind };

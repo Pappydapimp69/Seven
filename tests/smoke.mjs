@@ -338,6 +338,56 @@ function assert(cond, msg) {
   assert(craft.itemsCrafted === 1, "craft was not recorded in stats");
   assert(/The two combine/.test(craft.subtitles), `crafting did not show its text: ${JSON.stringify(craft.subtitles)}`);
 
+  // --- item hallucinations: a mislabeled real item reveals on use, a husk is
+  // real but does nothing --------------------------------------------------
+  const reveal = await page.evaluate(() => {
+    const M = window.__mirage;
+    const s = M.sim;
+    s.inventory.length = 0;
+    s.inventory.push({ id: "reveal-flare", real: true, kind: "flare", claimedKind: null });
+    s.player.hallucinating = true;
+    // Force the lie deterministically rather than trusting the roll: the
+    // player believes slot 0 is a Lens, it is really a Flare.
+    M.percept.itemLabels.set("reveal-flare", "lens");
+    const lucidityBefore = s.player.lucidity;
+    M.act(M.ACTIONS.USE_ITEM);
+    M.advance(0.2);
+    return {
+      subtitles: document.getElementById("subtitles").innerText,
+      lucidityRestored: s.player.lucidity > lucidityBefore,
+      inventoryAfter: s.inventory.length,
+    };
+  });
+  assert(/That wasn't Lens\. It was Flare\./.test(reveal.subtitles), `misidentified use did not reveal the truth: ${JSON.stringify(reveal.subtitles)}`);
+  assert(reveal.lucidityRestored, "a mislabeled Flare must still apply its REAL effect when used");
+  assert(reveal.inventoryAfter === 0, "the used slot was not consumed");
+
+  const husk = await page.evaluate(() => {
+    const M = window.__mirage;
+    const s = M.sim;
+    s.player.hallucinating = false;
+    s.inventory.length = 0;
+    s.inventory.push({ id: "husk-0", real: true, kind: "husk", claimedKind: null });
+    const lucidityBefore = s.player.lucidity;
+    const before = s.stats.itemsUsed;
+    M.act(M.ACTIONS.USE_ITEM);
+    // Compare BEFORE the advance below: passive drain runs every tick
+    // regardless of what was used, so any elapsed time — not the husk —
+    // would otherwise account for the difference.
+    const lucidityRightAfterUse = s.player.lucidity;
+    M.advance(0.2); // let hud.update() paint the subtitle
+    return {
+      subtitles: document.getElementById("subtitles").innerText,
+      lucidityUnchanged: lucidityRightAfterUse === lucidityBefore,
+      itemsUsed: s.stats.itemsUsed - before,
+      inventoryAfter: s.inventory.length,
+    };
+  });
+  assert(/crumbles/.test(husk.subtitles), `using a husk did not show its text: ${JSON.stringify(husk.subtitles)}`);
+  assert(husk.lucidityUnchanged, "a husk must have no effect at all");
+  assert(husk.itemsUsed === 1, "husk use was not counted");
+  assert(husk.inventoryAfter === 0, "the husk slot was not consumed");
+
   // --- gathering: chop a tree, mine a deposit, craft and plant a Stake ----
   // Gathering is a HOLD, not a tap: a single M.act(SURVEY) must NOT gather,
   // and only holding interact for long enough should.

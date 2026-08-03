@@ -70,6 +70,11 @@ export const ITEM_INFO = Object.freeze({
   // Crafted from raw materials, not other items — see STAKE_COST/craftItem.
   // Using it doesn't affect the player directly at all; it plants a pylon.
   stake: { label: "Stake", charge: 60 },
+  // Spawns in the world exactly like flare/tether/lens — it is a REAL pickup,
+  // never a phantom — but it does nothing at all when used. Not every find is
+  // useful; a hallucinating lead can just as easily mislabel a real Husk as a
+  // Flare as the reverse (see percept.js perceivedInventory/perceivedWorldItems).
+  husk: { label: "Husk" },
 });
 // A phantom item's use is always a bad surprise — there is no real effect to
 // fall back on, so reaching for it costs you instead of rewarding you.
@@ -1071,6 +1076,13 @@ export function useItem(sim, slotIndex, targetCompanionId, actor = sim.player) {
         live: true,
       });
       emit(sim, "itemUsed", "You drive the stake into the ground. It will hold, for a while.", { itemKind: "stake" });
+      break;
+    // A real item, honestly picked up, that was simply never going to do
+    // anything — no lucidity, no steadying, no pylon. The only "reveal" here
+    // is whatever the lead believed it was a moment ago; the husk itself was
+    // always exactly this.
+    case "husk":
+      emit(sim, "itemUsed", "It crumbles in your hand. It was never going to be anything.", { itemKind: "husk", who: self.id });
       break;
     default:
       break;

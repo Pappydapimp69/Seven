@@ -32,7 +32,10 @@ export const MONOLITH_COUNT = 6;
 export const PYLON_COUNT = 5;
 export const ITEM_COUNT = 6;
 // Kind strings only — state.js ITEM_INFO owns what each one actually does.
-export const ITEM_KINDS = Object.freeze(["flare", "tether", "lens"]);
+// "husk" is a real, honestly-placed dud: it spawns and is picked up exactly
+// like the other three, it just does nothing when used (see state.js
+// ITEM_INFO/useItem) — trash mixed into the same pool, not a hallucination.
+export const ITEM_KINDS = Object.freeze(["flare", "tether", "lens", "husk"]);
 // Raw-material nodes: chop a tree for wood, mine a deposit for stone. Unlike
 // ITEM, these carry no `itemKind` — a tree is always a tree, a deposit always
 // stone. There is no deception layer for these at all (see state.js/percept.js

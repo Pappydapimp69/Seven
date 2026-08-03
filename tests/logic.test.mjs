@@ -157,10 +157,10 @@ check("item kinds actually vary across seeds, and the draw count never varies", 
   const mixes = new Set();
   for (let seed = 1; seed <= 120; seed++) {
     const w = generateWorld(seed);
-    const c = { flare: 0, tether: 0, lens: 0 };
+    const c = Object.fromEntries(ITEM_KINDS.map((k) => [k, 0]));
     for (const it of w.items) c[it.itemKind] += 1;
     for (const k of ITEM_KINDS) assert(c[k] >= 1, `seed ${seed}: no ${k} in the basin`);
-    mixes.add(`${c.flare}/${c.tether}/${c.lens}`);
+    mixes.add(ITEM_KINDS.map((k) => c[k]).join("/"));
   }
   assert(mixes.size > 1, `item mix never changes across 120 seeds (got only ${[...mixes]})`);
   // Constant roll count: the same seed must always produce the same world, and
@@ -859,6 +859,58 @@ check("a real item's displayed kind can be wrong while hallucinating, and holds 
   const clear = perceivedWorldItems(percept, sim).find((x) => x.id === it.id);
   eq(clear.shownKind, it.itemKind, "a lucid lead must see the true kind");
   eq(clear.misidentified, false, "no misidentification flag while lucid");
+});
+
+check("a hallucinating lead sometimes sees a world item's TRUE kind too, not always a lie", () => {
+  // The pool used to exclude the real kind on purpose (always wrong). Now it
+  // doesn't — a hallucination that lied about literally everything would be
+  // easier to play around than one you can't fully distrust or fully trust.
+  let sawTrue = false, sawFalse = false;
+  for (let seed = 1; seed <= 200 && !(sawTrue && sawFalse); seed++) {
+    const sim = createRun({ seed });
+    const it = sim.items[0];
+    it.discovered = true;
+    const percept = createPercept();
+    sim.player.hallucinating = true;
+    updatePercept(percept, sim, 0.1);
+    const seen = perceivedWorldItems(percept, sim).find((x) => x.id === it.id);
+    if (seen.shownKind === it.itemKind) sawTrue = true;
+    else sawFalse = true;
+  }
+  assert(sawTrue, "200 seeds and a hallucinating lead never once saw the truth about a world item");
+  assert(sawFalse, "200 seeds and a hallucinating lead never once saw a wrong kind — the lie never fires");
+});
+
+check("a hallucinating lead sometimes sees a carried item's TRUE kind too, not always a lie", () => {
+  let sawTrue = false, sawFalse = false;
+  for (let seed = 1; seed <= 200 && !(sawTrue && sawFalse); seed++) {
+    const sim = createRun({ seed });
+    sim.inventory.push({ id: "s0", real: true, kind: "flare", claimedKind: null });
+    const percept = createPercept();
+    sim.player.hallucinating = true;
+    updatePercept(percept, sim, 0.1);
+    const seen = perceivedInventory(percept, sim)[0];
+    if (seen.shownKind === "flare") sawTrue = true;
+    else sawFalse = true;
+  }
+  assert(sawTrue, "200 seeds and a hallucinating lead never once saw the truth about a carried item");
+  assert(sawFalse, "200 seeds and a hallucinating lead never once saw a wrong kind — the lie never fires");
+});
+
+check("a husk is a REAL pickup that does nothing at all when used", () => {
+  const sim = createRun({ seed: 63 });
+  sim.inventory.push({ id: "s0", real: true, kind: "husk", claimedKind: null });
+  const lucidityBefore = sim.player.lucidity;
+  const target = sim.companions[0];
+  const steadyBefore = target.steadyUntil;
+  const pylonsBefore = sim.pylons.length;
+  const res = useItem(sim, 0, target.id);
+  assert(res.ok && res.real === true, "a husk is real, not a phantom");
+  eq(res.kind, "husk", "wrong kind recorded for a husk use");
+  eq(sim.player.lucidity, lucidityBefore, "a husk must not touch lucidity");
+  eq(target.steadyUntil, steadyBefore, "a husk must not steady anyone");
+  eq(sim.pylons.length, pylonsBefore, "a husk must not plant a pylon");
+  eq(sim.stats.itemsUsed, 1, "husk use should still be counted as a real item use");
 });
 
 check("a phantom pickup is never rendered as a world object, only as an inventory slot", () => {

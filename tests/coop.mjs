@@ -222,6 +222,32 @@ function assert(cond, msg) { if (!cond) failures.push(msg); }
   assert(!prompt2.chopped, "0.7s of a 1.2s hold must not have completed the chop");
   notes.push(`p2 prompt "${prompt2.p2Text}" at ${prompt2.fill.toFixed(0)}%`);
 
+  // ---- the shared pack shows a different label to each viewer --------------
+  // There is ONE inventory array, not one per player (see state.js's own
+  // comment) — but each half of the split screen paints it through THAT
+  // player's own percept. Player two is still the one hallucinating from the
+  // asymmetry check above; the still-lucid lead must read the SAME slot
+  // truthfully, with no "show" or "give" action at all — the existing
+  // per-percept split already does it.
+  const shared = await page.evaluate(() => {
+    const M = window.__mirage;
+    const s = M.sim;
+    const p2 = M.players[1];
+    s.inventory.length = 0;
+    s.inventory.push({ id: "shared-flare", real: true, kind: "flare", claimedKind: null });
+    p2.percept.itemLabels.set("shared-flare", "lens"); // player two: still lying
+    M.advance(0.1); // one frame so hud.update() repaints both panels from this state
+    return {
+      p1Active: M.players[0].percept.active,
+      p2Active: p2.percept.active,
+      p1Bar: document.getElementById("itemBar").textContent,
+      p2Bar: document.getElementById("itemBar2").textContent,
+    };
+  });
+  assert(!shared.p1Active && shared.p2Active, `test assumes lead lucid / p2 hallucinating still, got p1=${shared.p1Active} p2=${shared.p2Active}`);
+  assert(/Flare/.test(shared.p1Bar), `the still-lucid lead's panel should show the truth, got ${JSON.stringify(shared.p1Bar)}`);
+  assert(/Lens/.test(shared.p2Bar), `player two's own panel should keep showing their own lie about the SAME slot, got ${JSON.stringify(shared.p2Bar)}`);
+
   // ---- dropping out hands the mind back to the AI --------------------------
   const dropped = await page.evaluate(() => {
     const M = window.__mirage;
