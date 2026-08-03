@@ -6,9 +6,9 @@
 // list as the real ones.
 
 import * as THREE from "../lib/three.module.js";
-import { CELL, GRID, cellToWorld } from "./world.js?v=mirage-0.8.0";
-import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=mirage-0.8.0";
-import { PYLON_RADIUS } from "./state.js?v=mirage-0.8.0";
+import { CELL, GRID, cellToWorld } from "./world.js?v=mirage-0.8.1";
+import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=mirage-0.8.1";
+import { PYLON_RADIUS } from "./state.js?v=mirage-0.8.1";
 
 const PALETTE = {
   sky: 0x0a0f16,
@@ -24,7 +24,17 @@ const PALETTE = {
   pylonDead: 0x40484f,
   camp: 0xffb562,
   body: 0x8d97a8,
-  bodyLost: 0xb06a72,
+  // A gone companion must separate from a well one by LUMINANCE, not hue. The
+  // previous 0xb06a72 was a warm red at almost exactly the body's brightness:
+  // WCAG contrast 1.38 normally and 1.14 simulated for deuteranopia, i.e. the
+  // single most important tell in the game — "that mind is gone" — was
+  // invisible to a large share of players. This is the same warm register,
+  // dropped in brightness: 3.15 against the body across all three CVD types,
+  // and still 1.8 against PALETTE.monster, which additionally carries a size
+  // change and a different eye colour. (Brain: COUCH-MULTIPLAYER/accessibility
+  // — no palette is safe across all CVD types, so meaning must never rest on
+  // hue alone. A contrast guard in logic.test.mjs holds this.)
+  bodyLost: 0x5e2f3c,
   monster: 0x140a0d, // near-black with a red undertone — wrong, not just "gone"
   monsterEye: 0xff2a2a,
   itemFlare: 0xff8a3d,
