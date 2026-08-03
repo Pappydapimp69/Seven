@@ -150,20 +150,40 @@ export function createAudio() {
     reveal: () => blip({ freq: 520, dur: 0.22, type: "square", gain: 0.15, slide: -260 }),
     break: () => blip({ freq: 240, dur: 0.25, type: "square", gain: 0.08 }),
     deny: () => blip({ freq: 150, dur: 0.12, type: "square", gain: 0.07 }),
+    // CHORUS agreeing with something the player just did. Deliberately NOT a
+    // stinger: three near-unison partials a few cents apart, entering together
+    // and decaying together, so it reads as several throats saying one word
+    // rather than as an alarm. The beating between them is the whole effect —
+    // the same trick the `wrong` drone uses against the ground tone, which is
+    // why this sits comfortably on top of the bed instead of fighting it.
+    chorus: () => {
+      for (const f of [196, 197.6, 293.4]) {
+        blip({ freq: f, dur: 0.75, type: "triangle", gain: 0.055, slide: -3 });
+      }
+    },
   };
 
-  /** A whisper: filtered noise burst. Only ever played while the lead is gone. */
-  function whisper() {
+  /**
+   * A whisper: filtered noise burst. Only ever played while the lead is gone.
+   *
+   * `emphasis` (0..1) is how insistent the voices have got — percept.js's
+   * chorusTier over 2, for a lead under CHORUS. It narrows the band and lifts
+   * the level a little, so the same channel carries "there are voices" and
+   * "the voices are getting louder about it" without becoming a second sound.
+   * Defaults to 0, so every existing caller is unchanged.
+   */
+  function whisper(emphasis = 0) {
     if (!started || !ctx) return;
+    const e = Math.max(0, Math.min(1, emphasis));
     const src = ctx.createBufferSource();
     src.buffer = noiseBuffer(1);
     const bp = ctx.createBiquadFilter();
     bp.type = "bandpass";
     bp.frequency.value = 900 + Math.random() * 1400;
-    bp.Q.value = 6;
+    bp.Q.value = 6 + e * 6;
     const g = ctx.createGain();
     g.gain.value = 0;
-    g.gain.linearRampToValueAtTime(0.13, ctx.currentTime + 0.1);
+    g.gain.linearRampToValueAtTime(0.13 + e * 0.06, ctx.currentTime + 0.1);
     g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.9);
     src.connect(bp).connect(g).connect(master);
     src.start();

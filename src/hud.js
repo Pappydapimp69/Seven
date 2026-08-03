@@ -6,7 +6,7 @@
 // the one hallucinating. The only place a real number is ever printed is the
 // debrief, after the run is over.
 
-import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory } from "./percept.js?v=mirage-0.8.1";
+import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho } from "./percept.js?v=mirage-0.8.1";
 import { LOG_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, gatherTarget, GATHER_HOLD_TIME, previewCraft } from "./state.js?v=mirage-0.8.1";
 
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
@@ -26,7 +26,13 @@ export function paintHint(el, text) {
   );
 }
 
-export function createHud(sim, percept) {
+/**
+ * `opts.onChorus` is called whenever a CHORUS reply actually lands, so main.js
+ * can sound it. The HUD has no audio handle of its own and shouldn't grow one —
+ * percept.js decides IF a line happens, this file decides where it lands, and
+ * the caller decides what it sounds like.
+ */
+export function createHud(sim, percept, opts = {}) {
   const el = {
     roster: document.getElementById("roster"),
     survey: document.getElementById("surveyCount"),
@@ -174,6 +180,16 @@ export function createHud(sim, percept) {
       else if (ev.kind === "dropPhantom") say(ev.text, "gone");
       else if (ev.kind === "advance") say(ev.text, "good");
       else if (ev.kind === "end") say(ev.text, "warn");
+
+      // CHORUS answers the lead's own verbs. percept.js owns every decision
+      // here — whether this event earns a reply at all, who speaks, how loud
+      // it has got — and gates itself so at most one line lands per several
+      // seconds across all sources; this is only the surface it lands on.
+      const echo = chorusEcho(percept, sim, ev);
+      if (echo) {
+        say(echo.text, "gone");
+        opts.onChorus?.();
+      }
     }
   }
 
@@ -290,6 +306,13 @@ export function createHud(sim, percept) {
     const yaw = perceivedYaw(percept, sim);
     const oct = ((Math.round((-yaw / (Math.PI * 2)) * 8) % 8) + 8) % 8;
     el.compass.textContent = COMPASS[oct];
+    // Deliberately NOT flagged when it settles. WRONG_WAY's needle now
+    // releases its accumulated error in one jump while the lead is standing
+    // still, and that jump always crosses a whole compass point (percept.js
+    // COMPASS_SNAP_MIN), so the letter genuinely changes under a player who
+    // is not moving — but only for a player who happens to be looking. A
+    // highlight here would turn "wrong in a way you can almost catch" into a
+    // notification, which is the opposite of the effect.
 
     const left = Math.max(0, TIME_LIMIT - sim.time);
     el.clock.textContent = `${String(Math.floor(left / 60)).padStart(2, "0")}:${String(Math.floor(left % 60)).padStart(2, "0")}`;

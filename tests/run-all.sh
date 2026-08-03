@@ -19,6 +19,10 @@ echo "== hallucination (does the player actually SEE the tells?) =="
 node tests/hallucination.test.mjs
 echo
 
+echo "== kinds (the four that used to be static) =="
+node tests/kinds.test.mjs
+echo
+
 echo "== balance (whole runs to a terminal state) =="
 node tests/balance.mjs "${BALANCE_SEEDS:-12}"
 echo

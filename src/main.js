@@ -214,7 +214,7 @@ function mountRun(sim, openingLine) {
   const seedValue = sim.seed;
   const percept = createPercept(sim.player);
   const renderer = createRenderer(canvas, sim);
-  const hud = createHud(sim, percept);
+  const hud = createHud(sim, percept, { onChorus: () => audio.play("chorus") });
   paused = false;
   whisperTimer = 0;
   run = { sim, percept, renderer, hud, players: [makeLocalPlayer(0, sim.player, percept)] };
@@ -283,7 +283,7 @@ function advanceLevel() {
   const percept = createPercept(sim.player);
   run.renderer.dispose();
   const renderer = createRenderer(canvas, sim);
-  const hud = createHud(sim, percept);
+  const hud = createHud(sim, percept, { onChorus: () => audio.play("chorus") });
   hud.setHints(input.activeScheme);
   hud.say(`Basin ${nextLevel} of ${sim.campaignLength}. The party pushes on.`, "warn");
   // createRun rebuilt every character object, so each joined player's percept

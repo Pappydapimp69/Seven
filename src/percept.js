@@ -11,7 +11,7 @@
 // assert "a hallucinating lead is shown a marker the sim does not contain"
 // without booting a browser.
 
-import { HALLUCINATION, BAND, bandOf, ITEM_INFO, LUCIDITY_GRACE } from "./state.js?v=mirage-0.8.1";
+import { HALLUCINATION, BAND, bandOf, ITEM_INFO, LUCIDITY_GRACE, CORROBORATE_RADIUS } from "./state.js?v=mirage-0.8.1";
 import { ITEM_KINDS } from "./world.js?v=mirage-0.8.1";
 
 const PHANTOM_NAMES = ["the Sixth Stone", "the Watching Slab", "the Other Cairn", "the Hollow Tooth"];
@@ -53,6 +53,38 @@ export function createPercept(eye = null) {
     // when that flicker ends. See updateMonsterFlicker.
     monsterId: null,
     monsterUntil: 0,
+
+    // ---- WRONG_WAY: a compass whose error GROWS while you hold a line -------
+    // compassOffset (above) is the value everything else reads. It is now a
+    // derived total: the fixed error seeded at onset, plus whatever the walk
+    // has added since. See updateCompassDrift.
+    compassBase: 0,
+    compassDrift: 0,
+    headingAnchor: null, // the yaw the current straight leg started on
+    walkRun: 0, // units walked on that leg
+    stillTime: 0, // seconds since the eye last really moved
+    lastX: null,
+    lastZ: null,
+    compassSnaps: 0, // how many times the needle has settled (tests read this)
+    lastSnapAt: -Infinity,
+    lastSnapSize: 0, // radians the needle jumped on the last settle
+
+    // ---- FALSE_ANCHOR: relief that keeps its distance ----------------------
+    reliefRecedes: 0, // how many times the phantom pylon has backed off
+
+    // ---- CHORUS: agreement that escalates, and answers you didn't ask for --
+    chorusVoices: [], // companion ids, shuffled once at onset
+    chorusIndex: 0,
+    chorusLines: 0,
+    chorusLast: -Infinity,
+
+    // ---- DOUBLED_PARTY: the sixth body fills a real gap --------------------
+    // Where each companion was standing, relative to the eye's own facing,
+    // the last time they were in formation — so the phantom can take a slot
+    // that a real person has actually vacated.
+    slotMemory: new Map(),
+    ghostOf: null, // whose place the phantom is currently holding, if anyone
+    ghostSwaps: 0,
   };
 }
 
@@ -88,6 +120,26 @@ function seedHallucination(percept, sim) {
   percept.phantomPylons = [];
   percept.deadPylonsLookLive = new Set();
   percept.compassOffset = 0;
+  // Every ACTION-TIED accumulator resets with the episode. A hallucination is
+  // a fresh lie each time it lands: the compass starts at its seeded error
+  // with nothing banked, the relief has not backed off yet, the chorus has
+  // not spoken, and no slot has been taken over.
+  percept.compassBase = 0;
+  percept.compassDrift = 0;
+  percept.headingAnchor = null;
+  percept.walkRun = 0;
+  percept.stillTime = 0;
+  percept.compassSnaps = 0;
+  percept.lastSnapAt = -Infinity;
+  percept.lastSnapSize = 0;
+  percept.reliefRecedes = 0;
+  percept.chorusVoices = [];
+  percept.chorusIndex = 0;
+  percept.chorusLines = 0;
+  percept.chorusLast = -Infinity;
+  percept.slotMemory = new Map();
+  percept.ghostOf = null;
+  percept.ghostSwaps = 0;
 
   switch (percept.kind) {
     case HALLUCINATION.PHANTOM_MARKER: {
@@ -135,10 +187,23 @@ function seedHallucination(percept, sim) {
       break;
     }
     case HALLUCINATION.WRONG_WAY:
-      percept.compassOffset = rng.pick([-1, 1]) * rng.float(1.1, 2.4); // radians
+      // The error the episode OPENS with. Narrowed from the old 1.1–2.4 band
+      // because the error is no longer static: updateCompassDrift adds up to
+      // COMPASS.driftMax on top of this while you hold a heading, and the two
+      // together have to stay a plausible bearing rather than wrapping past
+      // "exactly backwards". 1.15–1.8 rad is a solidly wrong quarter turn
+      // (66°–103°) that grows to at most ~178° if you commit to a straight
+      // line — starts arguable, ends damning. Same two draws as before.
+      percept.compassBase = rng.pick([-1, 1]) * rng.float(1.15, 1.8); // radians
+      percept.compassOffset = percept.compassBase;
       break;
     case HALLUCINATION.CHORUS:
       percept.whisper = "agreement";
+      // Who speaks, and in what order. Drawn ONCE here (shuffled is a fixed
+      // four draws for five companions) so the per-line pick downstream needs
+      // no rng at all — chorusEcho fires from the HUD's event pump, which is
+      // not a place that should be consuming the sim's stream at all.
+      percept.chorusVoices = rng.shuffled(sim.companions.map((c) => c.id));
       break;
     default:
       break;
@@ -281,6 +346,415 @@ export const MONSTER_TUNING = Object.freeze({
   maxDur: MONSTER_MAX_DUR,
 });
 
+// ===========================================================================
+// The other four kinds, made reactive.
+//
+// PHANTOM_MARKER already answers the player (shiftOneUnseenPhantom keys off
+// accumulated camera turn) and the monster flicker keys off where the party
+// actually is on screen. The remaining four each set ONE value at onset and
+// then held it for the whole episode: a fixed compass error, a fixed phantom
+// pylon, one canned agreement, one companion holding station. Correct, stable,
+// and inert — you learn the lie in three seconds and it never asks you
+// anything again.
+//
+// Each now has a twist tied to a verb the player actually performs, and every
+// one is sized the same way the monster flicker was: by the rate at which a
+// player PERCEIVES it, asserted from both sides (a floor so it isn't
+// invisible, a ceiling so it isn't a strobe). See tests/kinds.test.mjs — the
+// numbers in the comments below are measured there, not guessed.
+//
+// None of these consumes an rng draw per tick. Every draw any of them needs is
+// taken once, at onset, in seedHallucination — so no path's roll count depends
+// on how the player moved (Brain: waiting-city#E9/E17).
+// ===========================================================================
+
+// ---- WRONG_WAY ------------------------------------------------------------
+// The old lie was a constant: north is 90° off, forever, and the moment you
+// notice you can simply subtract it. This one is a constant PLUS a function of
+// what you just did — hold a heading and the error grows behind your back; the
+// needle only ever admits it when you stop.
+//
+// THE PERCEIVABLE EVENT IS NOT THE DRIFT, IT IS THE SETTLE, and it is not
+// measured in radians. The HUD compass is eight letters, so an error that
+// grows by half a radian changes nothing a player can see. The snap threshold
+// is therefore one full octant (2π/8 = 0.785 rad), which guarantees the letter
+// changes when the needle settles: whatever the reading was, it is a different
+// compass point now, and you were standing still when it moved.
+const COMPASS_HEADING_ARC = 0.45; // yaw drift that ends the current straight leg (~26°) and restarts the commit
+const COMPASS_WALK_SPEED = 1.0; // units/sec below which the eye counts as stopped (walk is 4.3)
+// ...and STOPPED means stopped, head included. Gating the settle on feet alone
+// let the needle release itself in the middle of a 180° sweep, where a compass
+// letter changing is the least remarkable thing on screen: the settle fired at
+// the tuned rate and only 1.9 of 4.1 per minute were witnessable as anomalies.
+// Requiring a still head as well moves the release into the beat where the
+// player is holding position and looking at something.
+const COMPASS_STILL_TURN = 0.02; // radians per tick (~0.6 rad/s) that still counts as holding a heading
+// A leg has to be COMMITTED before it costs anything. The first few units on a
+// new heading buy nothing at all, so a player picking their way around rocks,
+// weaving, or repeatedly changing their mind accumulates no error whatever —
+// the lie is specifically the price of holding a line, which is the one thing a
+// lost person does when they decide they know where they are going.
+const COMPASS_COMMIT = 5; // units on one heading before the error starts growing
+// Sized from the walk, not from taste: one committed leg — about four seconds
+// at the 4.3 u/s walk, ~17 units, of which ~12 count — has to be worth just
+// over one compass point, so that a player who picks a direction, holds it,
+// and then stops to get their bearings sees the bearing change. Below that the
+// settle is real and fires and nobody ever witnesses one (measured: at
+// 0.022/unit only 13% of twenty-second episodes settled at all, and the first
+// settle landed around t=22s — well past the ~7s median episode this game
+// actually has).
+const COMPASS_DRIFT_PER_UNIT = 0.07; // radians of extra error per committed unit walked
+// Capped so that the worst case — the widest seeded error plus the whole
+// drift — stays just under π. The compass can end up reading almost exactly
+// backwards; it must never wrap through and start reading correct again.
+const COMPASS_DRIFT_MAX = 1.3;
+const COMPASS_SNAP_MIN = Math.PI / 4 + 0.02; // a settle must cross a whole compass point to be seen
+const COMPASS_SETTLE_TIME = 0.4; // seconds stopped before the needle settles
+
+// ---- FALSE_ANCHOR ---------------------------------------------------------
+// The relief that stays twenty units away. The phantom pylon NEVER moves while
+// you are looking at it (same rule shiftOneUnseenPhantom obeys, and the same
+// reason: a marker that jumps on screen reads as a graphics bug, not a place).
+// It backs off only once you have closed inside RELIEF_HOLD and then let it
+// out of your view — so an approach that never breaks eye contact really does
+// arrive, and the punchline is standing inside a pylon that gives nothing
+// back. Looking around on the way, which is what a frightened player does,
+// costs you the ground you just made up.
+const RELIEF_HOLD = 16; // close inside this and the recede is armed
+const RELIEF_DISTANCE = 20; // where it reappears, on the SAME bearing
+
+// ---- CHORUS ---------------------------------------------------------------
+// Agreement is only frightening if it is agreement with something. The canned
+// check-in reply stays, but the chorus now answers the player's OWN VERBS —
+// you log a marker that isn't there and a voice tells you it saw it too — and
+// it escalates: one voice, then a certain voice, then the whole party at once
+// answering a question you asked somebody else.
+//
+// Gated hard, because a feedback channel that fires on every event stops
+// carrying information and starts destroying it (Brain: brain-builder#E6). One
+// line per CHORUS_GAP seconds at most, only for events that are a DECISION
+// (surveying, taking, using, spending) and never for the world merely being
+// noticed, and the check-in reply shares the same clock so the two can't stack.
+const CHORUS_GAP = 9; // seconds between chorus lines, all sources
+const CHORUS_DEEPEN_AFTER = 25; // seconds into the episode before it gains a tier
+const CHORUS_EARNED = new Set([
+  "log", "logFalse", "pickup", "pickupFalse", "itemUsed", "itemPhantom",
+  "dose", "craft", "drop", "dropPhantom", "gather",
+]);
+
+// ---- DOUBLED_PARTY --------------------------------------------------------
+// The sixth companion used to walk a slot nobody had ever filled, which is
+// exactly the version you can count: five of us, plus one. Now it fills a slot
+// somebody has VACATED — the one who just went under, or the one who wandered
+// out of formation while you weren't watching — so the shape of the party
+// stays intact precisely when it has stopped being intact. The gap you should
+// have noticed is the gap that gets covered.
+const VACANCY_DIST = 14; // beyond this (or gone) a companion has left their slot
+const VACANCY_RETURN = 10; // ...and must come back inside this to reclaim it (hysteresis)
+const SLOT_MEMORY_DIST = 9; // how close a companion must be for their slot to be remembered
+const GHOST_EASE = 1.1; // how fast the phantom slides into a slot — a drift, never a cut
+// ...and hard-capped at a real companion's own walking pace (party.js
+// WALK_SPEED). An ease alone is smooth but not necessarily PLAUSIBLE: a
+// handover across a ten-unit gap starts at over twelve units a second, which
+// is faster than anything alive in the basin and reads as a figure snapping
+// into place. Capped, the sixth body always looks like a person walking over.
+const GHOST_MAX_SPEED = 4.6;
+
+export const KIND_TUNING = Object.freeze({
+  compass: Object.freeze({
+    headingArc: COMPASS_HEADING_ARC,
+    commit: COMPASS_COMMIT,
+    driftPerUnit: COMPASS_DRIFT_PER_UNIT,
+    driftMax: COMPASS_DRIFT_MAX,
+    snapMin: COMPASS_SNAP_MIN,
+    settleTime: COMPASS_SETTLE_TIME,
+  }),
+  relief: Object.freeze({ hold: RELIEF_HOLD, distance: RELIEF_DISTANCE }),
+  chorus: Object.freeze({ gap: CHORUS_GAP, deepenAfter: CHORUS_DEEPEN_AFTER }),
+  doubled: Object.freeze({ vacancy: VACANCY_DIST, reclaim: VACANCY_RETURN, ease: GHOST_EASE }),
+});
+
+/**
+ * WRONG_WAY's twist. Grow the compass error while the eye walks a consistent
+ * heading; release it, all at once, the moment the eye stops.
+ *
+ * The consistency test is on the ANCHOR, not on a per-tick difference: the leg
+ * ends when the current yaw has departed far enough from the yaw the leg began
+ * on. Summing per-tick turn instead would measure total activity rather than
+ * committed direction, and a slow weave down a straight corridor would read
+ * the same as a deliberate change of course (Brain: dog#E42 — sum the signed
+ * quantity against an anchor, never abs() each step).
+ *
+ * Reads the eye's position; writes only percept's own fields.
+ */
+function updateCompassDrift(percept, sim, p, dt, lying, turned) {
+  if (!lying || percept.kind !== HALLUCINATION.WRONG_WAY) {
+    percept.lastX = p.x;
+    percept.lastZ = p.z;
+    return;
+  }
+  const moved = percept.lastX === null ? 0 : Math.hypot(p.x - percept.lastX, p.z - percept.lastZ);
+  percept.lastX = p.x;
+  percept.lastZ = p.z;
+
+  if (percept.headingAnchor === null) percept.headingAnchor = p.yaw;
+  if (Math.abs(angularDelta(p.yaw, percept.headingAnchor)) > COMPASS_HEADING_ARC) {
+    // A real change of course. The leg ends; the error already banked STAYS —
+    // turning is not a confession, only stopping is.
+    percept.headingAnchor = p.yaw;
+    percept.walkRun = 0;
+  }
+
+  if (moved / Math.max(dt, 1e-6) > COMPASS_WALK_SPEED || turned > COMPASS_STILL_TURN) {
+    percept.stillTime = 0;
+    percept.walkRun += moved;
+    if (percept.walkRun > COMPASS_COMMIT) {
+      percept.compassDrift = Math.min(COMPASS_DRIFT_MAX, percept.compassDrift + moved * COMPASS_DRIFT_PER_UNIT);
+    }
+  } else {
+    percept.stillTime += dt;
+    if (percept.stillTime >= COMPASS_SETTLE_TIME && percept.compassDrift >= COMPASS_SNAP_MIN) {
+      // The settle. A compass that moves while its owner is standing still is
+      // the one thing about this that a player can actually catch, so it is
+      // the thing that is sized: never smaller than a whole compass point.
+      percept.lastSnapSize = percept.compassDrift;
+      percept.lastSnapAt = sim.time;
+      percept.compassSnaps += 1;
+      percept.compassDrift = 0;
+      percept.walkRun = 0;
+    }
+  }
+  percept.compassOffset = percept.compassBase + Math.sign(percept.compassBase) * percept.compassDrift;
+}
+
+/**
+ * FALSE_ANCHOR's twist. Push the phantom pylon back out to RELIEF_DISTANCE on
+ * its own bearing, but ONLY while it is off screen and only once the eye has
+ * closed inside RELIEF_HOLD. Bearing is preserved exactly, so it is always
+ * still "over there, where it was" when you look back — just further.
+ *
+ * Also folds in pylons that die DURING the episode: FALSE_ANCHOR's other half
+ * used to be a set frozen at onset, so a pylon the player drained themselves
+ * (by camping it, which is the whole reason it dies) honestly went dark on
+ * screen mid-hallucination. Now the screen keeps insisting, which is the
+ * cruellest version and costs nothing: you stand in the light and never
+ * come back.
+ */
+function updateFalseAnchor(percept, sim, p, lying) {
+  if (!lying || percept.kind !== HALLUCINATION.FALSE_ANCHOR) return;
+  for (const pl of sim.pylons) if (pl.charge <= 0) percept.deadPylonsLookLive.add(pl.id);
+
+  const ph = percept.phantomPylons[0];
+  if (!ph) return;
+  const dx = ph.x - p.x;
+  const dz = ph.z - p.z;
+  const d = Math.hypot(dx, dz);
+  if (d >= RELIEF_HOLD) return;
+  if (inView(p.yaw, dx, dz, VIEW_HALF_ANGLE)) return; // never moves under the eye
+  const a = d > 1e-6 ? Math.atan2(dz, dx) : 0;
+  ph.x = p.x + Math.cos(a) * RELIEF_DISTANCE;
+  ph.z = p.z + Math.sin(a) * RELIEF_DISTANCE;
+  percept.reliefRecedes += 1;
+}
+
+/**
+ * How loud the chorus currently is: 0 one voice, 1 a certain voice, 2 all of
+ * them. Escalates on three axes, none of which is a number the player is ever
+ * shown — how long you have been under, how much of the party has gone with
+ * you, and how much the chorus has already said. Pure; safe to call from a
+ * render path.
+ */
+export function chorusTier(percept, sim) {
+  if (!percept.active || percept.kind !== HALLUCINATION.CHORUS) return -1;
+  const gone = sim.party.filter((c) => c.hallucinating).length;
+  const t = (percept.chorusLines >= 2 ? 1 : 0)
+    + (gone >= 3 ? 1 : 0)
+    + (sim.time - percept.since >= CHORUS_DEEPEN_AFTER ? 1 : 0);
+  return Math.min(2, t);
+}
+
+/**
+ * The next name(s) in the rotation. Deterministic — the shuffle already
+ * happened at onset — but BIASED toward a voice that could not possibly be
+ * speaking: somebody too far off to be heard, or somebody who has gone
+ * themselves. That bias is the whole tell. An agreement from the person
+ * standing at your elbow is merely eerie; an agreement in HALDER's voice while
+ * HALDER is forty units away with his back to you is a thing you can check,
+ * and checking it is the only way a player ever catches this kind at all.
+ *
+ * Falls back to the plain rotation when the party really is all around you,
+ * which is exactly when the chorus should just be unsettling instead.
+ */
+function chorusNames(percept, sim, count) {
+  const roster = percept.chorusVoices
+    .map((id) => sim.companions.find((x) => x.id === id))
+    .filter(Boolean);
+  if (!roster.length) return [];
+  const ordered = [];
+  for (let i = 0; i < roster.length; i++) ordered.push(roster[(percept.chorusIndex + i) % roster.length]);
+  const impossible = ordered.filter((c) => chorusVoiceIsImpossible(sim, percept, c.id));
+  const pool = impossible.length >= count ? impossible : impossible.concat(ordered.filter((c) => !impossible.includes(c)));
+  const out = pool.slice(0, count);
+  percept.chorusIndex = (percept.chorusIndex + Math.max(1, out.length)) % roster.length;
+  return out;
+}
+
+// Deliberately short lists, indexed rather than drawn, so no two consecutive
+// lines repeat and no rng is consumed on a presentation path.
+const CHORUS_ASSENT = [
+  "Yes. That's the one.",
+  "Good. That's what we came for.",
+  "Mm. Same as I had it.",
+];
+const CHORUS_CERTAIN = [
+  "We all saw it. Don't second-guess it.",
+  "That's confirmed. Keep going.",
+  "It's written the same in mine.",
+];
+const CHORUS_ALL = [
+  "All of us have it. Don't stop.",
+  "Nobody disagrees. Nobody has disagreed all day.",
+  "We're all saying it. Listen.",
+];
+// The bite. These fire on the events where the player got NOTHING — an entry
+// written at nothing, a hand closing on air, an item that was never there —
+// and the chorus congratulates them anyway. Agreement with something you did
+// not do is the version you can almost catch.
+const CHORUS_WRONG = [
+  "That's the one we needed. Good.",
+  "There. That's the fourth. We're nearly done.",
+  "I had my hand on it too. Same thing.",
+];
+const CHORUS_HOLLOW = new Set(["logFalse", "pickupFalse", "itemPhantom", "dropPhantom"]);
+
+/**
+ * The chorus answering a thing the PLAYER just did. Call once per sim event
+ * (hud.js's event pump does); returns a line to speak, or null.
+ *
+ * This is the action tie: CHORUS used to be reachable only by asking for a
+ * check-in, which a player under can go a whole episode without doing. Now
+ * every decision you make is met, and the meeting escalates.
+ *
+ * Mutates only percept's own bookkeeping — never `sim`, never `ev`.
+ */
+export function chorusEcho(percept, sim, ev) {
+  if (!ev || !percept.active || percept.kind !== HALLUCINATION.CHORUS) return null;
+  if (isClear(percept, sim)) return null;
+  if (!CHORUS_EARNED.has(ev.kind)) return null;
+  if (sim.time - percept.chorusLast < CHORUS_GAP) return null;
+
+  const tier = chorusTier(percept, sim);
+  const speakers = chorusNames(percept, sim, tier >= 2 ? 2 : 1);
+  if (!speakers.length) return null;
+  const i = percept.chorusLines;
+  const hollow = CHORUS_HOLLOW.has(ev.kind);
+  const table = hollow ? CHORUS_WRONG : tier >= 2 ? CHORUS_ALL : tier >= 1 ? CHORUS_CERTAIN : CHORUS_ASSENT;
+  const who = speakers.map((c) => c.name).join(" and ");
+
+  percept.chorusLast = sim.time;
+  percept.chorusLines += 1;
+  return {
+    text: `${who}: ${table[i % table.length]}`,
+    voices: speakers.map((c) => c.id),
+    tier,
+    hollow,
+  };
+}
+
+/**
+ * Is a voice the chorus just used one the player could plausibly catch? True
+ * when the named companion is too far away to have said it, or is themselves
+ * gone — the tell that makes the agreement checkable rather than merely
+ * ominous. Exposed for tests and for anything that wants to score the lie.
+ */
+export function chorusVoiceIsImpossible(sim, percept, id) {
+  const c = sim.companions.find((x) => x.id === id);
+  if (!c) return true;
+  const self = eyeOf(percept, sim);
+  return c.hallucinating || Math.hypot(c.x - self.x, c.z - self.z) > CORROBORATE_RADIUS;
+}
+
+/**
+ * DOUBLED_PARTY's twist. Remember where each companion stands in formation
+ * (relative to the eye's own facing, so the slot turns with the lead the way a
+ * real one does), then park the phantom in a slot a real companion has
+ * VACATED — gone under, or simply strayed.
+ *
+ * The handover is hysteretic on purpose: once the phantom has taken a slot it
+ * keeps it until that companion comes properly back inside VACANCY_RETURN, so
+ * somebody hovering right at the edge of formation cannot make the sixth body
+ * flicker between two places. And the move itself is an ease, never a cut — a
+ * phantom that teleports into a gap is a glitch; one that drifts into it over
+ * a couple of seconds is a person catching up.
+ */
+function updateDoubledParty(percept, sim, p, dt, lying) {
+  const ph = percept.phantomCompanions[0];
+  if (!ph) return;
+  if (!lying || percept.kind !== HALLUCINATION.DOUBLED_PARTY) {
+    percept.ghostOf = null;
+    return;
+  }
+
+  // Remember formation slots, in the eye's own frame.
+  for (const c of sim.companions) {
+    const dx = c.x - p.x;
+    const dz = c.z - p.z;
+    const r = Math.hypot(dx, dz);
+    if (c.hallucinating || r > SLOT_MEMORY_DIST || r < 1e-6) continue;
+    percept.slotMemory.set(c.id, { r, bearing: angularDelta(Math.atan2(dz, dx), p.yaw) });
+  }
+
+  // Does the current occupant still count as away? (hysteresis: they have to
+  // come properly back, not just brush the threshold)
+  const held = percept.ghostOf && sim.companions.find((c) => c.id === percept.ghostOf);
+  if (held) {
+    const back = !held.hallucinating && Math.hypot(held.x - p.x, held.z - p.z) <= VACANCY_RETURN;
+    if (back) percept.ghostOf = null;
+  } else {
+    percept.ghostOf = null;
+  }
+
+  if (!percept.ghostOf) {
+    // The freshest gap: among everyone who has left a remembered slot, the one
+    // still NEAREST is the one who most recently walked out of it. Picking by
+    // distance rather than by roster order keeps the choice deterministic
+    // without pinning it to c1 forever.
+    let best = null;
+    let bestD = Infinity;
+    for (const c of sim.companions) {
+      if (!percept.slotMemory.has(c.id)) continue;
+      const d = Math.hypot(c.x - p.x, c.z - p.z);
+      if (!c.hallucinating && d <= VACANCY_DIST) continue;
+      if (d < bestD) { bestD = d; best = c; }
+    }
+    if (best) {
+      percept.ghostOf = best.id;
+      percept.ghostSwaps += 1;
+    }
+  }
+
+  const slot = percept.ghostOf ? percept.slotMemory.get(percept.ghostOf) : null;
+  let tx;
+  let tz;
+  if (slot) {
+    const a = p.yaw + slot.bearing;
+    tx = p.x + Math.cos(a) * slot.r;
+    tz = p.z + Math.sin(a) * slot.r;
+  } else {
+    // Nobody missing: the old behaviour, a sixth body keeping its own station.
+    ph.slot += dt * 0.15;
+    tx = p.x + Math.sin(ph.slot) * 5.2;
+    tz = p.z + Math.cos(ph.slot) * 5.2;
+  }
+  const ex = (tx - ph.x) * Math.min(1, dt * GHOST_EASE);
+  const ez = (tz - ph.z) * Math.min(1, dt * GHOST_EASE);
+  const step = Math.hypot(ex, ez);
+  const cap = GHOST_MAX_SPEED * dt;
+  const scale = step > cap ? cap / step : 1;
+  ph.x += ex * scale;
+  ph.z += ez * scale;
+}
+
 /** Advance the perceived world. Call once per tick, after state.tick. */
 export function updatePercept(percept, sim, dt) {
   const p = eyeOf(percept, sim);
@@ -301,6 +775,18 @@ export function updatePercept(percept, sim, dt) {
     percept.whisper = null;
     percept.itemLabels.clear();
     percept.monsterId = null;
+    // The reactive accumulators die with the episode too. Leaving compassDrift
+    // banked here would let a lead who walked a long straight line, recovered,
+    // and went under again cash in the FIRST episode's committed heading on
+    // the second one's opening tick — the same "credit banked while lucid"
+    // bug the camera-turn drift already has a regression test for.
+    percept.compassDrift = 0;
+    percept.compassOffset = 0;
+    percept.walkRun = 0;
+    percept.stillTime = 0;
+    percept.headingAnchor = null;
+    percept.ghostOf = null;
+    percept.slotMemory.clear();
   }
   // Computed AFTER the transition above, not before: on the exact tick
   // recovery happens, `percept.active` just flipped false, and the turn/
@@ -319,7 +805,8 @@ export function updatePercept(percept, sim, dt) {
   // environment changing directly to the player's own action: sweep your
   // view around and the half of the world you just left may not be where you
   // left it. Whatever is on screen right now never moves.
-  if (percept.lastYaw !== null && lying) percept.turnAccum += Math.abs(angularDelta(p.yaw, percept.lastYaw));
+  const turned = percept.lastYaw === null ? 0 : Math.abs(angularDelta(p.yaw, percept.lastYaw));
+  if (percept.lastYaw !== null && lying) percept.turnAccum += turned;
   percept.lastYaw = p.yaw;
   if (!lying) percept.turnAccum = 0;
   while (lying && percept.turnAccum >= TURN_SHIFT_ANGLE) {
@@ -329,14 +816,12 @@ export function updatePercept(percept, sim, dt) {
 
   updateMonsterFlicker(percept, sim, p, dt, lying && !justOnset);
 
-  // A doubled companion keeps station like a real one, which is why it works.
-  for (const ph of percept.phantomCompanions) {
-    ph.slot += dt * 0.15;
-    const tx = p.x + Math.sin(ph.slot) * 5.2;
-    const tz = p.z + Math.cos(ph.slot) * 5.2;
-    ph.x += (tx - ph.x) * Math.min(1, dt * 1.4);
-    ph.z += (tz - ph.z) * Math.min(1, dt * 1.4);
-  }
+  // The other four kinds' action ties. Each is a no-op unless its own kind is
+  // the one running, and none of them draws from sim.rng — see the block
+  // comment above KIND_TUNING.
+  updateCompassDrift(percept, sim, p, dt, lying, turned);
+  updateFalseAnchor(percept, sim, p, lying);
+  updateDoubledParty(percept, sim, p, dt, lying);
   return percept;
 }
 
@@ -472,8 +957,36 @@ export function filterReport(percept, sim, report) {
   if (!percept.active) return report;
   const rng = sim.rng;
   if (percept.kind === HALLUCINATION.CHORUS) {
-    // Everyone agrees with you. Everyone is fine. Nothing needs doing.
-    return { ...report, claim: BAND.STEADY, text: "…fine. We're all fine. Keep going.", filtered: true };
+    // Everyone agrees with you. Everyone is fine. Nothing needs doing — and
+    // the deeper in you are, the less it stays a reply to the person you
+    // actually asked. Three tiers, no rng (the rotation was shuffled at
+    // onset), and it shares chorusEcho's clock so a check-in and an action
+    // echo can never land on top of each other.
+    const tier = chorusTier(percept, sim);
+    percept.chorusLast = sim.time;
+    percept.chorusLines += 1;
+    if (tier >= 2) {
+      // Someone else answers. You asked HALDER; NKEM replies, in the first
+      // person, as though the question had been put to the room — and the HUD
+      // prints the name the report carries, so the wrong name is right there
+      // on screen to be caught.
+      const other = chorusNames(percept, sim, 1).find((c) => c.id !== report.who);
+      if (other) {
+        return {
+          ...report,
+          name: other.name,
+          claim: BAND.STEADY,
+          text: "We're all fine. All of us. You keep asking.",
+          filtered: true,
+        };
+      }
+    }
+    return {
+      ...report,
+      claim: BAND.STEADY,
+      text: tier >= 1 ? "Fine. We're all fine — nobody's arguing." : "…fine. We're all fine. Keep going.",
+      filtered: true,
+    };
   }
   if (rng.chance(0.6)) {
     const bands = [BAND.STEADY, BAND.UNSETTLED, BAND.FRAYING, BAND.BRITTLE];
@@ -497,7 +1010,26 @@ function garble(text, rng) {
 export function rosterRead(percept, sim, companion) {
   // "unknown" rather than a literal "?" so it is a usable CSS class and a
   // greppable value; the player-facing text is the note.
-  if (percept.active) return { tag: "unknown", note: "you can't tell", uncertain: true };
+  if (percept.active) {
+    // DOUBLED_PARTY's second surface, and the reason it is worth putting the
+    // phantom in a real person's slot rather than a spare one: the roster
+    // reads THE PHANTOM. A hallucinating lead can't tell anything about
+    // anyone — except the one person whose place is currently filled by
+    // something that looks perfectly steady, because there IS a body in that
+    // slot walking with the party.
+    //
+    // Exactly one row is ever allowed to lie this way (ghostOf is a single
+    // id): a confident line that appeared next to every name would be noise,
+    // and it is the asymmetry against five "you can't tell"s that makes this
+    // one legible at all (Brain: brain-builder#E6 — float ONE headline
+    // marker, don't stack them).
+    if (percept.kind === HALLUCINATION.DOUBLED_PARTY
+      && companion.id === percept.ghostOf
+      && !isClear(percept, sim)) {
+      return { tag: "ok", note: "steady", uncertain: false, doubled: true };
+    }
+    return { tag: "unknown", note: "you can't tell", uncertain: true };
+  }
   const band = bandOf(companion.lucidity);
   const self = eyeOf(percept, sim);
   const lagging = Math.hypot(companion.x - self.x, companion.z - self.z) > 9;
