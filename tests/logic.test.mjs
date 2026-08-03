@@ -14,7 +14,7 @@ import {
   possess, release, possessableCompanions,
   PARTY_SIZE, MAX_LUCIDITY, DOSE_COUNT, RECOVER_AT, RECOVER_TIME, DISSOLVE_TIME,
   TIME_LIMIT, PYLON_RADIUS, LOG_RADIUS, ISOLATION_DIST,
-  ITEM_CAP, ITEM_PICKUP_RADIUS, ITEM_INFO, PHANTOM_ITEM_COST, CRAFT_RECIPES, CAMPAIGN_LENGTH,
+  ITEM_CAP, ITEM_PICKUP_RADIUS, ITEM_INFO, PHANTOM_ITEM_COST, CRAFT_RECIPES, CAMPAIGN_LENGTH, LUCIDITY_GRACE,
   GATHER_RADIUS, GATHER_HOLD_TIME, GATHER_YIELD, STAKE_COST, PYLON_MAX_CHARGE, TRAIT_VARIANCE, COMPANION_TEMPLATES,
   COMPANION_ITEM_CAP,
 } from "../src/state.js";
@@ -221,8 +221,22 @@ check("a run starts with the player plus five companions, all full", () => {
   eq(sim.status, "playing");
 });
 
+check("nobody's lucidity moves during the opening grace window, and drain resumes right after", () => {
+  const sim = createRun({ seed: 8 });
+  const spot = farFromPylons(sim);
+  for (const c of sim.party) { c.x = spot.x; c.z = spot.z; }
+  const before = sim.companions.map((c) => c.lucidity);
+  sim.time = LUCIDITY_GRACE - 1;
+  for (const c of sim.party) tickLucidity(sim, c, 1);
+  sim.companions.forEach((c, i) => eq(c.lucidity, before[i], `${c.name} drained before the grace window ended`));
+  sim.time = LUCIDITY_GRACE;
+  for (const c of sim.party) tickLucidity(sim, c, 1);
+  sim.companions.forEach((c, i) => assert(c.lucidity < before[i], `${c.name} did not drain once the grace window ended`));
+});
+
 check("lucidity only ever falls, absent a pylon or a dose", () => {
   const sim = createRun({ seed: 8 });
+  sim.time = LUCIDITY_GRACE; // past the orientation window — drain applies
   // Park everyone far from any pylon so the only force acting is drain.
   const spot = farFromPylons(sim);
   for (const c of sim.party) { c.x = spot.x; c.z = spot.z; }
@@ -233,6 +247,7 @@ check("lucidity only ever falls, absent a pylon or a dose", () => {
 
 check("companions drain at different rates — the party is not one meter", () => {
   const sim = createRun({ seed: 8 });
+  sim.time = LUCIDITY_GRACE;
   const spot = farFromPylons(sim);
   for (const c of sim.party) { c.x = spot.x; c.z = spot.z; }
   for (let i = 0; i < 30; i++) for (const c of sim.party) tickLucidity(sim, c, 1);
@@ -242,6 +257,7 @@ check("companions drain at different rates — the party is not one meter", () =
 
 check("walking off alone drains faster than staying with the party", () => {
   const sim = createRun({ seed: 9 });
+  sim.time = LUCIDITY_GRACE;
   const spot = farFromPylons(sim);
   for (const c of sim.party) { c.x = spot.x; c.z = spot.z; }
   const together = tickLucidity(sim, sim.companions[0], 1);
@@ -255,6 +271,7 @@ check("walking off alone drains faster than staying with the party", () => {
 
 check("watching someone come apart costs you", () => {
   const sim = createRun({ seed: 10 });
+  sim.time = LUCIDITY_GRACE;
   const spot = farFromPylons(sim);
   for (const c of sim.party) { c.x = spot.x; c.z = spot.z; }
   const subject = sim.companions[0];
@@ -268,6 +285,7 @@ check("watching someone come apart costs you", () => {
 
 check("coming back leaves a scar that makes the next fall faster", () => {
   const sim = createRun({ seed: 11 });
+  sim.time = LUCIDITY_GRACE;
   const spot = farFromPylons(sim);
   for (const c of sim.party) { c.x = spot.x; c.z = spot.z; }
   const c = sim.companions[0];
@@ -282,6 +300,7 @@ check("coming back leaves a scar that makes the next fall faster", () => {
 
 check("hitting zero starts a hallucination, with a specific kind", () => {
   const sim = createRun({ seed: 12 });
+  sim.time = LUCIDITY_GRACE;
   const c = sim.companions[2];
   c.lucidity = 0.2;
   c.x = farFromPylons(sim).x;
@@ -417,6 +436,7 @@ check("a pylon restores everyone standing in it, and spends itself doing so", ()
 
 check("a spent pylon does nothing", () => {
   const sim = createRun({ seed: 14 });
+  sim.time = LUCIDITY_GRACE;
   const p = sim.pylons[0];
   p.charge = 0;
   const c = sim.companions[0];
@@ -794,6 +814,7 @@ check("use: a flare restores lucidity and is consumed", () => {
 
 check("use: a tether steadies the target — reduced drain, not a cure", () => {
   const sim = createRun({ seed: 56 });
+  sim.time = LUCIDITY_GRACE;
   const target = sim.companions[0];
   const spot = farFromPylons(sim);
   for (const c of sim.party) { c.x = spot.x; c.z = spot.z; }
@@ -1665,6 +1686,7 @@ check("companions follow the lead", () => {
 
 check("a brittle companion breaks formation for a pylon they remember", () => {
   const sim = createRun({ seed: 44 });
+  sim.time = LUCIDITY_GRACE;
   const p = sim.pylons[0];
   const c = sim.companions[0];
   // The party is out in the basin, well away from relief, but this companion has
@@ -1706,6 +1728,7 @@ check("a gone companion stops following and goes its own way", () => {
 
 check("companions volunteer remarks, and a gone one says gone things", () => {
   const sim = createRun({ seed: 46 });
+  sim.time = LUCIDITY_GRACE;
   let normal = 0;
   advance(sim, 60);
   normal = sim.companions.length; // remarks are emitted as events; count over a window

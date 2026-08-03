@@ -155,7 +155,9 @@ function assert(cond, msg) {
   });
   assert(walked.simTime >= 7.9, `sim clock only reached ${walked.simTime}s after advancing 8s`);
   assert(walked.moved > 3, `player barely moved (${walked.moved.toFixed(2)} units in 8 sim-seconds)`);
-  assert(walked.lucidity < 100, "nobody drained over 8 sim-seconds");
+  // The first 5 minutes of a basin are a grace window (LUCIDITY_GRACE, state.js)
+  // — nobody's meter moves yet at 8 sim-seconds in, on purpose.
+  assert(walked.lucidity === 100, `lucidity moved inside the opening grace window: ${walked.lucidity}`);
   assert(walked.companionSpread.filter((d) => d < 22).length >= 3, `party did not keep up: ${walked.companionSpread}`);
 
   if (glOk) {

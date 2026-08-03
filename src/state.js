@@ -28,6 +28,11 @@ export const MAX_LUCIDITY = 100;
 // small enough gap that it should not be quoted as settled. Note the harness bot
 // reads the sim's truth, so none of these numbers price the hallucination layer.
 export const BASE_DRAIN = 1.05; // lucidity/second at rest, before modifiers
+// An orientation window: nobody's meter moves for the first 5 minutes of a
+// basin, so a fresh level doesn't start punishing you before you've even
+// gotten your bearings. `sim.time` resets to 0 at the top of every level
+// (see createRun), so this is measured per-basin, not once across a campaign.
+export const LUCIDITY_GRACE = 300;
 export const ISOLATION_DIST = 13; // units from the party centroid before you count as alone
 export const ISOLATION_MULT = 1.9; // walking off alone burns you down fastest
 export const CONTAGION_DIST = 9; // seeing someone come apart costs you
@@ -463,6 +468,14 @@ export function tickLucidity(sim, ch, dt) {
     ch.goneTime += dt;
     return 0; // already at the floor; nothing left to take
   }
+  // Zero means gone, whether or not the grace window is still open — grace
+  // only withholds NEW drain, it must never mask a meter already at the
+  // floor (however it got there: a direct set, a future mechanic, ...).
+  if (ch.lucidity <= 0) {
+    beginHallucinating(sim, ch);
+    return 0;
+  }
+  if (sim.time < LUCIDITY_GRACE) return 0; // still inside the orientation window
 
   const centroid = partyCentroid(sim);
   let mult = 1;
