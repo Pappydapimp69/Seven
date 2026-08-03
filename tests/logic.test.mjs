@@ -650,6 +650,7 @@ check("CHORUS makes every report agree with you", () => {
 
 check("distortion pre-echoes before zero, so the lead has a tell about themselves", () => {
   const sim = createRun({ seed: 30 });
+  sim.time = LUCIDITY_GRACE;
   const percept = createPercept();
   sim.player.lucidity = 100;
   eq(distortion(percept, sim), 0, "distortion while fresh");
@@ -829,6 +830,7 @@ check("use: a tether steadies the target — reduced drain, not a cure", () => {
 
 check("use: a lens buys a truth window without touching the meter or curing anyone", () => {
   const sim = createRun({ seed: 57 });
+  sim.time = LUCIDITY_GRACE;
   const percept = createPercept();
   sim.player.hallucinating = true;
   sim.player.hallucination = HALLUCINATION.WRONG_WAY;
@@ -1919,6 +1921,7 @@ check("releasing lets the party AI drive that companion again", () => {
 
 check("each human gets their own percept, so they can be shown different worlds", () => {
   const sim = createRun({ seed: 309 });
+  sim.time = LUCIDITY_GRACE;
   const c = sim.companions[0];
   possess(sim, c.id);
   const pLead = createPercept(sim.player);

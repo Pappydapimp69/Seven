@@ -11,7 +11,7 @@
 // assert "a hallucinating lead is shown a marker the sim does not contain"
 // without booting a browser.
 
-import { HALLUCINATION, BAND, bandOf, ITEM_INFO } from "./state.js";
+import { HALLUCINATION, BAND, bandOf, ITEM_INFO, LUCIDITY_GRACE } from "./state.js";
 import { ITEM_KINDS } from "./world.js";
 
 const PHANTOM_NAMES = ["the Sixth Stone", "the Watching Slab", "the Other Cairn", "the Hollow Tooth"];
@@ -288,6 +288,14 @@ export function updatePercept(percept, sim, dt) {
  */
 export function distortion(percept, sim) {
   if (isClear(percept, sim)) return 0;
+  // A carried-over mind can walk into a new basin already low, or even mid-
+  // hallucination (state.js's own carryOver comment: that's deliberate — a
+  // worn-down party stays worn down). But the grace window's whole point is
+  // an orientation beat with nothing to react to yet, so the visible
+  // distortion itself is withheld here even though the underlying state
+  // isn't — same asymmetry as tickLucidity's grace check, applied to what
+  // the screen shows rather than what the meter does.
+  if (sim.time < LUCIDITY_GRACE) return 0;
   const l = eyeOf(percept, sim).lucidity;
   const pre = l <= 0 ? 0 : l < 14 ? 0.3 : l < 36 ? 0.15 : l < 62 ? 0.05 : 0;
   return Math.max(pre, percept.intensity);

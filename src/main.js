@@ -13,7 +13,7 @@ import { createInput, ACTIONS } from "./input.js";
 import { createAudio } from "./audio.js";
 import { hashSeed } from "./rng.js";
 
-const BUILD = "mirage-0.7.1";
+const BUILD = "mirage-0.7.2";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
