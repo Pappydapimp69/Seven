@@ -4,7 +4,8 @@ A real-time 3D exploration game: you lead a survey party of six through a
 fogged basin. Every mind in the party — yours included — carries a hidden
 meter that only counts down, and at zero, that mind starts hallucinating.
 
-> Status: **0.1.0**, playable end to end — title, run, debrief. Started life as
+> Status: **0.7.x**, playable end to end — title, run, debrief, and a
+> campaign you can put down and pick up again. Started life as
 > a build inside [Opticon](https://github.com/Pappydapimp69/Opticon) and was
 > pulled out into its own repo once it stood on its own (see `docs/adr/`).
 
@@ -91,7 +92,10 @@ index.html          title / HUD / pause / debrief shells
 css/style.css       overlay styling (contains no meter — by design)
 lib/three.module.js vendored Three.js (self-contained single-file build)
 src/
-  rng.js            seeded determinism: a seed describes a whole run
+  rng.js            seeded determinism: a seed describes a whole run;
+                    snapshot()/restore() carry the raw state word for saves
+  save.js           run snapshots -> localStorage (the world is NOT saved; it
+                    is regenerated from the seed and the delta applied over it)
   world.js          basin generation + the connectivity repair pass
   state.js          THE SIM — lucidity, hallucination, pylons, endings
   party.js          the five companions: follow, break, wander, talk
@@ -103,12 +107,17 @@ src/
   audio.js          synthesised ambience; no assets
   main.js           wiring, menu grid nav, frame loop
 tests/
-  logic.test.mjs    58 pure-logic assertions, no browser
+  logic.test.mjs    pure-logic assertions, no browser
+  save.test.mjs     save/resume round trip + forward-divergence check
+  resume.mjs        real browser: play, leave, resume, discard-guard
   balance.mjs       whole runs to a terminal state; completability oracle
   smoke.mjs         real Chromium: draws, drains, hallucinates, recovers
   gamepad.mjs       real Chromium + a fake Gamepad object: full menu +
                     in-run nav on a controller alone
   run-all.sh
+tools/
+  stamp-version.mjs put ONE cache-bust token on index.html AND every
+                    relative import in src/ — see "Deploying" below
 docs/adr/           why this repo looks the way it does
 ```
 
@@ -133,6 +142,49 @@ after the run is over.
 touch buttons appear only while touch is active, and gamepad hints render as
 coloured A/B/X/Y badges instead of plain letters — the player should never have
 to translate "the button that looks like this" into a word.
+
+## Saving
+
+The run autosaves every 5 sim-seconds and on tab hide/close. The title screen
+offers **Resume run** when a save exists; **New run** then needs two presses,
+so a campaign can't be discarded by muscle memory.
+
+Only the mutable delta is stored — the basin is a pure function of its seed, so
+a resume regenerates the world and applies what changed over it. Two rules the
+schema is built around:
+
+- **The rng is restored from its raw state word**, not by replaying draws.
+  Anything that *gates* an rng draw is therefore save state too, however
+  cosmetic it looks: `sightTimer`, `remarkCooldown`, `repathTimer` and a
+  companion's cached `path` all decide *which tick* a draw happens on, and
+  leaving them out produced a resume with identical positions and meters and a
+  silently different rng stream — invisible for minutes, then a different basin.
+- **An ended run is never saved.** Resume can't hand back the frame you lost.
+
+Couch co-op is deliberately not restored: a resume comes up solo and player two
+rejoins with a pad press. Reviving a slot for a controller that may not be
+plugged in produces a companion nobody is driving, which reads as a frozen party
+member rather than a lost slot.
+
+## Deploying
+
+`index.html` is loaded with a `?v=` token, but **ES module imports do not
+inherit a query string** — `import "./percept.js"` is its own cache entry. An
+entry-point-only bust therefore refreshes `main.js` and serves every other
+module from cache, which looks exactly like "the fix didn't work" and gets
+re-diagnosed as a phantom logic bug.
+
+So bump versions with the tool, never by hand:
+
+```bash
+node tools/stamp-version.mjs 0.7.6   # index.html + BUILD + every src/ import
+```
+
+Commit **everything it touches in one commit**. A partial stamp means
+`main.js` imports `./state.js?v=NEW` while `percept.js` imports
+`./state.js?v=OLD`, and the browser loads state.js twice as two module
+instances. `logic.test.mjs` asserts both invariants (every import carries the
+current token; exactly one token is live anywhere).
 
 ## Tests
 

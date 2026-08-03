@@ -2422,6 +2422,22 @@ check("every module import and asset URL carries the current BUILD token", () =>
   for (const asset of ["css/style.css", "src/main.js"]) {
     assert(html.includes(`${asset}?v=${build}`), `index.html references ${asset} without ?v=${build}`);
   }
+
+  // A PARTIAL stamp is worse than none, and is the easy mistake: stamp, then
+  // commit only some of the touched files. main.js then imports
+  // "./state.js?v=NEW" while percept.js imports "./state.js?v=OLD", and the
+  // browser loads state.js TWICE under two URLs — two module instances, two
+  // copies of every module-level value. Exactly one token may appear anywhere.
+  const seen = new Set();
+  for (const file of fsReaddirSync(srcDir).filter((f) => f.endsWith(".js"))) {
+    const text = fsReadFileSync(new URL(file, srcDir), "utf8");
+    for (const [, tok] of text.matchAll(/\?v=(mirage-[\d.]+)/g)) seen.add(tok);
+  }
+  for (const [, tok] of html.matchAll(/\?v=(mirage-[\d.]+)/g)) seen.add(tok);
+  assert(
+    seen.size <= 1,
+    `more than one cache-bust token is live (${[...seen].join(", ")}) — a partial stamp loads a module twice under two URLs`,
+  );
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
