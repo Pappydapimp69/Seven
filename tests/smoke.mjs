@@ -173,6 +173,7 @@ function assert(cond, msg) {
   // --- the hallucination path ---------------------------------------------
   const gone = await page.evaluate(() => {
     const M = window.__mirage;
+    M.sim.time = 300; // past LUCIDITY_GRACE — drain is withheld for the first 5 minutes of a basin
     M.drain("you", 0.05);
     M.advance(1);
     const s = M.sim;
