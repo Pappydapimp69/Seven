@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0a0f16" />
   <title>MIRAGE — five minds and yours</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230a0f16'/%3E%3Cpath d='M4 22h24' stroke='%23596579' stroke-width='2'/%3E%3Crect x='9' y='8' width='4' height='14' fill='%2374e0ff'/%3E%3Crect x='19' y='11' width='4' height='11' fill='%23b06a72'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="css/style.css?v=mirage-0.7.4" />
+  <link rel="stylesheet" href="css/style.css?v=mirage-0.7.5" />
 </head>
 <body>
   <canvas id="gl"></canvas>
@@ -51,8 +51,15 @@
         </div>
       </div>
 
-      <button id="startBtn" class="big-btn" data-row="2" data-col="0">Walk in</button>
-      <button id="howBtn" class="text-btn" data-row="3" data-col="0">How to play</button>
+      <!-- Shown only when a save exists (main.js adds .show). It sits ABOVE
+           "Walk in" and takes the menu's first row when present, so the
+           default focus lands on continuing rather than on the button that
+           silently discards the run. -->
+      <button id="continueBtn" class="big-btn resume" data-row="2" data-col="0">
+        Resume run<span id="continueDetail" class="resume-detail"></span>
+      </button>
+      <button id="startBtn" class="big-btn" data-row="3" data-col="0">Walk in</button>
+      <button id="howBtn" class="text-btn" data-row="4" data-col="0">How to play</button>
 
       <p id="menuHints" class="menu-hints"></p>
 
@@ -202,7 +209,7 @@
   <!-- DEBRIEF -->
   <div id="debriefLayer" class="screen hidden"></div>
 
-  <script type="module" src="src/main.js?v=mirage-0.7.4"></script>
+  <script type="module" src="src/main.js?v=mirage-0.7.5"></script>
   <noscript><p style="color:#ccd">MIRAGE needs JavaScript and WebGL.</p></noscript>
 </body>
 </html>

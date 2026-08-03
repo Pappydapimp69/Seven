@@ -572,3 +572,23 @@ body[data-coop="2"] #actionPrompt { left: 25%; }
 
 .item-bar.p2 { display: none; left: auto; right: 16px; }
 body[data-coop="2"] .item-bar.p2 { display: flex; }
+
+/* Resume: hidden unless main.js finds a save. Sits above "Walk in" and is
+   visually the primary action when present — continuing a run should never be
+   the harder thing to hit. */
+.big-btn.resume { display: none; }
+.big-btn.resume.show { display: block; }
+.resume-detail {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--dim);
+  text-transform: none;
+}
+/* The confirm state for discarding a live save — see main.js's startBtn
+   handler. Warm, not alarming: it is a real choice, not an error. */
+.big-btn.confirm-new {
+  border-color: var(--warm);
+  color: var(--warm);
+}

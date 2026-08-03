@@ -11,6 +11,10 @@ echo "== logic =="
 node tests/logic.test.mjs
 echo
 
+echo "== save/resume (pure) =="
+node tests/save.test.mjs
+echo
+
 echo "== balance (whole runs to a terminal state) =="
 node tests/balance.mjs "${BALANCE_SEEDS:-12}"
 echo
@@ -24,6 +28,9 @@ if [ -d /opt/pw-browsers ] && node -e 'require("/opt/node22/lib/node_modules/pla
   echo
   echo "== coop (real browser, split-screen) =="
   node tests/coop.mjs
+  echo
+  echo "== resume (real browser, save slot) =="
+  node tests/resume.mjs
 else
   echo "== smoke + gamepad: SKIPPED — Playwright/Chromium not available here =="
   echo "   (the 3D layer was NOT exercised in this run)"
