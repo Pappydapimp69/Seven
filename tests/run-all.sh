@@ -42,6 +42,9 @@ if [ -d /opt/pw-browsers ] && node -e 'require("/opt/node22/lib/node_modules/pla
   echo
   echo "== menu nav (real browser, changing menu shape) =="
   node tests/menu-nav.mjs
+  echo
+  echo "== campaign (real browser, basin -> basin + save) =="
+  node tests/campaign.mjs
 else
   echo "== smoke + gamepad: SKIPPED — Playwright/Chromium not available here =="
   echo "   (the 3D layer was NOT exercised in this run)"
