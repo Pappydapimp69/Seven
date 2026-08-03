@@ -173,6 +173,11 @@ function assert(cond, msg) { if (!cond) failures.push(msg); }
     // window measures the grace window, not the asymmetry this block is about.
     M.sim.time = 300;
     // Drop ONLY player two's meter. The lead's is untouched.
+    // Past the opening dead-calm window: distortion() deliberately reports 0
+    // while sim.time < LUCIDITY_GRACE, so a drain at t=0 would produce a
+    // hallucinating mind with an honest screen — correct behaviour, but not
+    // what this asymmetry check is about.
+    M.sim.time = 300;
     M.drain(p2.eye.id, 0);
     M.advance(3);
     return {

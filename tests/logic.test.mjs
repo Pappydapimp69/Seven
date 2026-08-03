@@ -14,7 +14,7 @@ import {
   possess, release, possessableCompanions,
   PARTY_SIZE, MAX_LUCIDITY, DOSE_COUNT, RECOVER_AT, RECOVER_TIME, DISSOLVE_TIME,
   TIME_LIMIT, PYLON_RADIUS, LOG_RADIUS, ISOLATION_DIST,
-  ITEM_CAP, ITEM_PICKUP_RADIUS, ITEM_INFO, PHANTOM_ITEM_COST, CRAFT_RECIPES, CAMPAIGN_LENGTH, LUCIDITY_GRACE,
+  ITEM_CAP, ITEM_PICKUP_RADIUS, ITEM_INFO, PHANTOM_ITEM_COST, CRAFT_RECIPES, CAMPAIGN_LENGTH, LUCIDITY_GRACE, FULL_DRAIN_AT, graceMultiplier,
   GATHER_RADIUS, GATHER_HOLD_TIME, GATHER_YIELD, STAKE_COST, PYLON_MAX_CHARGE, TRAIT_VARIANCE, COMPANION_TEMPLATES,
   COMPANION_ITEM_CAP, OFFER_RADIUS,
 } from "../src/state.js";
@@ -222,22 +222,54 @@ check("a run starts with the player plus five companions, all full", () => {
   eq(sim.status, "playing");
 });
 
-check("nobody's lucidity moves during the opening grace window, and drain resumes right after", () => {
+check("nobody's lucidity moves during the dead-calm window, then drain eases in", () => {
   const sim = createRun({ seed: 8 });
   const spot = farFromPylons(sim);
   for (const c of sim.party) { c.x = spot.x; c.z = spot.z; }
   const before = sim.companions.map((c) => c.lucidity);
   sim.time = LUCIDITY_GRACE - 1;
   for (const c of sim.party) tickLucidity(sim, c, 1);
-  sim.companions.forEach((c, i) => eq(c.lucidity, before[i], `${c.name} drained before the grace window ended`));
-  sim.time = LUCIDITY_GRACE;
+  sim.companions.forEach((c, i) => eq(c.lucidity, before[i], `${c.name} drained inside the dead-calm window`));
+  sim.time = FULL_DRAIN_AT;
   for (const c of sim.party) tickLucidity(sim, c, 1);
-  sim.companions.forEach((c, i) => assert(c.lucidity < before[i], `${c.name} did not drain once the grace window ended`));
+  sim.companions.forEach((c, i) => assert(c.lucidity < before[i], `${c.name} did not drain at full rate`));
+});
+
+check("the grace ramp is a slope, not a cliff — partial drain in the middle", () => {
+  eq(graceMultiplier(0), 0, "drain at t=0");
+  eq(graceMultiplier(LUCIDITY_GRACE - 0.01), 0, "drain just before the calm window ends");
+  eq(graceMultiplier(LUCIDITY_GRACE), 0, "the ramp starts at zero");
+  eq(graceMultiplier(FULL_DRAIN_AT), 1, "full drain at the end of the ramp");
+  eq(graceMultiplier(FULL_DRAIN_AT + 999), 1, "drain never exceeds full");
+  const mid = graceMultiplier((LUCIDITY_GRACE + FULL_DRAIN_AT) / 2);
+  assert(mid > 0.4 && mid < 0.6, `halfway through the ramp should be about half drain, got ${mid}`);
+  // Monotonic: pressure may never DROP as the basin goes on.
+  let prev = -1;
+  for (let t = 0; t <= FULL_DRAIN_AT + 30; t += 5) {
+    const g = graceMultiplier(t);
+    assert(g >= prev, `grace multiplier went backwards at t=${t}`);
+    prev = g;
+  }
+});
+
+check("the difficulty tiers are still distinguishable through the ramp", () => {
+  // The flat 300s window made gentle/standard/bleak produce identical runs,
+  // because with no drain anywhere there is nothing for diffMult to multiply.
+  // This is the regression guard for that: at full drain the tiers must differ.
+  const rates = ["gentle", "standard", "bleak"].map((difficulty) => {
+    const sim = createRun({ seed: 8, difficulty });
+    const spot = farFromPylons(sim);
+    for (const c of sim.party) { c.x = spot.x; c.z = spot.z; }
+    sim.time = FULL_DRAIN_AT;
+    return tickLucidity(sim, sim.companions[0], 1);
+  });
+  assert(rates[0] < rates[1] && rates[1] < rates[2],
+    `pressure tiers must order gentle < standard < bleak, got ${rates.map((r) => r.toFixed(3))}`);
 });
 
 check("lucidity only ever falls, absent a pylon or a dose", () => {
   const sim = createRun({ seed: 8 });
-  sim.time = LUCIDITY_GRACE; // past the orientation window — drain applies
+  sim.time = FULL_DRAIN_AT; // past the orientation window — drain applies
   // Park everyone far from any pylon so the only force acting is drain.
   const spot = farFromPylons(sim);
   for (const c of sim.party) { c.x = spot.x; c.z = spot.z; }
@@ -248,7 +280,7 @@ check("lucidity only ever falls, absent a pylon or a dose", () => {
 
 check("companions drain at different rates — the party is not one meter", () => {
   const sim = createRun({ seed: 8 });
-  sim.time = LUCIDITY_GRACE;
+  sim.time = FULL_DRAIN_AT;
   const spot = farFromPylons(sim);
   for (const c of sim.party) { c.x = spot.x; c.z = spot.z; }
   for (let i = 0; i < 30; i++) for (const c of sim.party) tickLucidity(sim, c, 1);
@@ -258,7 +290,7 @@ check("companions drain at different rates — the party is not one meter", () =
 
 check("walking off alone drains faster than staying with the party", () => {
   const sim = createRun({ seed: 9 });
-  sim.time = LUCIDITY_GRACE;
+  sim.time = FULL_DRAIN_AT;
   const spot = farFromPylons(sim);
   for (const c of sim.party) { c.x = spot.x; c.z = spot.z; }
   const together = tickLucidity(sim, sim.companions[0], 1);
@@ -272,7 +304,7 @@ check("walking off alone drains faster than staying with the party", () => {
 
 check("watching someone come apart costs you", () => {
   const sim = createRun({ seed: 10 });
-  sim.time = LUCIDITY_GRACE;
+  sim.time = FULL_DRAIN_AT;
   const spot = farFromPylons(sim);
   for (const c of sim.party) { c.x = spot.x; c.z = spot.z; }
   const subject = sim.companions[0];
@@ -286,7 +318,7 @@ check("watching someone come apart costs you", () => {
 
 check("coming back leaves a scar that makes the next fall faster", () => {
   const sim = createRun({ seed: 11 });
-  sim.time = LUCIDITY_GRACE;
+  sim.time = FULL_DRAIN_AT;
   const spot = farFromPylons(sim);
   for (const c of sim.party) { c.x = spot.x; c.z = spot.z; }
   const c = sim.companions[0];
@@ -301,7 +333,7 @@ check("coming back leaves a scar that makes the next fall faster", () => {
 
 check("hitting zero starts a hallucination, with a specific kind", () => {
   const sim = createRun({ seed: 12 });
-  sim.time = LUCIDITY_GRACE;
+  sim.time = FULL_DRAIN_AT;
   const c = sim.companions[2];
   c.lucidity = 0.2;
   c.x = farFromPylons(sim).x;
@@ -437,7 +469,7 @@ check("a pylon restores everyone standing in it, and spends itself doing so", ()
 
 check("a spent pylon does nothing", () => {
   const sim = createRun({ seed: 14 });
-  sim.time = LUCIDITY_GRACE;
+  sim.time = FULL_DRAIN_AT;
   const p = sim.pylons[0];
   p.charge = 0;
   const c = sim.companions[0];
@@ -651,7 +683,7 @@ check("CHORUS makes every report agree with you", () => {
 
 check("distortion pre-echoes before zero, so the lead has a tell about themselves", () => {
   const sim = createRun({ seed: 30 });
-  sim.time = LUCIDITY_GRACE;
+  sim.time = FULL_DRAIN_AT;
   const percept = createPercept();
   sim.player.lucidity = 100;
   eq(distortion(percept, sim), 0, "distortion while fresh");
@@ -816,7 +848,7 @@ check("use: a flare restores lucidity and is consumed", () => {
 
 check("use: a tether steadies the target — reduced drain, not a cure", () => {
   const sim = createRun({ seed: 56 });
-  sim.time = LUCIDITY_GRACE;
+  sim.time = FULL_DRAIN_AT;
   const target = sim.companions[0];
   const spot = farFromPylons(sim);
   for (const c of sim.party) { c.x = spot.x; c.z = spot.z; }
@@ -831,7 +863,7 @@ check("use: a tether steadies the target — reduced drain, not a cure", () => {
 
 check("use: a lens buys a truth window without touching the meter or curing anyone", () => {
   const sim = createRun({ seed: 57 });
-  sim.time = LUCIDITY_GRACE;
+  sim.time = FULL_DRAIN_AT;
   const percept = createPercept();
   sim.player.hallucinating = true;
   sim.player.hallucination = HALLUCINATION.WRONG_WAY;
@@ -2126,7 +2158,7 @@ check("companions follow the lead", () => {
 
 check("a brittle companion breaks formation for a pylon they remember", () => {
   const sim = createRun({ seed: 44 });
-  sim.time = LUCIDITY_GRACE;
+  sim.time = FULL_DRAIN_AT;
   const p = sim.pylons[0];
   const c = sim.companions[0];
   // The party is out in the basin, well away from relief, but this companion has
@@ -2168,7 +2200,7 @@ check("a gone companion stops following and goes its own way", () => {
 
 check("companions volunteer remarks, and a gone one says gone things", () => {
   const sim = createRun({ seed: 46 });
-  sim.time = LUCIDITY_GRACE;
+  sim.time = FULL_DRAIN_AT;
   let normal = 0;
   advance(sim, 60);
   normal = sim.companions.length; // remarks are emitted as events; count over a window
@@ -2359,7 +2391,7 @@ check("releasing lets the party AI drive that companion again", () => {
 
 check("each human gets their own percept, so they can be shown different worlds", () => {
   const sim = createRun({ seed: 309 });
-  sim.time = LUCIDITY_GRACE;
+  sim.time = FULL_DRAIN_AT;
   const c = sim.companions[0];
   possess(sim, c.id);
   const pLead = createPercept(sim.player);
@@ -2859,6 +2891,22 @@ check("every module import and asset URL carries the current BUILD token", () =>
   for (const asset of ["css/style.css", "src/main.js"]) {
     assert(html.includes(`${asset}?v=${build}`), `index.html references ${asset} without ?v=${build}`);
   }
+
+  // A PARTIAL stamp is worse than none, and is the easy mistake: stamp, then
+  // commit only some of the touched files. main.js then imports
+  // "./state.js?v=NEW" while percept.js imports "./state.js?v=OLD", and the
+  // browser loads state.js TWICE under two URLs — two module instances, two
+  // copies of every module-level value. Exactly one token may appear anywhere.
+  const seen = new Set();
+  for (const file of fsReaddirSync(srcDir).filter((f) => f.endsWith(".js"))) {
+    const text = fsReadFileSync(new URL(file, srcDir), "utf8");
+    for (const [, tok] of text.matchAll(/\?v=(mirage-[\d.]+)/g)) seen.add(tok);
+  }
+  for (const [, tok] of html.matchAll(/\?v=(mirage-[\d.]+)/g)) seen.add(tok);
+  assert(
+    seen.size <= 1,
+    `more than one cache-bust token is live (${[...seen].join(", ")}) — a partial stamp loads a module twice under two URLs`,
+  );
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed`);

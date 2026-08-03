@@ -5,15 +5,16 @@ import {
   createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem, dropItem, craftItem, gatherTarget, offerItem,
   possess, release, possessableCompanions,
   PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=mirage-0.7.4";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=mirage-0.7.4";
-import { createRenderer } from "./render.js?v=mirage-0.7.4";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=mirage-0.7.4";
-import { createInput, ACTIONS } from "./input.js?v=mirage-0.7.4";
-import { createAudio } from "./audio.js?v=mirage-0.7.4";
-import { hashSeed } from "./rng.js?v=mirage-0.7.4";
+} from "./state.js?v=mirage-0.8.0";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=mirage-0.8.0";
+import { createRenderer } from "./render.js?v=mirage-0.8.0";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=mirage-0.8.0";
+import { createInput, ACTIONS } from "./input.js?v=mirage-0.8.0";
+import { createAudio } from "./audio.js?v=mirage-0.8.0";
+import { hashSeed } from "./rng.js?v=mirage-0.8.0";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave } from "./save.js?v=mirage-0.8.0";
 
-const BUILD = "mirage-0.7.4";
+const BUILD = "mirage-0.8.0";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -32,6 +33,11 @@ let coopAllowed = false; // title-screen Party option; gates the mid-run join po
 // debug hooks. The authoritative copy lives on each player (makeLocalPlayer).
 const lead = () => (run && run.players[0]) || { selected: 0, selectedItem: 0 };
 let whisperTimer = 0;
+// Seconds of SIM time since the last autosave (see step()).
+let saveTimer = 0;
+// Sim-seconds between autosaves. Short enough that a closed tab costs little,
+// long enough that a serialise is nowhere near a per-frame cost.
+const AUTOSAVE_EVERY = 5;
 let lastFrame = 0;
 let campaignSeed = 0; // the seed the player actually entered/rolled — each basin in the campaign derives its own seed from this so "New basin" always starts a fresh campaign
 
@@ -39,6 +45,9 @@ const LAYERS = ["title", "hudLayer", "pauseLayer", "debriefLayer"];
 function screens(show) {
   for (const id of LAYERS) el(id).classList.toggle("hidden", id !== show);
   input.setMode(show === "hudLayer" ? "game" : "menu");
+  // Before focus is seated, so the grid is already its final shape: showing or
+  // hiding Resume changes which rows exist.
+  if (show === "title") refreshTitleSave();
   if (show !== "hudLayer") setupMenuFocus(show);
 }
 
@@ -54,7 +63,13 @@ const menu = { root: null, row: 0, col: 0 };
 
 function menuElements() {
   const sel = ROOT_SELECTOR[menu.root];
-  return sel ? Array.from(document.querySelectorAll(`${sel} [data-row]`)) : [];
+  if (!sel) return [];
+  // HIDDEN CONTROLS ARE NOT IN THE GRID. `display:none` still matches a
+  // querySelector, so once the title screen gained a Resume button that only
+  // appears when a save exists, a controller pressing Down landed focus on an
+  // invisible row and confirm did nothing — the pad looked broken. Anything
+  // that can be conditionally shown has to be filtered here, not just styled.
+  return Array.from(document.querySelectorAll(`${sel} [data-row]`)).filter((e) => e.offsetParent !== null);
 }
 function currentFocusEl() {
   return menuElements().find((e) => Number(e.dataset.row) === menu.row && Number(e.dataset.col) === menu.col);
@@ -130,10 +145,73 @@ function refreshSchemeUI(scheme) {
   if (run) run.hud.setHints(scheme);
 }
 
+
+// ---- title-screen save state ------------------------------------------------
+// Whether a resumable save exists, re-read every time the title screen is
+// shown (a run can end, or another tab can clear it, while the title sits open).
+let hasSaveNow = false;
+// One-press-to-arm guard on "Walk in" while a save exists — see its handler.
+let newRunArmed = false;
+
+/**
+ * Sync the title screen to whatever is in the save slot: show or hide Resume,
+ * label it with how far the run got, and reset the discard confirmation.
+ * Deliberately reports basin/elapsed/difficulty and NOTHING about anyone's
+ * lucidity — the meters are invisible, and a menu is not a loophole for them.
+ */
+function refreshTitleSave() {
+  const data = loadSave();
+  hasSaveNow = !!data;
+  newRunArmed = false;
+  const start = el("startBtn");
+  if (start) {
+    start.textContent = hasSaveNow ? "New run" : "Walk in";
+    start.classList.remove("confirm-new");
+  }
+  const btn = el("continueBtn");
+  if (!btn) return;
+  btn.classList.toggle("show", hasSaveNow);
+  if (hasSaveNow) {
+    const d = describeSave(data);
+    const mm = String(d.minutes).padStart(2, "0");
+    const ss = String(d.seconds).padStart(2, "0");
+    el("continueDetail").textContent =
+      `basin ${d.level} of ${d.campaignLength} · ${mm}:${ss} in · ${DIFFICULTY[d.difficulty]?.label || d.difficulty} · seed ${d.seed}`;
+  }
+  // The menu grid changes shape when Resume appears/disappears, so re-seat
+  // focus or a controller can be left pointing at a row that no longer exists.
+  if (menu.root === "title") setupMenuFocus("title");
+}
+
 function startRun({ seed, difficulty } = {}) {
   const seedValue = seed ?? Math.floor(Math.random() * 0xffffff) + 1;
   campaignSeed = seedValue;
   const sim = createRun({ seed: seedValue, difficulty: difficulty || "standard", level: 1, campaignLength: CAMPAIGN_LENGTH });
+  // A NEW run always clears the slot: leaving the old save behind would offer
+  // a Resume that silently jumps out of the run now on screen (Brain: dbh#E4 —
+  // New Game must go through the real construction path, and must not leave
+  // stale authoritative state lying around behind it).
+  clearSave();
+  return mountRun(sim, "Six of you. One basin. Keep them together.");
+}
+
+/**
+ * Resume a saved run. Deliberately shares mountRun with startRun so a resumed
+ * run is wired EXACTLY like a fresh one — same percept binding, renderer, hud,
+ * player list. Returns null if there is nothing valid to resume, so the caller
+ * can fall back rather than mounting a half-run.
+ */
+function resumeRun() {
+  const data = loadSave();
+  const sim = data && deserializeRun(data);
+  if (!sim) return null;
+  campaignSeed = sim.seed;
+  return mountRun(sim, `Basin ${sim.level} of ${sim.campaignLength}. You pick up where you stopped.`);
+}
+
+/** Everything a run needs on screen, shared by a fresh start and a resume. */
+function mountRun(sim, openingLine) {
+  const seedValue = sim.seed;
   const percept = createPercept(sim.player);
   const renderer = createRenderer(canvas, sim);
   const hud = createHud(sim, percept);
@@ -141,7 +219,8 @@ function startRun({ seed, difficulty } = {}) {
   whisperTimer = 0;
   run = { sim, percept, renderer, hud, players: [makeLocalPlayer(0, sim.player, percept)] };
   hud.setHints(input.activeScheme);
-  hud.say("Six of you. One basin. Keep them together.", "warn");
+  hud.say(openingLine, "warn");
+  saveTimer = 0;
   el("seedLabel").textContent = `seed ${seedValue}`;
   screens("hudLayer");
   audio.start();
@@ -629,11 +708,25 @@ function step(dt, intent) {
   // tick() directly in a loop.
   sim.events.length = 0;
 
+  // Autosave on the SIM's clock, not wall time, so a slow frame or a
+  // backgrounded tab can't change how much progress a save is worth.
+  // saveRun itself refuses anything that isn't status "playing", so the
+  // ordering below (save, then handle endings) can't write a finished board.
+  saveTimer += dt;
+  if (saveTimer >= AUTOSAVE_EVERY) {
+    saveTimer = 0;
+    saveRun(sim, Date.now());
+  }
+
   if (sim.status === "levelComplete") advanceLevel();
   else if (sim.status !== "playing") finish();
 }
 
 function finish() {
+  // The run is over: drop the slot before showing the debrief, so "Resume"
+  // can never hand the player back the frame they already lost (Brain:
+  // wrong-sky#E2 — never keep a save of an ended world).
+  clearSave();
   const report = debrief(run.sim);
   renderDebrief(el("debriefLayer"), report);
   screens("debriefLayer");
@@ -679,9 +772,23 @@ function boot() {
     });
   }
   el("startBtn").addEventListener("click", () => {
+    // Starting fresh DISCARDS a saved run, so when one exists the first press
+    // only arms the button and says so. A destructive action reachable by one
+    // press of the control the player has been pressing all along is how you
+    // lose someone's campaign to muscle memory.
+    if (hasSaveNow && !newRunArmed) {
+      newRunArmed = true;
+      const btn = el("startBtn");
+      btn.textContent = "Discard saved run — press again";
+      btn.classList.add("confirm-new");
+      return;
+    }
     const raw = el("seedInput").value.trim();
     const seed = raw ? (/^\d+$/.test(raw) ? Number(raw) : hashSeed(raw)) : undefined;
     startRun({ seed, difficulty });
+  });
+  el("continueBtn").addEventListener("click", () => {
+    if (!resumeRun()) refreshTitleSave(); // the save vanished or was unreadable — re-sync the button
   });
   el("howBtn").addEventListener("click", () => el("howto").classList.toggle("hidden"));
   el("resumeBtn").addEventListener("click", togglePause);
@@ -716,6 +823,14 @@ function boot() {
   el("btnUse")?.addEventListener("click", () => run && handleAction(ACTIONS.USE_ITEM));
   el("btnCraft")?.addEventListener("click", () => run && handleAction(ACTIONS.CRAFT));
   el("btnGive")?.addEventListener("click", () => run && handleAction(ACTIONS.OFFER_ITEM));
+
+  // A closing tab, a backgrounded phone, an alt-tab: all of these can end the
+  // session between autosaves, so flush on the way out. visibilitychange is the
+  // one that actually fires reliably on mobile — beforeunload does not.
+  const flush = () => { if (run && !paused) saveRun(run.sim, Date.now()); };
+  window.addEventListener("beforeunload", flush);
+  document.addEventListener("visibilitychange", () => { if (document.hidden) flush(); });
+
   screens("title");
   requestAnimationFrame(frame);
 }
@@ -739,6 +854,10 @@ if (typeof window !== "undefined") {
     get selected() { return lead().selected; },
     get selectedItem() { return lead().selectedItem; },
     act: (action, arg) => run && handleAction(action, arg),
+    /** Leave the run for the title screen — what "quit" does, for tests. */
+    toTitle() { run = null; paused = false; screens("title"); },
+    /** Drive the menu grid down one row — for testing focus over a changing menu. */
+    menuDown() { menuNavY(1); },
     // Couch co-op, driven without physical controllers. The real join path is
     // a pad press (pollCoopJoin); this is the same possession + percept +
     // viewport wiring with the device step skipped, so a test can exercise

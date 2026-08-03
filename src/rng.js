@@ -27,6 +27,19 @@ export function makeRng(seed) {
     }
     return out;
   };
+  // Save/load of the generator's RAW STATE WORD, not a count of draws to
+  // replay. mulberry32's whole state is the single 32-bit `a`, so restoring a
+  // mid-run stream is O(1) and exact — replaying N draws to catch up would be
+  // O(N) and would drift the moment any code path's draw count changed
+  // (Brain: the-game-prologue#E1, test#E2).
+  //
+  // restore() deliberately does NOT apply makeRng's `|| 1` seed guard: 0 is a
+  // legitimate mid-stream value of `a` (it steps by a fixed odd addend through
+  // the whole 32-bit space), and silently rewriting it to 1 would fork the
+  // stream on exactly one save in four billion — the kind of bug that only
+  // ever shows up as an unreproducible "my save loaded wrong".
+  next.snapshot = () => a >>> 0;
+  next.restore = (word) => { a = word >>> 0; };
   return next;
 }
 

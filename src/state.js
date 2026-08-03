@@ -14,9 +14,9 @@
 // The sim's job is to keep an honest, testable record of what is TRUE; `percept.js`
 // is the only place allowed to lie about it.
 
-import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=mirage-0.7.4";
-import { makeRng } from "./rng.js?v=mirage-0.7.4";
-import { updateCompanions, companionRemark } from "./party.js?v=mirage-0.7.4";
+import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=mirage-0.8.0";
+import { makeRng } from "./rng.js?v=mirage-0.8.0";
+import { updateCompanions, companionRemark } from "./party.js?v=mirage-0.8.0";
 
 export const PARTY_SIZE = 6; // you + 5 companions — the spec's five NPCs, plus the player
 export const MAX_LUCIDITY = 100;
@@ -28,11 +28,58 @@ export const MAX_LUCIDITY = 100;
 // small enough gap that it should not be quoted as settled. Note the harness bot
 // reads the sim's truth, so none of these numbers price the hallucination layer.
 export const BASE_DRAIN = 1.05; // lucidity/second at rest, before modifiers
-// An orientation window: nobody's meter moves for the first 5 minutes of a
-// basin, so a fresh level doesn't start punishing you before you've even
-// gotten your bearings. `sim.time` resets to 0 at the top of every level
-// (see createRun), so this is measured per-basin, not once across a campaign.
-export const LUCIDITY_GRACE = 300;
+// An orientation window, in two parts: a hard freeze where NOTHING moves, then
+// an ease-in to full drain. `sim.time` resets to 0 at the top of every level
+// (see createRun), so both are measured per-basin.
+//
+// This started as a flat 300s freeze — a literal "five minutes before the
+// meter moves". Measured, that turned out to disable the game rather than
+// gentle its opening: a basin is completable in ~270s, so the ENTIRE typical
+// run fell inside the window. The balance harness returned byte-identical
+// results for careful, reckless AND bleak (75%, 268.6s, same markers found),
+// because with no drain anywhere the difficulty multiplier has nothing to
+// multiply. It also cut companion hallucination episodes from 0.88 to 0.21 per
+// run — which is the same "nobody else seems to hallucinate" the player
+// reported, caused by the fix for the other thing they reported.
+//
+// So: a real settling beat where the meter genuinely does not move, then
+// pressure arriving as a slope rather than a cliff, reaching full while a
+// normal run is still going.
+//
+// Measured at these numbers (n=40 where available):
+//   * the pressure tiers order correctly again, by party-seconds-lost —
+//     gentle 25, careful 55, bleak/careful 99, reckless 122, bleak/reckless 234
+//   * companions break again: 4.75 episodes and ~237 gone-seconds per basin
+//     over a realistic 420s run, against 0.21 episodes under the flat 300s
+//   * a controlled zero-grace run gives bleak/careful 25%, matching the
+//     pre-grace game — so the collapse really was the window, not the
+//     companion-behaviour changes that landed alongside it
+//
+// Win RATES stay high across tiers here, and that is expected rather than a
+// miss: balance.mjs's bot reads sim truth and is blind to the hallucination
+// layer, so it is a completability oracle, not a difficulty one (T23). It
+// finishes a basin in ~180s; a human being lied to takes far longer and meets
+// much more of the full-drain phase. party-seconds-lost is the honest tier
+// signal here, and it separates cleanly.
+//
+// To go back to a flat "nothing for N seconds", set LUCIDITY_RAMP to 0 and
+// LUCIDITY_GRACE to N — but re-run tests/balance.mjs and check the tiers are
+// still distinguishable, because at N=300 they were not.
+export const LUCIDITY_GRACE = 45; // dead calm: no drain at all
+export const LUCIDITY_RAMP = 135; // then ease 0 -> full drain across this long
+/** The moment drain reaches its full rate. Tests that want normal drain use this. */
+export const FULL_DRAIN_AT = LUCIDITY_GRACE + LUCIDITY_RAMP;
+
+/**
+ * How much of the normal drain rate applies at time `t`. 0 through the freeze,
+ * then linear to 1. Kept as a pure function of the clock so it is trivially
+ * testable and so nothing else has to know the shape.
+ */
+export function graceMultiplier(t) {
+  if (t < LUCIDITY_GRACE) return 0;
+  const into = t - LUCIDITY_GRACE;
+  return into >= LUCIDITY_RAMP ? 1 : into / LUCIDITY_RAMP;
+}
 export const ISOLATION_DIST = 13; // units from the party centroid before you count as alone
 export const ISOLATION_MULT = 1.9; // walking off alone burns you down fastest
 export const CONTAGION_DIST = 9; // seeing someone come apart costs you
@@ -479,7 +526,8 @@ export function tickLucidity(sim, ch, dt) {
     beginHallucinating(sim, ch);
     return 0;
   }
-  if (sim.time < LUCIDITY_GRACE) return 0; // still inside the orientation window
+  const grace = graceMultiplier(sim.time);
+  if (grace <= 0) return 0; // still inside the dead-calm window
 
   const centroid = partyCentroid(sim);
   let mult = 1;
@@ -492,7 +540,7 @@ export function tickLucidity(sim, ch, dt) {
   // for a pylon — just buy time to reach one.
   if (ch.steadyUntil > sim.time) mult *= ITEM_INFO.tether.steadyMult;
 
-  const rate = BASE_DRAIN * ch.drain * sim.diffMult * mult;
+  const rate = BASE_DRAIN * ch.drain * sim.diffMult * mult * grace;
   ch.lucidity = Math.max(0, ch.lucidity - rate * dt);
   if (ch.lucidity <= 0) beginHallucinating(sim, ch);
   return rate;

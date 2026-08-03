@@ -117,8 +117,12 @@ const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, L3: 10, START:
   // Left stick should do the SAME thing D-pad does (debounced into one pulse),
   // moving focus on to Start.
   await stick(0, 1);
-  const focusRowAfterStick = await page.evaluate(() => document.querySelector("#title .gpfocus")?.dataset.row);
-  assert(focusRowAfterStick === "2", `left stick down did not advance focus to row 2 (Start), got ${focusRowAfterStick}`);
+  // Asserted by IDENTITY, not by row number: the title screen gained a
+  // conditionally-shown Resume button, so absolute row indices move whenever
+  // the menu's shape changes. What matters is that one press down from Party
+  // lands on the button that starts a run.
+  const focusIdAfterStick = await page.evaluate(() => document.querySelector("#title .gpfocus")?.id);
+  assert(focusIdAfterStick === "startBtn", `left stick down did not advance focus to Start, got ${focusIdAfterStick}`);
 
   // Back up to the difficulty row and pick "Bleak" with dpad-right + A, purely
   // on the gamepad, then confirm it actually took (no mouse ever touched this).
