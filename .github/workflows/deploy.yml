@@ -55,6 +55,37 @@ jobs:
           cp index.html site/
           cp -r css lib src site/
 
+      # Cache-bust EVERY module specifier, not just the entry point — and do it
+      # here, on the assembled copy, so the source tree stays no-build and the
+      # Node suite goes on importing plain "./state.js" paths.
+      #
+      # WHY ALL OF THEM. index.html's `src/main.js?v=…` is its own cache entry,
+      # but main.js's nested imports ("./state.js", "./percept.js", …) are
+      # SEPARATE entries that carried no version at all. Pages serves these with
+      # `cache-control: max-age=600`, so a player returning inside that window
+      # could get a FRESH main.js resolved against a STALE percept.js. The
+      # moment a release adds a new export — exactly what `believedKinds` did —
+      # that skew is not a subtle bug, it is an unresolved import: module load
+      # fails and the screen stays black.
+      #
+      # So a PARTIAL bust is worse than none. Left entirely unversioned, the
+      # browser at least serves one self-consistent old set that still runs and
+      # self-heals in ten minutes. Version them together or not at all.
+      - name: Cache-bust every module specifier
+        run: |
+          set -euo pipefail
+          V="${GITHUB_SHA::12}"
+          find site/src -name '*.js' -print0 \
+            | xargs -0 sed -i -E "s@(from[[:space:]]+[\"'])(\.[^\"']+\.js)([\"'])@\1\2?v=$V\3@g"
+          sed -i -E "s@(src=\"src/main\.js)(\?v=[^\"]*)?(\")@\1?v=$V\3@" site/index.html
+          sed -i -E "s@(href=\"css/style\.css)(\?v=[^\"]*)?(\")@\1?v=$V\3@" site/index.html
+          # Fail the deploy rather than publish a half-rewritten graph.
+          if grep -rnE "from[[:space:]]+[\"']\.[^\"']+\.js[\"']" site/src; then
+            echo "::error::an import specifier escaped the cache-bust rewrite"
+            exit 1
+          fi
+          echo "cache-busted every specifier at v=$V"
+
       - name: Upload the site as the Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

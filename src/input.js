@@ -32,6 +32,10 @@ export const ACTIONS = Object.freeze({
   CYCLE_ITEM: "cycleItem",
   USE_ITEM: "useItem",
   CRAFT: "craft",
+  // Put the selected item in the selected companion's hands. Doubles as the
+  // only way to find out something is wrong with YOUR OWN reading of it — see
+  // state.offerItem.
+  OFFER_ITEM: "offerItem",
   PAUSE: "pause",
 });
 
@@ -121,6 +125,7 @@ export function createInput(canvas, opts = {}) {
       case "KeyZ": push(ACTIONS.CYCLE_ITEM); break;
       case "KeyX": push(ACTIONS.USE_ITEM); break;
       case "KeyC": push(ACTIONS.CRAFT); break;
+      case "KeyV": push(ACTIONS.OFFER_ITEM); break;
       case "Escape": push(ACTIONS.PAUSE); break;
       case "Space": e.preventDefault(); break;
       default: return;
@@ -252,6 +257,7 @@ export function createInput(canvas, opts = {}) {
     if (edges[5]) push(ACTIONS.NEXT_TARGET); // RB
     if (edges[7]) push(ACTIONS.CYCLE_ITEM); // RT
     if (edges[12]) push(ACTIONS.CRAFT); // D-pad Up — unused in "game" mode otherwise
+    if (edges[13]) push(ACTIONS.OFFER_ITEM); // D-pad Down — pairs with Craft above it
     if (edges[9]) push(ACTIONS.PAUSE); // Start
     state.look.dx += rx * 13;
     state.look.dy += ry * 9;

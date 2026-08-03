@@ -2,10 +2,10 @@
 // input into the sim, the sim into perception, and perception into the screen.
 
 import {
-  createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem, craftItem, gatherTarget,
+  createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem, craftItem, gatherTarget, offerItem,
   PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH,
 } from "./state.js";
-import { createPercept, updatePercept, distortion } from "./percept.js";
+import { createPercept, updatePercept, distortion, believedKinds } from "./percept.js";
 import { createRenderer } from "./render.js";
 import { createHud, renderDebrief, paintHint } from "./hud.js";
 import { createInput, ACTIONS } from "./input.js";
@@ -190,6 +190,8 @@ function advanceLevel() {
     wood: old.wood,
     stone: old.stone,
     stats: old.stats,
+    // Travels with the inventory it names, so ids stay unique across basins.
+    nextSlotId: old.nextSlotId,
   };
   const nextLevel = old.level + 1;
   // Deterministic per-level seed derived from the campaign's own seed, so a
@@ -306,17 +308,41 @@ function handleAction(action, arg) {
       break;
     }
     case ACTIONS.CRAFT: {
-      // Works off the sim's own truth (state.js), never the item bar's
-      // possibly-lying labels — see craftItem's own comment. A hallucinating
-      // lead who thinks they're holding a matching pair can still fail here.
-      const cres = craftItem(sim);
+      // Crafts against what the item bar is SHOWING, not the sim's truth — so a
+      // lead who believes they hold a matching pair always gets to commit, and
+      // finds out what they actually built later (state.craftItem).
+      const cres = craftItem(sim, believedKinds(percept, sim));
       if (!cres.ok) {
         audio.play("deny");
         hud.say(cres.reason === "full" ? "Hands are full. Use or drop something first." : "Nothing here combines.", "warn");
         break;
       }
+      // Deliberately does NOT branch on cres.real: a false craft has to look,
+      // sound and read exactly like an honest one at the moment it happens.
       audio.play("log");
       selectedItem = Math.max(0, sim.inventory.length - 1); // land selection on the new item
+      break;
+    }
+    case ACTIONS.OFFER_ITEM: {
+      if (!sim.inventory.length) {
+        audio.play("deny");
+        hud.say("Nothing carried to offer.", "warn");
+        break;
+      }
+      if (selectedItem >= sim.inventory.length) selectedItem = 0;
+      const target = sim.companions[selected];
+      if (!target) break;
+      const ores = offerItem(sim, selectedItem, target.id, believedKinds(percept, sim)[selectedItem]);
+      if (!ores.ok) {
+        audio.play("deny");
+        if (ores.reason === "too-far") hud.say(`${target.name} is too far to hand anything to.`, "warn");
+        break;
+      }
+      // Branches on whether the offer was CALLED OUT, never on whether the item
+      // was real: a phantom that two deceived minds pass between them has to
+      // sound exactly like a real one landing, or the sound is the tell.
+      audio.play(ores.revealed ? "logFalse" : "dose");
+      if (selectedItem >= sim.inventory.length && selectedItem > 0) selectedItem -= 1;
       break;
     }
     case ACTIONS.PAUSE:
@@ -474,6 +500,7 @@ function boot() {
   el("btnItem")?.addEventListener("click", () => run && handleAction(ACTIONS.CYCLE_ITEM));
   el("btnUse")?.addEventListener("click", () => run && handleAction(ACTIONS.USE_ITEM));
   el("btnCraft")?.addEventListener("click", () => run && handleAction(ACTIONS.CRAFT));
+  el("btnGive")?.addEventListener("click", () => run && handleAction(ACTIONS.OFFER_ITEM));
   screens("title");
   requestAnimationFrame(frame);
 }
