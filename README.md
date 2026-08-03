@@ -109,7 +109,11 @@ src/
 tests/
   logic.test.mjs    pure-logic assertions, no browser
   save.test.mjs     save/resume round trip + forward-divergence check
+  hallucination.test.mjs
+                    OBSERVED-rate floors and strobe ceilings for the tells
   resume.mjs        real browser: play, leave, resume, discard-guard
+  menu-nav.mjs      real browser: focus over a menu whose shape changes
+  campaign.mjs      real browser: basin -> basin, and the save across it
   balance.mjs       whole runs to a terminal state; completability oracle
   smoke.mjs         real Chromium: draws, drains, hallucinates, recovers
   gamepad.mjs       real Chromium + a fake Gamepad object: full menu +
@@ -194,7 +198,17 @@ node tests/logic.test.mjs # pure logic, fast
 node tests/balance.mjs 20 # whole-run simulations
 node tests/smoke.mjs      # real browser (needs Playwright + Chromium)
 node tests/gamepad.mjs    # real browser, gamepad-only playthrough
+node tools/verify-deploy.mjs   # walk the LIVE site's module graph
 ```
+
+A third lesson joined the two below, from the hallucination work: **a
+mechanism that fires correctly but off-screen has not fired at all.** The
+monster-flicker feature was covered by a passing test that forced the roll and
+stood a companion five units away — it proved the mechanism and said nothing
+about the rate, which was one visible flicker per ~110 seconds of hallucinating.
+Anything whose purpose is to be *perceived* needs its observed rate asserted
+from both sides: a floor (the player does see it) and a ceiling (it is not a
+strobe).
 
 Built around two lessons:
 
