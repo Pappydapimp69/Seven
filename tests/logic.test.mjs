@@ -26,6 +26,7 @@ import {
 } from "../src/percept.js";
 import { HALLUCINATION } from "../src/state.js";
 import { makeRng, hashSeed } from "../src/rng.js";
+import { readFileSync as fsReadFileSync, readdirSync as fsReaddirSync } from "fs";
 
 let passed = 0;
 const failures = [];
@@ -2394,6 +2395,35 @@ check("a phantom companion is never reported as monstrous — it's already fully
 });
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// cache-bust structural invariant — no behavioural test can see this
+// ---------------------------------------------------------------------------
+// A stale nested module is invisible to every other test in this file: the
+// source on disk is always correct, so the suite passes while a returning
+// player's browser runs old code. This asserts the SHIPPING SHAPE instead —
+// every cache-bustable URL carries the same token as BUILD.
+// Brain: the-game-prologue#E8 (entry-point-only busting misses nested imports,
+// and the next "still broken after deploy" gets re-diagnosed as a phantom
+// logic bug — which is exactly what happened here, twice), dog#E30 (confirmed
+// insufficient), opticon#E36 (assert every cache-buster equals BUILD).
+check("every module import and asset URL carries the current BUILD token", () => {
+  const srcDir = new URL("../src/", import.meta.url);
+  const build = fsReadFileSync(new URL("main.js", srcDir), "utf8").match(/const BUILD = "([^"]+)"/)?.[1];
+  assert(build, "could not read BUILD out of main.js");
+
+  for (const file of fsReaddirSync(srcDir).filter((f) => f.endsWith(".js"))) {
+    const text = fsReadFileSync(new URL(file, srcDir), "utf8");
+    for (const [, spec] of text.matchAll(/from\s+"(\.\/[^"]+)"/g)) {
+      assert(spec.includes(`?v=${build}`), `src/${file} imports "${spec}" without the current ?v=${build} — it will be served from cache after a deploy`);
+    }
+  }
+
+  const html = fsReadFileSync(new URL("../index.html", import.meta.url), "utf8");
+  for (const asset of ["css/style.css", "src/main.js"]) {
+    assert(html.includes(`${asset}?v=${build}`), `index.html references ${asset} without ?v=${build}`);
+  }
+});
+
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length) {
   for (const f of failures) console.log("  ✗ " + f);
