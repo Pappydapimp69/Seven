@@ -82,6 +82,26 @@ Truth stops being a property of the object alone.
   testable, which is what makes the whole deception layer assertable without a
   browser.
 
+## Interaction with couch co-op
+
+This landed in the same merge as two-player couch co-op, and the two compose
+without either side needing to know about the other. The pack is SHARED (one
+`sim.inventory`) while perception is PER-MIND (each player gets their own
+`percept`, with its own `itemLabels`). So two humans reading the same three
+slots can genuinely disagree about what is in the bag — the asymmetry falls out
+of the existing derivation for free, with no new verb and no netcode.
+
+What is NOT free is the REVEAL. A second human has a rendered item bar, so their
+disagreement is visible to them; an AI companion has no panel, so the truth it
+holds has nowhere to appear. That is precisely why the give verb exists, and it
+is the one clause worth remembering if this is ported: per-viewer derivation
+buys you divergent belief, but it does not buy you the moment somebody says
+"there's nothing in your hand." That moment needs an explicit action, and it is
+better for costing something.
+
+The crossing rule needed no special case for any of it: `seesThrough` asks the
+RECEIVER, and a possessed companion is a receiver with a real meter of their own.
+
 ## What did NOT change
 
 `state.js` remains the only source of truth and `percept.js` the only module

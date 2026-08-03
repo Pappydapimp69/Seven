@@ -53,7 +53,7 @@ clause(1, "â€œthe crafted item might not be real if the player is hallucinatingâ
   show(`truth in hand : flare + flare`);
   show(`bar shows     : ${barReads(percept, sim)}`);
 
-  const res = craftItem(sim, believedKinds(percept, sim));
+  const res = craftItem(sim, -1, believedKinds(percept, sim));
   show(`craft result  : "${sim.events[sim.events.length - 1].text}"`);
   must(res.ok && res.kind === "ember", "the craft the lead believed in went through");
   must(res.real === false, "and what it produced was never there");

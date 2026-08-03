@@ -139,6 +139,15 @@ export function createAudio() {
     dose: () => blip({ freq: 660, dur: 0.3, type: "sine", gain: 0.15, slide: 240 }),
     recover: () => { blip({ freq: 300, dur: 0.3, type: "sine", slide: 200 }); setTimeout(() => blip({ freq: 620, dur: 0.35 }), 140); },
     hallucinate: () => blip({ freq: 180, dur: 0.9, type: "sawtooth", gain: 0.16, slide: -70 }),
+    // A brief, low, guttural stinger for the monster-flicker reveal — deliberately
+    // distinct from "hallucinate" (that one marks going under; this one marks a
+    // single wrong instant inside an episode already underway).
+    monster: () => blip({ freq: 85, dur: 0.5, type: "sawtooth", gain: 0.17, slide: -35 }),
+    // A carried item turning out to be something else the moment it's used —
+    // deliberately its own cue rather than reusing "break" (that one already
+    // means a companion snapping off toward a pylon, in party.js). Quick
+    // downward buzz: a wrong answer, not a threat.
+    reveal: () => blip({ freq: 520, dur: 0.22, type: "square", gain: 0.15, slide: -260 }),
     break: () => blip({ freq: 240, dur: 0.25, type: "square", gain: 0.08 }),
     deny: () => blip({ freq: 150, dur: 0.12, type: "square", gain: 0.07 }),
   };

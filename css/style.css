@@ -253,6 +253,38 @@ input[type="range"] { width: 100%; margin-bottom: 18px; accent-color: var(--cyan
   text-transform: uppercase;
   color: var(--dim);
 }
+
+/* Landing pulse on the Wood/Stone pill when a chop/mine credits it — hud.js's
+   pillGain() toggles this with the same forced-reflow retrigger trick as
+   .flash.show, so back-to-back gathers each get their own pulse. Border-color
+   + a soft glow only (no size change), so the pill row never reflows. */
+.pill.gain {
+  border-color: var(--good);
+  box-shadow: 0 0 0 3px rgba(127, 214, 192, 0.35);
+  transition: border-color 0.4s ease-out, box-shadow 0.4s ease-out;
+}
+
+/* The dot hud.js's collectFly() flies from a chopped tree/mined deposit's own
+   screen position (projected by render.js's worldToScreen) to its pill —
+   fixed positioning + a transform transition, so the compositor handles the
+   whole flight and it costs nothing on weak/software-GL hardware. Positioned
+   at 0,0 and moved entirely via `transform: translate(...)` (set inline by
+   hud.js) rather than left/top, since transform is what's composited. */
+.gather-fly {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px; /* centre the dot on its translate() point */
+  border-radius: 3px;
+  pointer-events: none;
+  z-index: 15;
+  transition: transform 0.55s cubic-bezier(0.2, 0.6, 0.3, 1), opacity 0.55s ease-in;
+  will-change: transform, opacity;
+}
+.gather-fly.wood { background: #a9793f; }
+.gather-fly.stone { background: #c3ccd8; }
 #surveyCount.complete { color: var(--good); }
 #clock.low { color: var(--bad); }
 
@@ -477,3 +509,66 @@ body[data-scheme="touch"] .touch-buttons { display: flex; }
   .item-bar { bottom: 18px; }
   .craft-hint { bottom: 52px; }
 }
+
+/* ---------- couch co-op ---------- */
+/* Split-screen is side-by-side, so each half keeps FULL viewport height and
+   every HUD text row stays at its single-player pixel height (Brain:
+   COUCH-MULTIPLAYER/ui — a top/bottom split halves height and silently drops
+   proportionally-sized text under the readable floor). */
+.coop-badges { display: none; }
+body[data-coop="2"] .coop-badges {
+  display: flex;
+  position: absolute;
+  bottom: 14px;
+  left: 0;
+  width: 100%;
+  pointer-events: none;
+}
+body[data-coop="2"] .coop-badge {
+  width: 50%;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: center;
+  /* Fixed px, never a viewport fraction — see the note above. */
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.coop-num {
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--edge);
+  background: var(--panel);
+  color: var(--ink);
+}
+.coop-badge.p1 .coop-num { border-color: var(--cyan); }
+.coop-badge.p2 .coop-num { border-color: var(--warm); }
+/* The seam between the two viewports. */
+body[data-coop="2"] .hud::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgba(140, 168, 200, 0.25);
+  transform: translateX(-1px);
+}
+/* In split-screen the shared top pills and the roster belong to the LEAD's
+   half, so pull them into it rather than letting them straddle the seam. */
+body[data-coop="2"] .hud-top { left: 25%; }
+body[data-coop="2"] .hud-left { max-width: 44%; }
+
+/* Player two's action prompt. Hidden outside co-op; in co-op each prompt is
+   centred in its own half so neither straddles the seam. The [A] suffix
+   mirrors the lead pill's [E] — player two is always on a pad. */
+.action-prompt.p2 { display: none; }
+body[data-coop="2"] .action-prompt.p2 { display: block; left: 75%; }
+body[data-coop="2"] #actionPrompt { left: 25%; }
+.action-prompt.p2::after { content: "  [A]"; color: var(--cyan); font-size: 12px; }
+
+.item-bar.p2 { display: none; left: auto; right: 16px; }
+body[data-coop="2"] .item-bar.p2 { display: flex; }

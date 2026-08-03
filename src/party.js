@@ -8,7 +8,7 @@
 // who lags, who starts narrating things that aren't there. Each rule below exists
 // to make an internal number legible from the outside without printing it.
 
-import { findPath, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, GRID } from "./world.js";
+import { findPath, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, GRID } from "./world.js?v=mirage-0.7.4";
 import {
   BAND,
   bandOf,
@@ -20,7 +20,7 @@ import {
   recipeKey,
   companionPickup,
   handoffToPlayer,
-} from "./state.js";
+} from "./state.js?v=mirage-0.7.4";
 
 // Higher band = worse. Lets a per-companion trait move the pylon-seeking
 // trigger EARLIER than the uniform BRITTLE tell everyone else gets, without
@@ -201,6 +201,14 @@ export function updateCompanions(sim, dt) {
     ensureMemory(c);
     c.aliveTime += dt;
     updateMemory(sim, c);
+
+    // A companion a human has taken over still SENSES the basin — the memory
+    // update above is what lets them keep sighting markers and remembering
+    // pylons — but nothing here may steer them. Their movement comes from
+    // that player's input in tick(), and notably their hallucination is NOT
+    // short-circuited into a phantom errand: a hallucinating human still has
+    // the wheel, they are just being lied to about where they are going.
+    if (c.humanSlot !== null) continue;
 
     if (c.hallucinating) {
       // No formation, no orders, no lead. Just the errand they have invented.

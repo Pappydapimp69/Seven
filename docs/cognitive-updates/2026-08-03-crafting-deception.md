@@ -35,11 +35,16 @@ sharing the delusion. See `docs/adr/0002-observer-relative-item-truth.md`.
   `believedKinds` did here — that skew stops being "old content" and becomes an
   unresolved import and a black screen. Uniformly unstamped at least degrades
   to one self-consistent old set that still runs.
-  Now closed structurally rather than by rule: the Pages workflow rewrites
-  EVERY relative specifier at deploy time on the assembled artifact, with a
-  guard that fails the deploy if any escape. Verified by serving the rewritten
-  artifact and booting it headless, and by confirming the guard fires on
-  un-rewritten source.
+  Independently converged on: a parallel session had already closed the gap
+  in-source with `tools/stamp-version.mjs` plus a suite assertion that every
+  import and asset URL carries the current `BUILD` token. Two sessions reached
+  the same diagnosis from opposite ends — one from a live black-screen risk,
+  one from the recurrence itself — which is itself the strongest evidence the
+  filed lesson is right. Theirs is the better implementation (the source that
+  ships is the source that is checked), so this session's deploy-time rewrite
+  was dropped in favour of it; the empirical `curl -I` measurement of
+  `max-age=600` and the "partial is worse than none" argument are the parts
+  that survive as new.
 
 ## New Tensions
 

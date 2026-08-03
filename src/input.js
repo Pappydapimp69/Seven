@@ -31,6 +31,7 @@ export const ACTIONS = Object.freeze({
   PREV_TARGET: "prevTarget",
   CYCLE_ITEM: "cycleItem",
   USE_ITEM: "useItem",
+  DROP_ITEM: "dropItem",
   CRAFT: "craft",
   // Put the selected item in the selected companion's hands. Doubles as the
   // only way to find out something is wrong with YOUR OWN reading of it — see
@@ -125,7 +126,8 @@ export function createInput(canvas, opts = {}) {
       case "KeyZ": push(ACTIONS.CYCLE_ITEM); break;
       case "KeyX": push(ACTIONS.USE_ITEM); break;
       case "KeyC": push(ACTIONS.CRAFT); break;
-      case "KeyV": push(ACTIONS.OFFER_ITEM); break;
+      case "KeyV": push(ACTIONS.DROP_ITEM); break;
+      case "KeyB": push(ACTIONS.OFFER_ITEM); break;
       case "Escape": push(ACTIONS.PAUSE); break;
       case "Space": e.preventDefault(); break;
       default: return;
@@ -207,9 +209,101 @@ export function createInput(canvas, opts = {}) {
   let padPrev = []; // previous frame's button.pressed[], for edge detection
   let stickHeldMenu = false; // debounces the left stick into discrete menu pulses
 
-  function pollGamepad() {
+  // ---- couch co-op device ownership -----------------------------------------
+  //
+  // padSlots maps a physical gamepad INDEX to the human slot that owns it, and
+  // an entry is written once at join time and never re-derived. That fixed
+  // ownership is the whole point: local-multiplayer input goes wrong when a
+  // second controller's buttons silently do nothing because the first player's
+  // device claim quietly disabled them (Brain: COUCH-MULTIPLAYER/input —
+  // join-action-device-cloning), and it goes wrong the other way when a
+  // reconnecting pad grabs a slot it was never assigned (Brain:
+  // COUCH-MULTIPLAYER/input — device-identity-registry). Freezing the mapping
+  // at join makes both impossible: slot 0 reads whatever pad nobody claimed,
+  // and every joined slot reads only its own.
+  const padSlots = new Map(); // padIndex -> human slot (slot >= 1)
+  const padPrevBySlot = new Map(); // padIndex -> previous pressed[] for edge detection
+
+  function livePads() {
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-    const pad = pads && [...pads].find((p) => p && p.connected);
+    return pads ? [...pads].filter((p) => p && p.connected) : [];
+  }
+
+  /** The pad slot 0 drives: the first one nobody else has claimed. */
+  function leadPad() {
+    return livePads().find((p) => !padSlots.has(p.index)) || null;
+  }
+
+  /**
+   * A pad that just pressed Start/A and belongs to no one yet — i.e. someone
+   * on the couch asking to join. Returns its index, or null.
+   *
+   * Deliberately excludes the pad slot 0 is currently driving, so a solo
+   * player on a controller can't accidentally join themselves as player two.
+   */
+  function pendingJoinPad() {
+    const lead = leadPad();
+    for (const p of livePads()) {
+      if (padSlots.has(p.index)) continue;
+      if (lead && p.index === lead.index) continue;
+      const prev = padPrevBySlot.get(p.index) || [];
+      const now = p.buttons.map((b) => !!(b && b.pressed));
+      padPrevBySlot.set(p.index, now);
+      if ((now[9] && !prev[9]) || (now[0] && !prev[0])) return p.index;
+    }
+    return null;
+  }
+
+  function claimPad(padIndex, slot) { padSlots.set(padIndex, slot); }
+  function releaseSlot(slot) {
+    for (const [idx, s] of [...padSlots]) if (s === slot) padSlots.delete(idx);
+  }
+
+  /**
+   * One joined player's intent for this frame. Mirrors the lead's game-mode
+   * bindings on that player's own pad, and returns null if their pad vanished
+   * (unplugged / dead battery) so the caller can decide what to do rather than
+   * having the character silently freeze with no explanation.
+   */
+  function pollSlot(slot) {
+    let padIndex = null;
+    for (const [idx, s] of padSlots) if (s === slot) padIndex = idx;
+    if (padIndex === null) return null;
+    const pad = livePads().find((p) => p.index === padIndex);
+    if (!pad) return null;
+
+    const dead = (v) => (Math.abs(v) < 0.18 ? 0 : v);
+    const lx = dead(pad.axes[0] || 0), ly = dead(pad.axes[1] || 0);
+    const rx = dead(pad.axes[2] || 0), ry = dead(pad.axes[3] || 0);
+    const now = pad.buttons.map((b) => !!(b && b.pressed));
+    const prev = padPrevBySlot.get(padIndex) || [];
+    const edges = now.map((p, i) => p && !prev[i]);
+    padPrevBySlot.set(padIndex, now);
+
+    const queue = [];
+    if (edges[0]) queue.push(ACTIONS.SURVEY);
+    if (edges[1]) queue.push(ACTIONS.USE_ITEM);
+    if (edges[2]) queue.push(ACTIONS.CHECK_IN);
+    if (edges[3]) queue.push(ACTIONS.DOSE);
+    if (edges[7]) queue.push(ACTIONS.CYCLE_ITEM);
+    if (edges[12]) queue.push(ACTIONS.CRAFT);
+    if (edges[13]) queue.push(ACTIONS.DROP_ITEM);
+    if (edges[15]) queue.push(ACTIONS.OFFER_ITEM);
+
+    return {
+      move: { x: lx, z: ly },
+      run: now[10] || now[6],
+      interact: now[0],
+      look: { dx: rx * 13, dy: ry * 9 },
+      queue,
+      // Select (button 8) is the leave verb — deliberately NOT Start, which is
+      // pause, so a player cannot drop out by reaching for the pause button.
+      leave: edges[8],
+    };
+  }
+
+  function pollGamepad() {
+    const pad = leadPad();
     if (!pad) {
       padPrev = [];
       stickHeldMenu = false;
@@ -256,8 +350,9 @@ export function createInput(canvas, opts = {}) {
     if (edges[4]) push(ACTIONS.PREV_TARGET); // LB
     if (edges[5]) push(ACTIONS.NEXT_TARGET); // RB
     if (edges[7]) push(ACTIONS.CYCLE_ITEM); // RT
-    if (edges[12]) push(ACTIONS.CRAFT); // D-pad Up — unused in "game" mode otherwise
-    if (edges[13]) push(ACTIONS.OFFER_ITEM); // D-pad Down — pairs with Craft above it
+    if (edges[12]) push(ACTIONS.CRAFT); // D-pad Up
+    if (edges[13]) push(ACTIONS.DROP_ITEM); // D-pad Down — mirrors craft above it
+    if (edges[15]) push(ACTIONS.OFFER_ITEM); // D-pad Right — handing it across, sideways
     if (edges[9]) push(ACTIONS.PAUSE); // Start
     state.look.dx += rx * 13;
     state.look.dy += ry * 9;
@@ -329,5 +424,12 @@ export function createInput(canvas, opts = {}) {
     requestLock,
     destroy,
     get activeScheme() { return scheme; },
+    // Couch co-op. `pendingJoinPad()` is polled by main.js while a run is
+    // live; claiming is explicit so device ownership is fixed at join time.
+    pendingJoinPad,
+    claimPad,
+    releaseSlot,
+    pollSlot,
+    get joinedPads() { return padSlots.size; },
   };
 }

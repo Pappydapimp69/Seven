@@ -6,8 +6,8 @@
 // the one hallucinating. The only place a real number is ever printed is the
 // debrief, after the run is over.
 
-import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, believedKinds } from "./percept.js";
-import { LOG_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, gatherTarget, GATHER_HOLD_TIME, previewCraft } from "./state.js";
+import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, believedKinds } from "./percept.js?v=mirage-0.7.4";
+import { LOG_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, gatherTarget, GATHER_HOLD_TIME, previewCraft } from "./state.js?v=mirage-0.7.4";
 
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 
@@ -40,12 +40,18 @@ export function createHud(sim, percept) {
     hints: document.getElementById("hints"),
     selection: document.getElementById("selectionLabel"),
     items: document.getElementById("itemBar"),
+    items2: document.getElementById("itemBar2"),
     level: document.getElementById("levelLabel"),
     flash: document.getElementById("flash"),
     wood: document.getElementById("woodCount"),
     stone: document.getElementById("stoneCount"),
+    woodPill: document.getElementById("woodPill"),
+    stonePill: document.getElementById("stonePill"),
     promptFill: document.getElementById("actionPromptFill"),
     promptText: document.getElementById("actionPromptText"),
+    prompt2: document.getElementById("actionPrompt2"),
+    promptFill2: document.getElementById("actionPromptFill2"),
+    promptText2: document.getElementById("actionPromptText2"),
     craftHint: document.getElementById("craftHint"),
   };
 
@@ -85,6 +91,54 @@ export function createHud(sim, percept) {
     // "show" holds the instant jump to visible; removing it after a brief hold
     // hands back to the base .flash rule's own (eased) transition to fade out.
     setTimeout(() => el.flash.classList.remove("show"), 90);
+  }
+
+  /** Briefly highlight a resource pill when its count just went up — the
+   * landing beat for a chop/mine haul, whether or not collectFly's dot made
+   * the trip (e.g. the node was behind the camera when the hold completed).
+   * Same forced-reflow retrigger trick as flash(), so back-to-back gathers
+   * each get their own pulse instead of the first one's timeout cutting the
+   * second one's class short. */
+  function pillGain(resource) {
+    const pill = resource === "wood" ? el.woodPill : el.stonePill;
+    if (!pill) return;
+    pill.classList.remove("gain");
+    void pill.offsetWidth;
+    pill.classList.add("gain");
+    setTimeout(() => pill.classList.remove("gain"), 420);
+  }
+
+  /**
+   * Fly a small dot from `from` (a screen point render.js projected from the
+   * gathered tree/deposit's own world position) to the resource's pill, then
+   * land with a pillGain() pulse — a physical sense of the haul arriving,
+   * not just a counter that silently ticked up. Pure DOM/CSS: a transform
+   * transition on a throwaway fixed-position element. Cleanup is a timer, not
+   * transitionend, so a backgrounded tab (which can stall CSS transitions)
+   * can't leak the element or skip the landing pulse.
+   */
+  function collectFly(resource, from) {
+    if (!from || !from.visible) {
+      pillGain(resource);
+      return;
+    }
+    const pill = resource === "wood" ? el.woodPill : el.stonePill;
+    if (!pill) return;
+    const to = pill.getBoundingClientRect();
+    const DURATION = 550;
+    const dot = document.createElement("div");
+    dot.className = `gather-fly ${resource}`;
+    dot.style.transform = `translate(${from.x}px, ${from.y}px)`;
+    document.body.appendChild(dot);
+    // Force the start position to commit before moving the target, or the
+    // browser may coalesce both writes into one frame and skip the transition.
+    void dot.offsetWidth;
+    dot.style.transform = `translate(${to.left + to.width / 2}px, ${to.top + to.height / 2}px)`;
+    dot.style.opacity = "0";
+    setTimeout(() => {
+      dot.remove();
+      pillGain(resource);
+    }, DURATION);
   }
 
   /**
@@ -127,29 +181,36 @@ export function createHud(sim, percept) {
         if (ITEM_INFO[ev.itemKind]?.restore) flash();
       } else if (ev.kind === "itemPhantom") say(ev.text, "gone");
       else if (ev.kind === "craft") say(ev.text, "good");
+      else if (ev.kind === "drop") say(ev.text, "");
+      else if (ev.kind === "dropPhantom") say(ev.text, "gone");
       else if (ev.kind === "advance") say(ev.text, "good");
       else if (ev.kind === "end") say(ev.text, "warn");
     }
   }
 
   /** A check-in the player asked for, passed through the lead's own filter. */
-  function showReport(report) {
-    const filtered = filterReport(percept, sim, report);
+  /** `viewer` is the percept of whoever ASKED — the listener is the second
+   * filter (see percept.filterReport), so player two's check-ins must pass
+   * through player two's own state, not the lead's. Defaults to the lead. */
+  function showReport(report, viewer = percept) {
+    const filtered = filterReport(viewer, sim, report);
     if (!filtered) return;
     say(`${filtered.name}: ${filtered.text}`, filtered.claim === "gone" ? "gone" : "");
   }
 
-  function nearestUnloggedName() {
+  function nearestUnloggedName(viewer = percept, actor = sim.player) {
     let best = null, bestD = Infinity;
     for (const m of sim.monoliths) {
       if (m.logged) continue;
-      const d = Math.hypot(m.x - sim.player.x, m.z - sim.player.z);
+      const d = Math.hypot(m.x - actor.x, m.z - actor.z);
       if (d < bestD) { bestD = d; best = m; }
     }
-    // Phantoms count for the prompt — the whole point is that the lead cannot
-    // tell the difference from where they are standing.
-    for (const ph of percept.active ? percept.phantomMonoliths : []) {
-      const d = Math.hypot(ph.x - sim.player.x, ph.z - sim.player.z);
+    // Phantoms count for the prompt — the whole point is that this mind cannot
+    // tell the difference from where they are standing. Each player's prompt
+    // reads THEIR OWN phantoms; one player's hallucination never leaks into
+    // the other half of the screen.
+    for (const ph of viewer.active ? viewer.phantomMonoliths : []) {
+      const d = Math.hypot(ph.x - actor.x, ph.z - actor.z);
       if (d < bestD) { bestD = d; best = ph; }
     }
     return bestD <= LOG_RADIUS ? best : null;
@@ -157,24 +218,63 @@ export function createHud(sim, percept) {
 
   /** Nearest pickup in reach, shown through PERCEPTION — the prompt names the
    * item the lead believes they see, never the true kind underneath it. */
-  function nearestPickupItem() {
+  function nearestPickupItem(viewer = percept, actor = sim.player) {
     let best = null, bestD = Infinity;
-    for (const it of perceivedWorldItems(percept, sim)) {
-      const d = Math.hypot(it.x - sim.player.x, it.z - sim.player.z);
+    for (const it of perceivedWorldItems(viewer, sim)) {
+      const d = Math.hypot(it.x - actor.x, it.z - actor.z);
       if (d < bestD) { bestD = d; best = it; }
     }
     return bestD <= ITEM_PICKUP_RADIUS ? best : null;
   }
 
-  function renderInventory(selectedItem) {
-    if (!el.items) return;
-    const slots = perceivedInventory(percept, sim);
-    el.items.innerHTML = slots.length
+  /**
+   * Paint one player's contextual action prompt. ONE resolver drives the whole
+   * surface (Brain: dog#E20 — a single "what can happen right now" answer keeps
+   * every prompt honest as verbs are added), and the same priority order
+   * handleAction uses: pickup, then gather, then survey.
+   */
+  function paintPrompt(els, viewer, actor, hold) {
+    if (!els.prompt) return;
+    const pickup = nearestPickupItem(viewer, actor);
+    const gatherable = gatherTarget(sim, actor);
+    const near = nearestUnloggedName(viewer, actor);
+    if (pickup && sim.status === "playing") {
+      els.text.textContent = `Pick up ${ITEM_INFO[pickup.shownKind].label}`;
+      els.prompt.classList.add("show");
+      els.fill.style.width = "0%";
+    } else if (gatherable && sim.status === "playing") {
+      els.text.textContent = gatherable.gatherKind === "tree" ? "Hold to chop the tree" : "Hold to mine the stone";
+      els.prompt.classList.add("show");
+      const pct = hold && hold.targetId === gatherable.id ? (hold.progress / GATHER_HOLD_TIME) * 100 : 0;
+      els.fill.style.width = `${Math.min(100, Math.max(0, pct))}%`;
+    } else if (near && sim.status === "playing") {
+      els.text.textContent = `Survey ${near.name}`;
+      els.prompt.classList.add("show");
+      els.fill.style.width = "0%";
+    } else {
+      els.prompt.classList.remove("show");
+      els.fill.style.width = "0%";
+    }
+  }
+
+  /**
+   * Paint one player's read of the shared pack into `container`. The pack
+   * itself is ONE array (see state.js's own comment on that), but each viewer
+   * is handed a DIFFERENT `viewerPercept` — so the same physical slot can
+   * legitimately show two different labels at once, one per screen half.
+   * That is the whole mechanism behind "show it to someone who isn't gone":
+   * nothing is transferred, nobody performs a hand-off, a lucid partner's own
+   * panel was reading the truth about that slot the entire time.
+   */
+  function renderSlots(container, selectedItem, viewerPercept) {
+    if (!container) return;
+    const slots = perceivedInventory(viewerPercept, sim);
+    container.innerHTML = slots.length
       ? slots.map((s, i) => `<div class="item-slot${i === selectedItem ? " sel" : ""}">${s.label}</div>`).join("")
       : `<div class="item-slot empty">—</div>`;
   }
 
-  function update(view, selected, selectedItem = 0, actionEvents = []) {
+  function update(view, selected, selectedItem = 0, actionEvents = [], coop = null) {
     pumpEvents(actionEvents);
 
     for (const c of sim.companions) {
@@ -208,35 +308,27 @@ export function createHud(sim, percept) {
 
     const dis = distortion(percept, sim);
     el.vignette.style.opacity = String(Math.min(0.92, dis * 0.9));
-    el.vignette.classList.toggle("lost", percept.active);
+    // Gated on `dis`, not raw `percept.active`: the .lost class starts a CSS
+    // animation (breathe) that overrides the inline opacity above for as long
+    // as it's applied, so during the grace window (dis === 0 by construction,
+    // even if percept.active is already true from carried-over state) this
+    // must stay off — otherwise the animation alone makes the screen pulse
+    // regardless of what distortion() computed.
+    el.vignette.classList.toggle("lost", dis > 0);
 
-    renderInventory(selectedItem);
+    renderSlots(el.items, selectedItem, percept);
 
-    // Same priority handleAction gives it in main.js — pickup, then gather,
-    // then survey — so the on-screen text never promises one verb while the
-    // button actually does another.
-    const pickup = nearestPickupItem();
-    const gatherable = gatherTarget(sim);
-    const near = nearestUnloggedName();
-    if (pickup && sim.status === "playing") {
-      el.promptText.textContent = `Pick up ${ITEM_INFO[pickup.shownKind].label}`;
-      el.prompt.classList.add("show");
-      el.promptFill.style.width = "0%";
-    } else if (gatherable && sim.status === "playing") {
-      const verb = gatherable.gatherKind === "tree" ? "Hold to chop the tree" : "Hold to mine the stone";
-      el.promptText.textContent = verb;
-      el.prompt.classList.add("show");
-      // Only reflects progress toward THIS target — a hold on a different
-      // node (or none) reads as 0%, same rule updateGatherHold itself uses.
-      const pct = sim.gatherHold.targetId === gatherable.id ? (sim.gatherHold.progress / GATHER_HOLD_TIME) * 100 : 0;
-      el.promptFill.style.width = `${Math.min(100, Math.max(0, pct))}%`;
-    } else if (near && sim.status === "playing") {
-      el.promptText.textContent = `Survey ${near.name}`;
-      el.prompt.classList.add("show");
-      el.promptFill.style.width = "0%";
-    } else {
-      el.prompt.classList.remove("show");
-      el.promptFill.style.width = "0%";
+    paintPrompt({ prompt: el.prompt, text: el.promptText, fill: el.promptFill },
+      percept, sim.player, sim.gatherHold);
+    // Player two's prompt lives in their half of the screen and reads THEIR
+    // percept, THEIR position and THEIR OWN hold — nothing about it touches
+    // the lead's. Hidden entirely outside co-op (CSS keys off body[data-coop]).
+    if (coop) {
+      paintPrompt({ prompt: el.prompt2, text: el.promptText2, fill: el.promptFill2 },
+        coop.percept, coop.eye, coop.eye.gatherHold);
+      // Same shared inventory as el.items, painted through player two's OWN
+      // percept — see renderSlots' own comment.
+      renderSlots(el.items2, coop.selectedItem, coop.percept);
     }
 
     // Craft accessibility: name what's craftable the moment it's possible,
@@ -246,7 +338,12 @@ export function createHud(sim, percept) {
     // indicator has to be as wrong as the item bar above it, or it would
     // quietly become the one honest instrument on the screen.
     if (el.craftHint) {
-      const preview = previewCraft(sim, believedKinds(percept, sim));
+      // Same selected slot craftItem will use, so the hint can never name a
+      // different result than the button produces — and the same belief view,
+      // so a mind being lied to about what it carries gets INVITED into the
+      // false craft by name. The indicator has to be as wrong as the item bar
+      // above it, or it quietly becomes the one honest instrument on screen.
+      const preview = previewCraft(sim, selectedItem, believedKinds(percept, sim));
       if (preview.ok && sim.status === "playing") {
         el.craftHint.textContent = `Craft ready: ${ITEM_INFO[preview.kind].label}`;
         el.craftHint.classList.add("show");
@@ -258,14 +355,14 @@ export function createHud(sim, percept) {
 
   function setHints(scheme) {
     const text = {
-      keyboard: "WASD move · Shift run · E survey/pick up, hold to gather · Z cycle item · X use item · C craft · V give item · 1–5 check in · Shift+1–5 dose · Esc pause",
-      gamepad: "Stick move · [A] survey/pick up, hold to gather · [RT] cycle item · [B] use item · D-pad Up craft · D-pad Down give · [X] check in · [Y] dose · [LB]/[RB] select · [Start] pause",
+      keyboard: "WASD move · Shift run · E survey/pick up, hold to gather · Z cycle item · X use item · V drop · B give · C craft · 1–5 check in · Shift+1–5 dose · Esc pause",
+      gamepad: "Stick move · [A] survey/pick up, hold to gather · [RT] cycle item · [B] use item · D-pad Up craft · D-pad Down drop · D-pad Right give · [X] check in · [Y] dose · [LB]/[RB] select · [Start] pause",
       touch: "Left half steers · right half looks · buttons bottom-right",
     }[scheme] || "";
     paintHint(el.hints, text);
   }
 
-  return { update, say, showReport, setHints, el };
+  return { update, say, showReport, setHints, collectFly, el };
 }
 
 /** The debrief screen — the one and only place hidden state is revealed. */

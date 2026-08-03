@@ -155,7 +155,9 @@ function assert(cond, msg) {
   });
   assert(walked.simTime >= 7.9, `sim clock only reached ${walked.simTime}s after advancing 8s`);
   assert(walked.moved > 3, `player barely moved (${walked.moved.toFixed(2)} units in 8 sim-seconds)`);
-  assert(walked.lucidity < 100, "nobody drained over 8 sim-seconds");
+  // The first 5 minutes of a basin are a grace window (LUCIDITY_GRACE, state.js)
+  // — nobody's meter moves yet at 8 sim-seconds in, on purpose.
+  assert(walked.lucidity === 100, `lucidity moved inside the opening grace window: ${walked.lucidity}`);
   assert(walked.companionSpread.filter((d) => d < 22).length >= 3, `party did not keep up: ${walked.companionSpread}`);
 
   if (glOk) {
@@ -171,6 +173,7 @@ function assert(cond, msg) {
   // --- the hallucination path ---------------------------------------------
   const gone = await page.evaluate(() => {
     const M = window.__mirage;
+    M.sim.time = 300; // past LUCIDITY_GRACE — drain is withheld for the first 5 minutes of a basin
     M.drain("you", 0.05);
     M.advance(1);
     const s = M.sim;
@@ -340,15 +343,15 @@ function assert(cond, msg) {
 
   // --- crafting deception: the WIRING around it -----------------------------
   // logic.test.mjs already covers offerItem/craftItem's rules in isolation;
-  // this section is only the parts a logic test cannot reach: the real KeyV
+  // this section is only the parts a logic test cannot reach: the real KeyB
   // keypress, the #btnGive touch button actually being in the DOM and wired,
   // the phantom-reveal line actually reaching the subtitle element, and the
   // belief-based craft indicator actually painting through hud.js.
 
   // Nothing above this point in the file drives a physical keyboard event —
   // every verb test so far calls M.act()/M.advance() directly — so this uses
-  // Playwright's own `keyboard`, which for a named key like "KeyV" fires a
-  // genuine trusted keydown/keyup with `code: "KeyV"`, exactly what
+  // Playwright's own `keyboard`, which for a named key like "KeyB" fires a
+  // genuine trusted keydown/keyup with `code: "KeyB"`, exactly what
   // input.js's onKeyDown switches on. Unlike M.act()/M.advance(), a real
   // keydown only gets drained once the game's own rAF loop calls
   // input.poll() on a LATER frame, so a short real wait follows it — this is
@@ -361,7 +364,7 @@ function assert(cond, msg) {
     await page.waitForTimeout(300);
   }
 
-  // 1) KeyV is wired to ACTIONS.OFFER_ITEM end to end: give a real, useful
+  // 1) KeyB is wired to ACTIONS.OFFER_ITEM end to end: give a real, useful
   // item (a Flare) to the currently-selected companion, in range and lucid,
   // and confirm it actually reached them.
   await page.evaluate(() => {
@@ -375,14 +378,14 @@ function assert(cond, msg) {
     c.x = s.player.x;
     c.z = s.player.z;
   });
-  await pressKeyAndSettle("KeyV");
+  await pressKeyAndSettle("KeyB");
   const giveKey = await page.evaluate(() => {
     const M = window.__mirage;
     const s = M.sim;
     return { inventory: s.inventory.length, lucidity: s.companions[M.selected].lucidity };
   });
-  assert(giveKey.inventory === 0, `KeyV should consume the offered slot, inventory still has ${giveKey.inventory}`);
-  assert(giveKey.lucidity >= 89, `KeyV-triggered offer did not restore the companion's lucidity (${giveKey.lucidity})`);
+  assert(giveKey.inventory === 0, `KeyB should consume the offered slot, inventory still has ${giveKey.inventory}`);
+  assert(giveKey.lucidity >= 89, `KeyB-triggered offer did not restore the companion's lucidity (${giveKey.lucidity})`);
 
   // 2) The #btnGive touch button exists and fires the same verb — a Tether
   // this time, so the OTHER "helps" branch (steadySeconds, not restore) is
@@ -416,7 +419,7 @@ function assert(cond, msg) {
   // length>0 check here previously let a real bug through elsewhere in this
   // file (see the check-in assertion above) — the same class of bug would
   // hide a reveal behind stale text left over from tests 1/2 above.
-  const reveal = await page.evaluate(() => {
+  const offerReveal = await page.evaluate(() => {
     const M = window.__mirage;
     const s = M.sim;
     s.inventory.length = 0;
@@ -432,9 +435,9 @@ function assert(cond, msg) {
       subtitles: document.getElementById("subtitles").innerText,
     };
   });
-  assert(reveal.inventory === 0, `offering a phantom should still consume the slot, inventory still has ${reveal.inventory}`);
-  assert(reveal.phantomsRevealed === 1, "offering a phantom to a lucid companion did not record a reveal");
-  assert(/There's nothing there\./.test(reveal.subtitles), `phantom reveal text did not reach the subtitles: ${JSON.stringify(reveal.subtitles)}`);
+  assert(offerReveal.inventory === 0, `offering a phantom should still consume the slot, inventory still has ${offerReveal.inventory}`);
+  assert(offerReveal.phantomsRevealed === 1, "offering a phantom to a lucid companion did not record a reveal");
+  assert(/There's nothing there\./.test(offerReveal.subtitles), `phantom reveal text did not reach the subtitles: ${JSON.stringify(offerReveal.subtitles)}`);
 
   // 4) The craft-ready indicator reflects BELIEF, not truth, end to end
   // through hud.js: two real items that genuinely combine (Flare + Tether ->
@@ -456,12 +459,74 @@ function assert(cond, msg) {
   assert(craftHint.visible, "craftHint did not appear for a genuine Flare+Tether pair");
   assert(/Ember/.test(craftHint.text), `craftHint did not name the expected result: ${JSON.stringify(craftHint.text)}`);
 
+  // --- item hallucinations: a mislabeled real item reveals on use, a husk is
+  // real but does nothing --------------------------------------------------
+  const reveal = await page.evaluate(() => {
+    const M = window.__mirage;
+    const s = M.sim;
+    s.inventory.length = 0;
+    s.inventory.push({ id: "reveal-flare", real: true, kind: "flare", claimedKind: null });
+    s.player.hallucinating = true;
+    // Force the lie deterministically rather than trusting the roll: the
+    // player believes slot 0 is a Lens, it is really a Flare.
+    M.percept.itemLabels.set("reveal-flare", "lens");
+    const lucidityBefore = s.player.lucidity;
+    M.act(M.ACTIONS.USE_ITEM);
+    M.advance(0.2);
+    return {
+      subtitles: document.getElementById("subtitles").innerText,
+      lucidityRestored: s.player.lucidity > lucidityBefore,
+      inventoryAfter: s.inventory.length,
+    };
+  });
+  assert(/That wasn't Lens\. It was Flare\./.test(reveal.subtitles), `misidentified use did not reveal the truth: ${JSON.stringify(reveal.subtitles)}`);
+  assert(reveal.lucidityRestored, "a mislabeled Flare must still apply its REAL effect when used");
+  assert(reveal.inventoryAfter === 0, "the used slot was not consumed");
+
+  const husk = await page.evaluate(() => {
+    const M = window.__mirage;
+    const s = M.sim;
+    s.player.hallucinating = false;
+    s.inventory.length = 0;
+    s.inventory.push({ id: "husk-0", real: true, kind: "husk", claimedKind: null });
+    const lucidityBefore = s.player.lucidity;
+    const before = s.stats.itemsUsed;
+    M.act(M.ACTIONS.USE_ITEM);
+    // Compare BEFORE the advance below: passive drain runs every tick
+    // regardless of what was used, so any elapsed time — not the husk —
+    // would otherwise account for the difference.
+    const lucidityRightAfterUse = s.player.lucidity;
+    M.advance(0.2); // let hud.update() paint the subtitle
+    return {
+      subtitles: document.getElementById("subtitles").innerText,
+      lucidityUnchanged: lucidityRightAfterUse === lucidityBefore,
+      itemsUsed: s.stats.itemsUsed - before,
+      inventoryAfter: s.inventory.length,
+    };
+  });
+  assert(/crumbles/.test(husk.subtitles), `using a husk did not show its text: ${JSON.stringify(husk.subtitles)}`);
+  assert(husk.lucidityUnchanged, "a husk must have no effect at all");
+  assert(husk.itemsUsed === 1, "husk use was not counted");
+  assert(husk.inventoryAfter === 0, "the husk slot was not consumed");
+
   // --- gathering: chop a tree, mine a deposit, craft and plant a Stake ----
   // Gathering is a HOLD, not a tap: a single M.act(SURVEY) must NOT gather,
   // and only holding interact for long enough should.
   const gather = await page.evaluate(() => {
     const M = window.__mirage;
     const s = M.sim;
+    // Record the .gain pulse as it happens. M.advance() steps the sim
+    // synchronously in a tight loop, so BOTH gathers below land within a few
+    // real milliseconds — by the time this evaluate() returns, a pulse that
+    // was read directly could already have expired. An observer turns a
+    // fleeting class into a durable fact.
+    window.__gainSeen = { wood: false, stone: false };
+    for (const [key, id] of [["wood", "woodPill"], ["stone", "stonePill"]]) {
+      const pill = document.getElementById(id);
+      new MutationObserver(() => {
+        if (pill.classList.contains("gain")) window.__gainSeen[key] = true;
+      }).observe(pill, { attributes: true, attributeFilter: ["class"] });
+    }
     const t = s.trees.find((x) => !x.chopped);
     t.discovered = true;
     M.teleport(t.x, t.z);
@@ -484,6 +549,9 @@ function assert(cond, msg) {
       stoneAfterMine: s.stone,
       woodPill: document.getElementById("woodCount").textContent,
       stonePill: document.getElementById("stoneCount").textContent,
+      // Both dots are still mid-flight here (they live ~550ms of real time,
+      // and everything above took a few ms), so this is a safe read.
+      spawnedFlies: document.querySelectorAll(".gather-fly").length,
     };
   });
   assert(!gather.choppedAfterTap, "a bare tap should not chop a tree — gathering must be a hold");
@@ -493,6 +561,35 @@ function assert(cond, msg) {
   assert(gather.stoneAfterMine >= 1, "stone was not credited");
   assert(gather.woodPill !== "0", `wood pill did not update: ${gather.woodPill}`);
   assert(gather.stonePill !== "0", `stone pill did not update: ${gather.stonePill}`);
+
+  // The collect-fly animation (hud.js collectFly/pillGain) is the one part of
+  // this file that genuinely runs on WALL-CLOCK time — CSS transitions and
+  // setTimeout, not the sim clock — so M.advance() can't drive it. It is still
+  // asserted by POLLING for the end state (waitForFunction), never by sleeping
+  // a fixed span and reading once: the .gain pulse is only ~420ms wide, and a
+  // loaded headless box can easily slide a fixed read outside that window. The
+  // MutationObserver installed above is what makes "the pulse happened" a
+  // recorded fact rather than something that had to be caught mid-flight.
+  assert(gather.spawnedFlies > 0, "chopping/mining did not spawn a .gather-fly element");
+  // Generous timeouts, on purpose. These wait on WALL-CLOCK browser timers
+  // (collectFly's ~550ms flight, pillGain's ~420ms pulse) in an environment
+  // that renders this scene at 8-10fps under software GL and saturates the
+  // main thread doing it — a 550ms timer routinely lands seconds late here,
+  // and a 5s budget failed on exactly that. What is being asserted is that
+  // the animation CLEANS UP, not that it is fast; picking a tight bound would
+  // be re-making this file's own lesson about wall-clock assertions.
+  // Report the live count on failure — "never cleaned up" alone doesn't say
+  // whether nothing was removed or something keeps spawning more.
+  await page.waitForFunction(() => document.querySelectorAll(".gather-fly").length === 0, null, { timeout: 30000 })
+    .catch(async () => {
+      const n = await page.evaluate(() => document.querySelectorAll(".gather-fly").length);
+      throw new Error(`gather-fly dot(s) were never cleaned up after landing (${n} still present, ${gather.spawnedFlies} spawned)`);
+    });
+  const pulsed = await page.evaluate(() => window.__gainSeen);
+  assert(pulsed.wood, "wood pill never got its landing highlight (.gain)");
+  assert(pulsed.stone, "stone pill never got its landing highlight (.gain)");
+  await page.waitForFunction(() => !document.querySelector(".pill.gain"), null, { timeout: 30000 })
+    .catch(() => { throw new Error("a pill's landing highlight (.gain) never cleared") });
 
   const stake = await page.evaluate(() => {
     const M = window.__mirage;

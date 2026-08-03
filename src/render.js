@@ -6,9 +6,9 @@
 // list as the real ones.
 
 import * as THREE from "../lib/three.module.js";
-import { CELL, GRID, cellToWorld } from "./world.js";
-import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js";
-import { PYLON_RADIUS } from "./state.js";
+import { CELL, GRID, cellToWorld } from "./world.js?v=mirage-0.7.4";
+import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=mirage-0.7.4";
+import { PYLON_RADIUS } from "./state.js?v=mirage-0.7.4";
 
 const PALETTE = {
   sky: 0x0a0f16,
@@ -25,6 +25,8 @@ const PALETTE = {
   camp: 0xffb562,
   body: 0x8d97a8,
   bodyLost: 0xb06a72,
+  monster: 0x140a0d, // near-black with a red undertone — wrong, not just "gone"
+  monsterEye: 0xff2a2a,
   itemFlare: 0xff8a3d,
   itemTether: 0x5fe0c0,
   itemLens: 0xbfe6ff,
@@ -341,13 +343,41 @@ export function createRenderer(canvas, sim) {
   const tmpColor = new THREE.Color();
   let elapsed = 0;
 
-  function update(percept, dt, view) {
+  /**
+   * Draw the basin as ONE mind perceives it.
+   *
+   * `opts.eye` is the character whose head the camera sits in (defaults to the
+   * lead, so single-player callers are unchanged). `opts.viewport` is a
+   * {x,y,w,h} rect in device pixels for couch co-op split-screen; omitted, the
+   * whole canvas is used.
+   *
+   * Couch co-op calls this once PER PLAYER per frame, with that player's own
+   * percept — which is the whole reason the two halves of the screen can
+   * legitimately disagree about what is in the basin. Pass dt only on the
+   * first call of a frame: `elapsed` is shared scene-animation time, and
+   * advancing it once per viewport would run the world at 2x for two players.
+   */
+  function update(percept, dt, view, opts = {}) {
     elapsed += dt;
+    const eye = opts.eye || sim.player;
+    const vp = opts.viewport || null;
     const dis = distortion(percept, sim);
 
+    if (vp) {
+      renderer.setScissorTest(true);
+      renderer.setViewport(vp.x, vp.y, vp.w, vp.h);
+      renderer.setScissor(vp.x, vp.y, vp.w, vp.h);
+      camera.aspect = vp.w / vp.h || 1;
+    } else {
+      renderer.setScissorTest(false);
+      const w = canvas.width, h = canvas.height;
+      renderer.setViewport(0, 0, w, h);
+      camera.aspect = (canvas.clientWidth || w) / (canvas.clientHeight || h) || 1;
+    }
+
     // ---- camera ----
-    const px = sim.player.x;
-    const pz = sim.player.z;
+    const px = eye.x;
+    const pz = eye.z;
     rig.position.set(px, terrainHeight(px, pz) + EYE_HEIGHT, pz);
     rig.rotation.y = view.yaw;
     camera.rotation.x = view.pitch;
@@ -436,8 +466,19 @@ export function createRenderer(canvas, sim) {
       const dx = px - c.x;
       const dz = pz - c.z;
       obj.rotation.y = Math.atan2(dx, dz);
-      obj.userData.mat.color.set(c.hallucinating ? PALETTE.bodyLost : PALETTE.body);
-      obj.userData.light.material.color.set(c.hallucinating ? 0xff8a94 : 0xffd9a0);
+      if (c.monstrous) {
+        // A lie about identity, not position — the figure keeps its real
+        // spot and facing, only reads wrong for a beat. Wrong proportions
+        // (looms taller and wider) rather than just a new colour, so it
+        // reads as "not them" at a glance, not merely "them, but red."
+        obj.scale.set(1.15, 1.6, 1.1);
+        obj.userData.mat.color.set(PALETTE.monster);
+        obj.userData.light.material.color.set(PALETTE.monsterEye);
+      } else {
+        obj.scale.set(1, 1, 1);
+        obj.userData.mat.color.set(c.hallucinating ? PALETTE.bodyLost : PALETTE.body);
+        obj.userData.light.material.color.set(c.hallucinating ? 0xff8a94 : 0xffd9a0);
+      }
     }
 
     renderer.render(scene, camera);
@@ -449,6 +490,38 @@ export function createRenderer(canvas, sim) {
     renderer.setSize(w, h, false);
     camera.aspect = w / h || 1;
     camera.updateProjectionMatrix();
+  }
+
+  /**
+   * Project a world point to CSS pixel coordinates against the canvas's own
+   * bounding rect, for HUD elements (fixed-position DOM, not WebGL) that need
+   * to line up with something in the 3D scene — e.g. a collected-resource fly
+   * animation starting where the tree/deposit actually stood. `visible` is
+   * false once the point is behind the camera, where the projected x/y are
+   * meaningless (they'd otherwise mirror to the wrong side of the screen).
+   */
+  function worldToScreen(x, y, z, vp = null) {
+    const v = new THREE.Vector3(x, y, z).project(camera);
+    const rect = canvas.getBoundingClientRect();
+    // In split-screen the camera was last set up for ONE viewport, so the NDC
+    // it produces maps into that viewport's slice of the canvas, not the whole
+    // thing. `vp` is in device pixels (what Three wants); the DOM overlay is in
+    // CSS pixels, hence the ratio. Its y-origin is bottom-left, the DOM's is
+    // top-left, so the flip below is not the same flip as the NDC one.
+    let left = rect.left, top = rect.top, width = rect.width, height = rect.height;
+    if (vp) {
+      const sx = rect.width / (canvas.width || rect.width);
+      const sy = rect.height / (canvas.height || rect.height);
+      left = rect.left + vp.x * sx;
+      top = rect.top + (canvas.height - vp.y - vp.h) * sy;
+      width = vp.w * sx;
+      height = vp.h * sy;
+    }
+    return {
+      x: left + (v.x * 0.5 + 0.5) * width,
+      y: top + (-v.y * 0.5 + 0.5) * height,
+      visible: v.z < 1,
+    };
   }
   window.addEventListener("resize", resize);
   resize();
@@ -470,5 +543,5 @@ export function createRenderer(canvas, sim) {
     renderer.dispose();
   }
 
-  return { renderer, scene, camera, rig, update, resize, dispose, terrainHeight, PALETTE };
+  return { renderer, scene, camera, rig, update, resize, dispose, terrainHeight, worldToScreen, PALETTE };
 }

@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0a0f16" />
   <title>MIRAGE — five minds and yours</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230a0f16'/%3E%3Cpath d='M4 22h24' stroke='%23596579' stroke-width='2'/%3E%3Crect x='9' y='8' width='4' height='14' fill='%2374e0ff'/%3E%3Crect x='19' y='11' width='4' height='11' fill='%23b06a72'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="css/style.css?v=mirage-0.2.0" />
+  <link rel="stylesheet" href="css/style.css?v=mirage-0.7.4" />
 </head>
 <body>
   <canvas id="gl"></canvas>
@@ -43,8 +43,16 @@
         </div>
       </div>
 
-      <button id="startBtn" class="big-btn" data-row="1" data-col="0">Walk in</button>
-      <button id="howBtn" class="text-btn" data-row="2" data-col="0">How to play</button>
+      <div class="field" style="margin-bottom:20px">
+        <label class="field-label">Party</label>
+        <div class="diff-row">
+          <button class="diff sel" data-coop-opt="solo" data-row="1" data-col="0">Solo</button>
+          <button class="diff" data-coop-opt="couch" data-row="1" data-col="1">Couch co-op</button>
+        </div>
+      </div>
+
+      <button id="startBtn" class="big-btn" data-row="2" data-col="0">Walk in</button>
+      <button id="howBtn" class="text-btn" data-row="3" data-col="0">How to play</button>
 
       <p id="menuHints" class="menu-hints"></p>
 
@@ -62,16 +70,24 @@
         where there are none, a sixth companion joins the formation, spent pylons
         glow like full ones, north moves. Logging a marker with nobody lucid
         beside you can write down something that was never there.</p>
-        <p><b>Items</b> turn up in the fog too — a flare, a tether, a lens. What
-        the item bar SAYS an item is may not be what it truly is while you're
-        gone, and something you pick up while hallucinating might not be
-        there at all. Either way it can be carried and used — you only find
-        out which kind of surprise it was the moment you use it.</p>
+        <p><b>Items</b> turn up in the fog too — a flare, a tether, a lens,
+        and the Husk: real, but useless. What the item bar SAYS an item is may
+        not be what it truly is while you're gone (or, sometimes, it's exactly
+        right — you can't tell which), and something you pick up while
+        hallucinating might not be there at all. Either way it can be carried
+        and used — you only find out which kind of surprise it was the moment
+        you use it. In couch co-op, the shared pack shows a DIFFERENT label to
+        each of you — whoever's still lucid sees the truth about the same slot.</p>
+        <p><b>Carrying and dropping.</b> Three slots. <b>V</b> (or D-pad Down)
+        puts the selected one down at your feet — a real item stays there to be
+        picked up again, and a phantom simply stops being. Dropping is how you
+        make room without spending anything.</p>
         <p><b>Crafting.</b> Carrying two combinable items and pressing craft
         fuses them into something stronger — an Ember, a Beacon, or a Ward,
         each doing both of its parts' work at once. A small indicator names
         what's craftable the moment it's possible, so you never have to guess
-        and press blind. Crafting reads what you're ACTUALLY carrying, not
+        and press blind. Carrying three combinable items, the CYCLED slot picks
+        which pair fuses — the hint always names what you'll actually get. Crafting reads what you're ACTUALLY carrying, not
         what the item bar told you, so a hallucinating lead can still reach
         for a pair that doesn't combine — or doesn't exist.</p>
         <p><b>Trees and stone</b> turn up too — walk up and HOLD survey/pick up
@@ -84,8 +100,12 @@
         into the next, harder basin — carrying doses, items, materials, and
         every scar with them. The campaign ends when you fail one, or clear
         the last.</p>
+        <p><b>Couch co-op.</b> Pick it on the title screen, then a second
+        controller presses Start mid-run to take over a companion — split
+        screen, and each of you hallucinates on your own. They can drop back
+        out with Select; the party AI simply resumes that mind.</p>
         <p class="howto-keys">WASD move · Shift run · mouse look · <b>E</b> survey/pick up, hold to gather ·
-        <b>Z</b> cycle item · <b>X</b> use item · <b>C</b> craft ·
+        <b>Z</b> cycle item · <b>X</b> use item · <b>V</b> drop · <b>C</b> craft ·
         <b>1–5</b> check in · <b>Shift+1–5</b> dose · <b>Q/R</b> select · <b>Esc</b> pause</p>
       </div>
 
@@ -100,8 +120,8 @@
       <div class="pill"><span class="pill-label">Found</span><span id="foundCount">0 / 6</span></div>
       <div class="pill"><span class="pill-label">Log</span><span id="surveyCount">0 / 6</span></div>
       <div class="pill"><span class="pill-label">Doses</span><span id="doseCount">3</span></div>
-      <div class="pill"><span class="pill-label">Wood</span><span id="woodCount">0</span></div>
-      <div class="pill"><span class="pill-label">Stone</span><span id="stoneCount">0</span></div>
+      <div class="pill" id="woodPill"><span class="pill-label">Wood</span><span id="woodCount">0</span></div>
+      <div class="pill" id="stonePill"><span class="pill-label">Stone</span><span id="stoneCount">0</span></div>
       <div class="pill"><span class="pill-label">Light</span><span id="clock">15:00</span></div>
       <div class="pill"><span class="pill-label">Basin</span><span id="levelLabel">1 / 1</span></div>
       <div class="pill dim"><span id="seedLabel"></span></div>
@@ -114,13 +134,35 @@
     </div>
 
     <div id="itemBar" class="item-bar"></div>
+    <!-- Player two's own read of the SAME shared pack, through THEIR percept.
+         Nothing is handed off — the slot is one array, but a lucid player two
+         reads it truthfully even while player one is being lied to about it.
+         Exists only in co-op (CSS keys off body[data-coop="2"]). -->
+    <div id="itemBar2" class="item-bar p2"></div>
     <div id="craftHint" class="craft-hint"></div>
     <div id="subtitles" class="subtitles"></div>
+    <!-- Couch co-op: one identity badge per half of the screen. Shown only
+         while body[data-coop="2"]. Each carries a NUMBER and a NAME, not just
+         a colour — player identity encoded in colour alone is unreadable for
+         a large share of players (Brain: COUCH-MULTIPLAYER/accessibility —
+         no single palette is safe across all three CVD types, so identity
+         must never rest on hue). -->
+    <div id="coopBadges" class="coop-badges">
+      <div class="coop-badge p1"><span class="coop-num">P1</span><span id="coopName1">YOU</span></div>
+      <div class="coop-badge p2"><span class="coop-num">P2</span><span id="coopName2">—</span></div>
+    </div>
     <!-- The fill is a separate element under the text so a hold-to-gather
          progress bar can grow behind the label without re-laying-out text. -->
     <div id="actionPrompt" class="action-prompt">
       <span id="actionPromptFill" class="action-prompt-fill"></span>
       <span id="actionPromptText" class="action-prompt-text"></span>
+    </div>
+    <!-- Player two's contextual prompt — their half of the screen, their
+         percept, their own hold progress. Exists only in co-op (CSS keys off
+         body[data-coop="2"]); a solo run never shows it. -->
+    <div id="actionPrompt2" class="action-prompt p2">
+      <span id="actionPromptFill2" class="action-prompt-fill"></span>
+      <span id="actionPromptText2" class="action-prompt-text"></span>
     </div>
     <div class="reticle"></div>
     <div id="hints" class="hints"></div>
@@ -161,7 +203,7 @@
   <!-- DEBRIEF -->
   <div id="debriefLayer" class="screen hidden"></div>
 
-  <script type="module" src="src/main.js?v=mirage-0.2.0"></script>
+  <script type="module" src="src/main.js?v=mirage-0.7.4"></script>
   <noscript><p style="color:#ccd">MIRAGE needs JavaScript and WebGL.</p></noscript>
 </body>
 </html>

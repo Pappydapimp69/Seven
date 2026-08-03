@@ -9,12 +9,13 @@
 import {
   createRun, tick, tickLucidity, bandOf, BAND, checkIn, useDose, logMarker, recover,
   beginHallucinating, debrief, trueLogCount, checkEndings, partyCentroid,
-  pickupItem, useItem, craftItem, previewCraft, gatherResource, gatherTarget, emit,
+  pickupItem, useItem, dropItem, craftItem, previewCraft, gatherResource, gatherTarget, emit,
   rollTraits, pickHallucinationKind, companionPickup, handoffToPlayer, offerItem,
+  possess, release, possessableCompanions,
   PARTY_SIZE, MAX_LUCIDITY, DOSE_COUNT, RECOVER_AT, RECOVER_TIME, DISSOLVE_TIME,
   TIME_LIMIT, PYLON_RADIUS, LOG_RADIUS, ISOLATION_DIST,
-  ITEM_CAP, ITEM_PICKUP_RADIUS, ITEM_INFO, PHANTOM_ITEM_COST, CRAFT_RECIPES, CAMPAIGN_LENGTH,
-  GATHER_RADIUS, GATHER_HOLD_TIME, STAKE_COST, PYLON_MAX_CHARGE, TRAIT_VARIANCE, COMPANION_TEMPLATES,
+  ITEM_CAP, ITEM_PICKUP_RADIUS, ITEM_INFO, PHANTOM_ITEM_COST, CRAFT_RECIPES, CAMPAIGN_LENGTH, LUCIDITY_GRACE,
+  GATHER_RADIUS, GATHER_HOLD_TIME, GATHER_YIELD, STAKE_COST, PYLON_MAX_CHARGE, TRAIT_VARIANCE, COMPANION_TEMPLATES,
   COMPANION_ITEM_CAP, OFFER_RADIUS,
 } from "../src/state.js";
 import { generateWorld, validate, findPath, isBlockedAt, GRID, ITEM_COUNT, ITEM_KINDS, TREE_COUNT, STONE_COUNT } from "../src/world.js";
@@ -25,6 +26,7 @@ import {
 } from "../src/percept.js";
 import { HALLUCINATION } from "../src/state.js";
 import { makeRng, hashSeed } from "../src/rng.js";
+import { readFileSync as fsReadFileSync, readdirSync as fsReaddirSync } from "fs";
 
 let passed = 0;
 const failures = [];
@@ -135,14 +137,42 @@ check("markers stand on open ground", () => {
   }
 });
 
-check("items place at the documented count, cycling every kind, all reachable", () => {
+check("items place at the documented count, every kind present, all reachable", () => {
+  // The contract is COVERAGE, not a fixed order. Kinds used to cycle `i % 3`,
+  // which guaranteed coverage but made every basin on every seed the same
+  // 2/2/2 mix — only positions varied. The invariant that actually matters is
+  // that no seed can deal a basin missing a kind (a Lens you can never find is
+  // a worse world, not a harder one).
   for (const seed of [1, 2, 3, 17, 42]) {
     const w = generateWorld(seed);
     eq(w.items.length, ITEM_COUNT, `seed ${seed}: wrong item count`);
-    for (let i = 0; i < w.items.length; i++) eq(w.items[i].itemKind, ITEM_KINDS[i % ITEM_KINDS.length], `seed ${seed}: item ${i} kind`);
     const kinds = new Set(w.items.map((it) => it.itemKind));
-    assert(kinds.size === ITEM_KINDS.length, `seed ${seed}: not every kind appeared`);
+    eq(kinds.size, ITEM_KINDS.length, `seed ${seed}: not every kind appeared`);
+    for (const it of w.items)
+      assert(ITEM_KINDS.includes(it.itemKind), `seed ${seed}: unknown kind ${it.itemKind}`);
     assert(validate(w).ok, `seed ${seed}: an item was left unreachable`);
+  }
+});
+
+check("item kinds actually vary across seeds, and the draw count never varies", () => {
+  const mixes = new Set();
+  for (let seed = 1; seed <= 120; seed++) {
+    const w = generateWorld(seed);
+    const c = Object.fromEntries(ITEM_KINDS.map((k) => [k, 0]));
+    for (const it of w.items) c[it.itemKind] += 1;
+    for (const k of ITEM_KINDS) assert(c[k] >= 1, `seed ${seed}: no ${k} in the basin`);
+    mixes.add(ITEM_KINDS.map((k) => c[k]).join("/"));
+  }
+  assert(mixes.size > 1, `item mix never changes across 120 seeds (got only ${[...mixes]})`);
+  // Constant roll count: the same seed must always produce the same world, and
+  // everything drawn AFTER the items (trees, stones) must be unmoved by the
+  // item draw — a pool whose roll count varies with its own contents desyncs
+  // every later consumer of the stream (Brain: waiting-city#E9/E17).
+  for (const seed of [5, 33, 91]) {
+    const a = generateWorld(seed), b = generateWorld(seed);
+    eq(JSON.stringify(a.items), JSON.stringify(b.items), `seed ${seed}: item draw not deterministic`);
+    eq(JSON.stringify(a.trees), JSON.stringify(b.trees), `seed ${seed}: trees moved between identical seeds`);
+    eq(JSON.stringify(a.stones), JSON.stringify(b.stones), `seed ${seed}: stones moved between identical seeds`);
   }
 });
 
@@ -192,8 +222,22 @@ check("a run starts with the player plus five companions, all full", () => {
   eq(sim.status, "playing");
 });
 
+check("nobody's lucidity moves during the opening grace window, and drain resumes right after", () => {
+  const sim = createRun({ seed: 8 });
+  const spot = farFromPylons(sim);
+  for (const c of sim.party) { c.x = spot.x; c.z = spot.z; }
+  const before = sim.companions.map((c) => c.lucidity);
+  sim.time = LUCIDITY_GRACE - 1;
+  for (const c of sim.party) tickLucidity(sim, c, 1);
+  sim.companions.forEach((c, i) => eq(c.lucidity, before[i], `${c.name} drained before the grace window ended`));
+  sim.time = LUCIDITY_GRACE;
+  for (const c of sim.party) tickLucidity(sim, c, 1);
+  sim.companions.forEach((c, i) => assert(c.lucidity < before[i], `${c.name} did not drain once the grace window ended`));
+});
+
 check("lucidity only ever falls, absent a pylon or a dose", () => {
   const sim = createRun({ seed: 8 });
+  sim.time = LUCIDITY_GRACE; // past the orientation window — drain applies
   // Park everyone far from any pylon so the only force acting is drain.
   const spot = farFromPylons(sim);
   for (const c of sim.party) { c.x = spot.x; c.z = spot.z; }
@@ -204,6 +248,7 @@ check("lucidity only ever falls, absent a pylon or a dose", () => {
 
 check("companions drain at different rates — the party is not one meter", () => {
   const sim = createRun({ seed: 8 });
+  sim.time = LUCIDITY_GRACE;
   const spot = farFromPylons(sim);
   for (const c of sim.party) { c.x = spot.x; c.z = spot.z; }
   for (let i = 0; i < 30; i++) for (const c of sim.party) tickLucidity(sim, c, 1);
@@ -213,6 +258,7 @@ check("companions drain at different rates — the party is not one meter", () =
 
 check("walking off alone drains faster than staying with the party", () => {
   const sim = createRun({ seed: 9 });
+  sim.time = LUCIDITY_GRACE;
   const spot = farFromPylons(sim);
   for (const c of sim.party) { c.x = spot.x; c.z = spot.z; }
   const together = tickLucidity(sim, sim.companions[0], 1);
@@ -226,6 +272,7 @@ check("walking off alone drains faster than staying with the party", () => {
 
 check("watching someone come apart costs you", () => {
   const sim = createRun({ seed: 10 });
+  sim.time = LUCIDITY_GRACE;
   const spot = farFromPylons(sim);
   for (const c of sim.party) { c.x = spot.x; c.z = spot.z; }
   const subject = sim.companions[0];
@@ -239,6 +286,7 @@ check("watching someone come apart costs you", () => {
 
 check("coming back leaves a scar that makes the next fall faster", () => {
   const sim = createRun({ seed: 11 });
+  sim.time = LUCIDITY_GRACE;
   const spot = farFromPylons(sim);
   for (const c of sim.party) { c.x = spot.x; c.z = spot.z; }
   const c = sim.companions[0];
@@ -253,6 +301,7 @@ check("coming back leaves a scar that makes the next fall faster", () => {
 
 check("hitting zero starts a hallucination, with a specific kind", () => {
   const sim = createRun({ seed: 12 });
+  sim.time = LUCIDITY_GRACE;
   const c = sim.companions[2];
   c.lucidity = 0.2;
   c.x = farFromPylons(sim).x;
@@ -388,6 +437,7 @@ check("a pylon restores everyone standing in it, and spends itself doing so", ()
 
 check("a spent pylon does nothing", () => {
   const sim = createRun({ seed: 14 });
+  sim.time = LUCIDITY_GRACE;
   const p = sim.pylons[0];
   p.charge = 0;
   const c = sim.companions[0];
@@ -601,6 +651,7 @@ check("CHORUS makes every report agree with you", () => {
 
 check("distortion pre-echoes before zero, so the lead has a tell about themselves", () => {
   const sim = createRun({ seed: 30 });
+  sim.time = LUCIDITY_GRACE;
   const percept = createPercept();
   sim.player.lucidity = 100;
   eq(distortion(percept, sim), 0, "distortion while fresh");
@@ -765,6 +816,7 @@ check("use: a flare restores lucidity and is consumed", () => {
 
 check("use: a tether steadies the target — reduced drain, not a cure", () => {
   const sim = createRun({ seed: 56 });
+  sim.time = LUCIDITY_GRACE;
   const target = sim.companions[0];
   const spot = farFromPylons(sim);
   for (const c of sim.party) { c.x = spot.x; c.z = spot.z; }
@@ -779,6 +831,7 @@ check("use: a tether steadies the target — reduced drain, not a cure", () => {
 
 check("use: a lens buys a truth window without touching the meter or curing anyone", () => {
   const sim = createRun({ seed: 57 });
+  sim.time = LUCIDITY_GRACE;
   const percept = createPercept();
   sim.player.hallucinating = true;
   sim.player.hallucination = HALLUCINATION.WRONG_WAY;
@@ -830,6 +883,58 @@ check("a real item's displayed kind can be wrong while hallucinating, and holds 
   const clear = perceivedWorldItems(percept, sim).find((x) => x.id === it.id);
   eq(clear.shownKind, it.itemKind, "a lucid lead must see the true kind");
   eq(clear.misidentified, false, "no misidentification flag while lucid");
+});
+
+check("a hallucinating lead sometimes sees a world item's TRUE kind too, not always a lie", () => {
+  // The pool used to exclude the real kind on purpose (always wrong). Now it
+  // doesn't — a hallucination that lied about literally everything would be
+  // easier to play around than one you can't fully distrust or fully trust.
+  let sawTrue = false, sawFalse = false;
+  for (let seed = 1; seed <= 200 && !(sawTrue && sawFalse); seed++) {
+    const sim = createRun({ seed });
+    const it = sim.items[0];
+    it.discovered = true;
+    const percept = createPercept();
+    sim.player.hallucinating = true;
+    updatePercept(percept, sim, 0.1);
+    const seen = perceivedWorldItems(percept, sim).find((x) => x.id === it.id);
+    if (seen.shownKind === it.itemKind) sawTrue = true;
+    else sawFalse = true;
+  }
+  assert(sawTrue, "200 seeds and a hallucinating lead never once saw the truth about a world item");
+  assert(sawFalse, "200 seeds and a hallucinating lead never once saw a wrong kind — the lie never fires");
+});
+
+check("a hallucinating lead sometimes sees a carried item's TRUE kind too, not always a lie", () => {
+  let sawTrue = false, sawFalse = false;
+  for (let seed = 1; seed <= 200 && !(sawTrue && sawFalse); seed++) {
+    const sim = createRun({ seed });
+    sim.inventory.push({ id: "s0", real: true, kind: "flare", claimedKind: null });
+    const percept = createPercept();
+    sim.player.hallucinating = true;
+    updatePercept(percept, sim, 0.1);
+    const seen = perceivedInventory(percept, sim)[0];
+    if (seen.shownKind === "flare") sawTrue = true;
+    else sawFalse = true;
+  }
+  assert(sawTrue, "200 seeds and a hallucinating lead never once saw the truth about a carried item");
+  assert(sawFalse, "200 seeds and a hallucinating lead never once saw a wrong kind — the lie never fires");
+});
+
+check("a husk is a REAL pickup that does nothing at all when used", () => {
+  const sim = createRun({ seed: 63 });
+  sim.inventory.push({ id: "s0", real: true, kind: "husk", claimedKind: null });
+  const lucidityBefore = sim.player.lucidity;
+  const target = sim.companions[0];
+  const steadyBefore = target.steadyUntil;
+  const pylonsBefore = sim.pylons.length;
+  const res = useItem(sim, 0, target.id);
+  assert(res.ok && res.real === true, "a husk is real, not a phantom");
+  eq(res.kind, "husk", "wrong kind recorded for a husk use");
+  eq(sim.player.lucidity, lucidityBefore, "a husk must not touch lucidity");
+  eq(target.steadyUntil, steadyBefore, "a husk must not steady anyone");
+  eq(sim.pylons.length, pylonsBefore, "a husk must not plant a pylon");
+  eq(sim.stats.itemsUsed, 1, "husk use should still be counted as a real item use");
 });
 
 check("a phantom pickup is never rendered as a world object, only as an inventory slot", () => {
@@ -955,7 +1060,7 @@ check("hand craftItem the lying item bar and the craft fires — and comes out f
   const believed = believedKinds(percept, sim);
   eq(believed[0], "tether", "test setup: the belief view should carry the bar's lie");
   eq(believed[1], "flare", "test setup: the second slot should read as a flare");
-  const res = craftItem(sim, believed);
+  const res = craftItem(sim, -1, believed);
   assert(res.ok, "a lead who believes they hold a matching pair must be allowed to commit");
   eq(res.kind, "ember", "they set out to make an ember");
   eq(res.real, false, "built out of a misread flare, it cannot be real");
@@ -1048,7 +1153,8 @@ check("gathering requires being in reach of a discovered tree or deposit", () =>
   sim.player.z = t.z;
   const res = gatherResource(sim);
   assert(res.ok && res.resource === "wood", "failed to chop a discovered tree in reach");
-  eq(sim.wood, 1, "wood not credited");
+  assert(sim.wood >= GATHER_YIELD.min && sim.wood <= GATHER_YIELD.max, "wood not credited in the documented range");
+  eq(sim.wood, res.amount, "credited wood must match the reported amount");
   assert(t.chopped, "the tree was not marked chopped");
   eq(gatherResource(sim).ok, false, "chopped the same tree twice");
 });
@@ -1061,7 +1167,8 @@ check("mining a stone deposit credits stone the same way chopping credits wood",
   sim.player.z = s.z;
   const res = gatherResource(sim);
   assert(res.ok && res.resource === "stone", "failed to mine a discovered deposit in reach");
-  eq(sim.stone, 1, "stone not credited");
+  assert(sim.stone >= GATHER_YIELD.min && sim.stone <= GATHER_YIELD.max, "stone not credited in the documented range");
+  eq(sim.stone, res.amount, "credited stone must match the reported amount");
   assert(s.mined, "the deposit was not marked mined");
 });
 
@@ -1103,7 +1210,7 @@ check("holding for GATHER_HOLD_TIME completes the gather", () => {
   advance(sim, GATHER_HOLD_TIME - 0.1, { interact: true });
   eq(sim.wood, 0, "gathered before the hold time was reached");
   advance(sim, 0.2, { interact: true }); // crosses the threshold
-  eq(sim.wood, 1, "did not gather once the hold time was reached");
+  assert(sim.wood >= GATHER_YIELD.min && sim.wood <= GATHER_YIELD.max, "did not gather once the hold time was reached");
   assert(t.chopped, "the tree was not marked chopped");
   eq(sim.gatherHold.progress, 0, "hold progress should reset after completing");
   eq(sim.gatherHold.targetId, null, "hold target should clear after completing");
@@ -1519,7 +1626,7 @@ check("a false craft and an honest craft emit an INDISTINGUISHABLE event — sam
   const simFalse = createRun({ seed: 142 });
   simFalse.inventory.push({ id: "a", real: true, kind: "flare", claimedKind: null });
   simFalse.inventory.push({ id: "b", real: true, kind: "lens", claimedKind: null });
-  const falseRes = craftItem(simFalse, ["flare", "tether"]);
+  const falseRes = craftItem(simFalse, -1, ["flare", "tether"]);
   assert(falseRes.ok && falseRes.real === false, "test setup: expected a false ember");
   const falseEv = simFalse.events[simFalse.events.length - 1];
 
@@ -1532,7 +1639,7 @@ check("a crafted phantom, used later, hits the phantom branch — cost, not payo
   const sim = createRun({ seed: 143 });
   sim.inventory.push({ id: "a", real: true, kind: "flare", claimedKind: null });
   sim.inventory.push({ id: "b", real: true, kind: "lens", claimedKind: null });
-  const craftRes = craftItem(sim, ["flare", "tether"]); // false ember, same construction as above
+  const craftRes = craftItem(sim, -1, ["flare", "tether"]); // false ember, same construction as above
   assert(craftRes.ok && craftRes.real === false, "test setup: expected a false craft");
   eq(sim.inventory[0].claimedKind, "ember", "test setup: the crafted phantom should claim to be an ember");
 
@@ -1558,7 +1665,7 @@ check("a crafted phantom's claimedKind survives the lead recovering from the hal
   percept.itemLabels.set("a", "flare");
   percept.itemLabels.set("b", "tether");
   const believed = believedKinds(percept, sim);
-  const craftRes = craftItem(sim, believed);
+  const craftRes = craftItem(sim, -1, believed);
   assert(craftRes.ok && craftRes.real === false, "test setup: expected a false craft built while hallucinating");
   eq(sim.inventory[0].claimedKind, "ember", "test setup: the phantom should claim to be an ember");
 
@@ -1577,9 +1684,9 @@ check("previewCraft and craftItem agree on belief, for both a pair recipe and th
   sim.inventory.push({ id: "a", real: true, kind: "flare", claimedKind: null });
   sim.inventory.push({ id: "b", real: true, kind: "lens", claimedKind: null });
   const believedYes = ["flare", "tether"];
-  const preview = previewCraft(sim, believedYes);
+  const preview = previewCraft(sim, -1, believedYes);
   assert(preview.ok && preview.kind === "ember", "expected an ember preview under this belief");
-  const res = craftItem(sim, believedYes);
+  const res = craftItem(sim, -1, believedYes);
   assert(res.ok, "craftItem should agree with previewCraft's ok:true");
   eq(res.kind, preview.kind, "craftItem's kind should match previewCraft's kind");
 
@@ -1589,8 +1696,8 @@ check("previewCraft and craftItem agree on belief, for both a pair recipe and th
   sim2.inventory.push({ id: "a", real: true, kind: "flare", claimedKind: null });
   sim2.inventory.push({ id: "b", real: true, kind: "lens", claimedKind: null });
   const believedNo = ["flare", "flare"];
-  eq(previewCraft(sim2, believedNo).ok, false, "expected no preview under a non-matching belief");
-  eq(craftItem(sim2, believedNo).ok, false, "craftItem should refuse exactly when previewCraft says no");
+  eq(previewCraft(sim2, -1, believedNo).ok, false, "expected no preview under a non-matching belief");
+  eq(craftItem(sim2, -1, believedNo).ok, false, "craftItem should refuse exactly when previewCraft says no");
 
   // The Stake path carries no belief layer at all — raw materials only.
   const sim3 = createRun({ seed: 147 });
@@ -2019,6 +2126,7 @@ check("companions follow the lead", () => {
 
 check("a brittle companion breaks formation for a pylon they remember", () => {
   const sim = createRun({ seed: 44 });
+  sim.time = LUCIDITY_GRACE;
   const p = sim.pylons[0];
   const c = sim.companions[0];
   // The party is out in the basin, well away from relief, but this companion has
@@ -2060,6 +2168,7 @@ check("a gone companion stops following and goes its own way", () => {
 
 check("companions volunteer remarks, and a gone one says gone things", () => {
   const sim = createRun({ seed: 46 });
+  sim.time = LUCIDITY_GRACE;
   let normal = 0;
   advance(sim, 60);
   normal = sim.companions.length; // remarks are emitted as events; count over a window
@@ -2137,6 +2246,621 @@ function farFromPylons(sim) {
 }
 
 // ---------------------------------------------------------------------------
+// couch co-op — a second player POSSESSES a companion; nobody is added
+// ---------------------------------------------------------------------------
+check("a fresh run has exactly one human, and it is the lead", () => {
+  const sim = createRun({ seed: 300 });
+  eq(sim.humans.length, 1, "a solo run should have one human");
+  assert(sim.humans[0] === sim.player, "humans[0] must BE the lead, not a copy");
+  eq(sim.player.humanSlot, 0, "the lead is always slot 0");
+  for (const c of sim.companions) eq(c.humanSlot, null, `${c.id} should start AI-driven`);
+});
+
+check("possessing a companion takes a seat without adding a body to the basin", () => {
+  const sim = createRun({ seed: 301 });
+  const partyBefore = sim.party.length;
+  const target = sim.companions[2];
+  const slot = possess(sim, target.id);
+  eq(slot, 1, "the second human should get slot 1");
+  eq(target.humanSlot, 1, "the companion should record its slot");
+  assert(sim.humans[1] === target, "humans[1] must be the possessed companion itself");
+  eq(sim.party.length, partyBefore, "possession must not change the party size");
+  eq(sim.companions.length, 5, "a possessed companion is still a companion");
+  assert(!target.isPlayer, "possession must not make a companion the LEAD");
+});
+
+check("a companion cannot be possessed twice", () => {
+  const sim = createRun({ seed: 302 });
+  const target = sim.companions[0];
+  eq(possess(sim, target.id), 1, "first possession should succeed");
+  eq(possess(sim, target.id), null, "second possession of the same mind must be refused");
+  eq(sim.humans.length, 2, "a refused possession must not grow the roster");
+  eq(possess(sim, "no-such-companion"), null, "an unknown id must be refused");
+});
+
+check("possessableCompanions only offers minds the AI still owns", () => {
+  const sim = createRun({ seed: 303 });
+  eq(possessableCompanions(sim).length, 5, "all five start available");
+  possess(sim, sim.companions[1].id);
+  const left = possessableCompanions(sim);
+  eq(left.length, 4, "a taken companion must drop out of the offer list");
+  assert(!left.includes(sim.companions[1]), "the taken companion must not be offered");
+});
+
+check("possession clears the AI's in-flight goal, and release clears it again", () => {
+  const sim = createRun({ seed: 304 });
+  const c = sim.companions[0];
+  c.goal = { x: 999, z: 999 };
+  c.goalKind = "pylon";
+  c.path = [{ x: 1, z: 1 }];
+  c.fetchItemId = "item-7";
+  possess(sim, c.id);
+  eq(c.goal, null, "a stale AI goal must not survive possession");
+  eq(c.goalKind, "follow", "goalKind must reset on possession");
+  eq(c.path, null, "a stale path must not survive possession");
+  eq(c.fetchItemId, null, "a stale fetch errand must not survive possession");
+  // ...and the same on the way out, so the AI restarts from where it is now.
+  c.goal = { x: 5, z: 5 };
+  c.path = [{ x: 2, z: 2 }];
+  release(sim, 1);
+  eq(c.goal, null, "a goal formed under human control must not be handed to the AI");
+  eq(c.path, null, "a path formed under human control must not be handed to the AI");
+});
+
+check("releasing hands the mind back to the AI, intact", () => {
+  const sim = createRun({ seed: 305 });
+  const c = sim.companions[3];
+  c.lucidity = 41;
+  c.scars = 2;
+  possess(sim, c.id);
+  assert(release(sim, 1), "release should succeed");
+  eq(c.humanSlot, null, "the companion must be AI-driven again");
+  eq(sim.humans.length, 1, "the roster should be back to the lead alone");
+  eq(c.lucidity, 41, "release must not reset the mind's state");
+  eq(c.scars, 2, "release must not reset scars");
+  assert(sim.companions.includes(c), "the character must STAY in the basin, not vanish");
+});
+
+check("the lead's slot can never be released", () => {
+  const sim = createRun({ seed: 306 });
+  eq(release(sim, 0), false, "slot 0 must be unreleasable");
+  assert(sim.humans[0] === sim.player, "the lead must still be human slot 0");
+  eq(release(sim, 5), false, "an out-of-range slot must be refused");
+});
+
+check("a possessed companion is steered by its own input, not by the party AI", () => {
+  const sim = createRun({ seed: 307 });
+  const c = sim.companions[0];
+  possess(sim, c.id);
+  // Park it far from everything so the AI, if it ran, would want to move.
+  const start = { x: c.x, z: c.z };
+  advance(sim, 0.5, { others: [{ move: { x: 1, z: 0 }, run: false, yaw: 0.3 }] });
+  assert(Math.abs(c.x - start.x) > 0.1, "slot-1 input should have moved the possessed companion");
+  eq(c.yaw, 0.3, "slot-1 input should set the possessed companion's facing");
+  // With NO input for slot 1 the AI must still not take the wheel back.
+  const held = { x: c.x, z: c.z };
+  advance(sim, 0.6, {});
+  eq(c.x, held.x, "a possessed companion must not drift under AI control");
+  eq(c.z, held.z, "a possessed companion must not drift under AI control");
+});
+
+check("releasing lets the party AI drive that companion again", () => {
+  const sim = createRun({ seed: 308 });
+  const c = sim.companions[0];
+  possess(sim, c.id);
+  advance(sim, 0.5, {});
+  release(sim, 1);
+  const start = { x: c.x, z: c.z };
+  // Put the lead well away so the follow AI has somewhere to go.
+  sim.player.x = c.x + 40;
+  advance(sim, 1.5, {});
+  assert(Math.hypot(c.x - start.x, c.z - start.z) > 0.1, "the AI should be driving the released companion again");
+});
+
+check("each human gets their own percept, so they can be shown different worlds", () => {
+  const sim = createRun({ seed: 309 });
+  sim.time = LUCIDITY_GRACE;
+  const c = sim.companions[0];
+  possess(sim, c.id);
+  const pLead = createPercept(sim.player);
+  const pTwo = createPercept(c);
+  // Only the SECOND player's mind goes. The lead's must stay honest.
+  beginHallucinating(sim, c);
+  updatePercept(pLead, sim, 0.1);
+  updatePercept(pTwo, sim, 0.1);
+  assert(!pLead.active, "the lead must not hallucinate because someone else did");
+  assert(pTwo.active, "the possessed companion's own percept must go active");
+  eq(distortion(pLead, sim), 0, "a lucid lead's screen must stay undistorted");
+  assert(distortion(pTwo, sim) > 0, "the gone player's own screen must distort");
+});
+
+check("a phantom marker is placed around the mind that conjured it, not always the lead", () => {
+  const sim = createRun({ seed: 310 });
+  const c = sim.companions[0];
+  possess(sim, c.id);
+  // Move the two humans far apart, then send ONLY the second one under.
+  sim.player.x = 0; sim.player.z = 0;
+  c.x = 120; c.z = 120;
+  c.hallucination = HALLUCINATION.PHANTOM_MARKER;
+  c.hallucinating = true;
+  const pTwo = createPercept(c);
+  updatePercept(pTwo, sim, 0.1);
+  assert(pTwo.phantomMonoliths.length > 0, "a phantom-marker episode should seed phantoms");
+  for (const ph of pTwo.phantomMonoliths) {
+    const dSelf = Math.hypot(ph.x - c.x, ph.z - c.z);
+    const dLead = Math.hypot(ph.x - sim.player.x, ph.z - sim.player.z);
+    assert(dSelf < dLead, "a phantom must be conjured near ITS OWN mind, not near the lead");
+  }
+  // And the lead, being lucid, must not be shown it at all.
+  const pLead = createPercept(sim.player);
+  updatePercept(pLead, sim, 0.1);
+  eq(perceivedMonoliths(pLead, sim).filter((m) => m.phantom).length, 0,
+     "a lucid lead must not see another player's phantom");
+});
+
+check("possession survives a basin transition — a joined pad must not go dead", () => {
+  const first = createRun({ seed: 311, level: 1, campaignLength: 3 });
+  const c = first.companions[2];
+  possess(first, c.id);
+  const carryOver = {
+    party: first.party.map((ch) => ({
+      id: ch.id, lucidity: ch.lucidity, scars: ch.scars,
+      hallucinating: ch.hallucinating, hallucination: ch.hallucination, goneTime: ch.goneTime,
+      drain: ch.drain, stoic: ch.stoic, chatty: ch.chatty, wander: ch.wander,
+      selfCare: ch.selfCare, humanSlot: ch.humanSlot,
+    })),
+    doses: first.doses, inventory: first.inventory, wood: first.wood, stone: first.stone, stats: first.stats,
+  };
+  const second = createRun({ seed: 312, level: 2, campaignLength: 3, carryOver });
+  eq(second.humans.length, 2, "the second player must still be in the roster");
+  const same = second.companions.find((x) => x.id === c.id);
+  eq(same.humanSlot, 1, "the same companion must still be in slot 1");
+  assert(second.humans[1] === same, "humans[1] must point at the restored companion");
+});
+
+// ---------------------------------------------------------------------------
+// co-op verbs — a joined player's action acts on THEM, not on the lead
+// ---------------------------------------------------------------------------
+check("a joined player surveys the marker THEY are standing at", () => {
+  const sim = createRun({ seed: 320 });
+  const c = sim.companions[0];
+  possess(sim, c.id);
+  const m = sim.monoliths[0];
+  // The lead is nowhere near it; player two is standing on it.
+  sim.player.x = m.x + 400; sim.player.z = m.z + 400;
+  c.x = m.x; c.z = m.z;
+  eq(logMarker(sim, null, sim.player).ok, false, "the lead is far away and must not be able to log it");
+  const res = logMarker(sim, null, c);
+  assert(res.ok && res.real, "player two standing at the marker should log it");
+  assert(m.logged, "the marker should be marked logged");
+});
+
+check("a joined player picks up the item THEY walked to", () => {
+  const sim = createRun({ seed: 321 });
+  const c = sim.companions[0];
+  possess(sim, c.id);
+  const it = sim.items[0];
+  it.discovered = true;
+  sim.player.x = it.x + 400; sim.player.z = it.z + 400;
+  c.x = it.x; c.z = it.z;
+  eq(pickupItem(sim, sim.player).ok, false, "the lead is nowhere near the item");
+  const res = pickupItem(sim, c);
+  assert(res.ok, "player two standing on the item should pick it up");
+  assert(it.taken, "the world item should be consumed");
+  eq(sim.inventory.length, 1, "the pack is shared — the item lands in the one inventory");
+});
+
+check("a flare used by a joined player restores THEIR lucidity, not the lead's", () => {
+  const sim = createRun({ seed: 322 });
+  const c = sim.companions[0];
+  possess(sim, c.id);
+  sim.player.lucidity = 50;
+  c.lucidity = 20;
+  sim.inventory.push({ id: "s0", real: true, kind: "flare", claimedKind: null });
+  const res = useItem(sim, 0, null, c);
+  assert(res.ok && res.real, "the flare should have been used");
+  eq(sim.player.lucidity, 50, "the lead's meter must be untouched");
+  assert(c.lucidity > 20, "the user's own meter should have risen");
+});
+
+check("a phantom item used by a joined player costs THEM, and can tip THEM under", () => {
+  const sim = createRun({ seed: 323 });
+  const c = sim.companions[0];
+  possess(sim, c.id);
+  sim.player.lucidity = 90;
+  c.lucidity = PHANTOM_ITEM_COST - 1; // just enough that using it takes them to 0
+  sim.inventory.push({ id: "s0", real: false, claimedKind: "flare", kind: null });
+  useItem(sim, 0, null, c);
+  eq(sim.player.lucidity, 90, "the lead must not pay for someone else's phantom");
+  eq(c.lucidity, 0, "the user pays the phantom cost");
+  assert(c.hallucinating, "being taken to zero by a phantom should tip that mind under");
+  assert(!sim.player.hallucinating, "the lead must not be dragged under with them");
+});
+
+check("a lens used by a joined player clears THEIR screen only", () => {
+  const sim = createRun({ seed: 324 });
+  const c = sim.companions[0];
+  possess(sim, c.id);
+  sim.inventory.push({ id: "s0", real: true, kind: "lens", claimedKind: null });
+  useItem(sim, 0, null, c);
+  assert((c.lensUntil || 0) > sim.time, "the user should get the truth window");
+  assert(!(sim.player.lensUntil > sim.time), "the lead must not get a lens they didn't use");
+  // ...and percept.js must agree about who is clear.
+  assert(isClear(createPercept(c), sim), "the user's percept should read as clear");
+  assert(!isClear(createPercept(sim.player), sim), "the lead's percept must not");
+});
+
+check("a stake planted by a joined player lands at THEIR feet", () => {
+  const sim = createRun({ seed: 325 });
+  const c = sim.companions[0];
+  possess(sim, c.id);
+  sim.player.x = 0; sim.player.z = 0;
+  c.x = 77; c.z = 88;
+  sim.inventory.push({ id: "s0", real: true, kind: "stake", claimedKind: null });
+  const before = sim.pylons.length;
+  useItem(sim, 0, null, c);
+  eq(sim.pylons.length, before + 1, "a stake should add a pylon");
+  const planted = sim.pylons[sim.pylons.length - 1];
+  eq(planted.x, 77, "the pylon should be planted at the planter's position");
+  eq(planted.z, 88, "the pylon should be planted at the planter's position");
+});
+
+check("two humans can corroborate each other's surveys, but never their own", () => {
+  const sim = createRun({ seed: 326 });
+  const c = sim.companions[0];
+  possess(sim, c.id);
+  const m = sim.monoliths[0];
+  // Park every AI companion far away so the only possible witness is the lead.
+  for (const other of sim.companions) { other.x = m.x + 500; other.z = m.z + 500; }
+  c.x = m.x; c.z = m.z;
+  sim.player.x = m.x + 2; sim.player.z = m.z; // the lead is at player two's shoulder
+  const res = logMarker(sim, null, c);
+  assert(res.ok && res.real, "player two should log the marker");
+  assert(res.corroborated, "the lead standing alongside should corroborate it");
+  // Now the reverse: nobody but the surveyor in range at all.
+  const m2 = sim.monoliths[1];
+  sim.player.x = m2.x; sim.player.z = m2.z;
+  c.x = m2.x + 500; c.z = m2.z + 500;
+  const res2 = logMarker(sim, null, sim.player);
+  assert(res2.ok && res2.real, "the lead should log the second marker");
+  assert(!res2.corroborated, "a surveyor alone must not be their own witness");
+});
+
+check("each human holds their own chop — one release does not cancel the other", () => {
+  const sim = createRun({ seed: 327 });
+  const c = sim.companions[0];
+  possess(sim, c.id);
+  const t1 = sim.trees[0], t2 = sim.trees[1];
+  t1.discovered = true; t2.discovered = true;
+  sim.player.x = t1.x; sim.player.z = t1.z;
+  c.x = t2.x; c.z = t2.z;
+  // Both hold; then the LEAD lets go while player two keeps holding.
+  advance(sim, GATHER_HOLD_TIME - 0.3, { interact: true, others: [{ interact: true }] });
+  assert(sim.gatherHold.progress > 0, "the lead should have progress");
+  assert(c.gatherHold.progress > 0, "player two should have their own progress");
+  advance(sim, 0.4, { interact: false, others: [{ interact: true }] });
+  eq(sim.gatherHold.progress, 0, "the lead released, so the lead's hold resets");
+  assert(t2.chopped, "player two kept holding and should have finished their chop");
+  assert(!t1.chopped, "the lead released early and must NOT have chopped");
+});
+
+// ---------------------------------------------------------------------------
+// dropping — the escape hatch the full-hands messages already promised
+// ---------------------------------------------------------------------------
+check("dropping a real item puts it back in the basin, pickable again", () => {
+  const sim = createRun({ seed: 400 });
+  sim.inventory.push({ id: "s0", real: true, kind: "flare", claimedKind: null });
+  sim.player.x = 12; sim.player.z = -7;
+  const worldBefore = sim.items.length;
+  const res = dropItem(sim, 0);
+  assert(res.ok && res.real, "dropping a real item should succeed");
+  eq(sim.inventory.length, 0, "the slot should be gone from the pack");
+  eq(sim.items.length, worldBefore + 1, "a dropped real item must exist in the world");
+  const put = sim.items[sim.items.length - 1];
+  eq(put.itemKind, "flare", "the dropped item keeps its TRUE kind");
+  eq(put.x, 12, "it lands at the dropper's feet");
+  assert(put.discovered && !put.taken, "a dropped item is already discovered and takeable");
+  // ...and it can be picked straight back up.
+  eq(pickupItem(sim).ok, true, "a dropped item should be pickable again");
+  eq(sim.inventory.length, 1, "picking it back up refills the slot");
+});
+
+check("dropping a phantom costs nothing and leaves nothing behind", () => {
+  const sim = createRun({ seed: 401 });
+  sim.inventory.push({ id: "s0", real: false, claimedKind: "lens", kind: null });
+  const worldBefore = sim.items.length;
+  const lucidBefore = sim.player.lucidity;
+  const res = dropItem(sim, 0);
+  assert(res.ok && !res.real, "dropping a phantom should succeed as a phantom");
+  eq(sim.inventory.length, 0, "the phantom slot should clear");
+  eq(sim.items.length, worldBefore, "a phantom must NOT become a real world item");
+  eq(sim.player.lucidity, lucidBefore, "dropping a phantom must cost nothing");
+});
+
+check("a hand full of phantoms can be cleared for free, not for a quarter of the meter", () => {
+  const sim = createRun({ seed: 402 });
+  for (let i = 0; i < ITEM_CAP; i++)
+    sim.inventory.push({ id: `p${i}`, real: false, claimedKind: "flare", kind: null });
+  const before = sim.player.lucidity;
+  while (sim.inventory.length) dropItem(sim, 0);
+  eq(sim.player.lucidity, before, "clearing phantoms by dropping must be free");
+  // Using them instead is what used to be the only way out.
+  const sim2 = createRun({ seed: 402 });
+  for (let i = 0; i < ITEM_CAP; i++)
+    sim2.inventory.push({ id: `p${i}`, real: false, claimedKind: "flare", kind: null });
+  while (sim2.inventory.length) useItem(sim2, 0, null);
+  assert(sim2.player.lucidity < before, "using phantoms should still cost — dropping is the free path");
+});
+
+check("dropping refuses an empty pack and an out-of-range slot", () => {
+  const sim = createRun({ seed: 403 });
+  eq(dropItem(sim, 0).reason, "empty", "dropping from an empty pack must refuse");
+  sim.inventory.push({ id: "s0", real: true, kind: "flare", claimedKind: null });
+  eq(dropItem(sim, 5).reason, "empty", "an out-of-range slot must refuse");
+  eq(sim.inventory.length, 1, "a refused drop must not consume the slot");
+});
+
+// ---------------------------------------------------------------------------
+// crafting — the selected slot decides which pair fuses
+// ---------------------------------------------------------------------------
+check("carrying all three kinds, the SELECTED slot picks the recipe", () => {
+  const build = () => {
+    const sim = createRun({ seed: 404 });
+    for (const k of ["flare", "tether", "lens"])
+      sim.inventory.push({ id: `s${sim.inventory.length}`, real: true, kind: k, claimedKind: null });
+    return sim;
+  };
+  // slot 0 = flare -> pairs with tether = ember
+  eq(previewCraft(build(), 0).kind, "ember", "selecting the flare should offer an ember");
+  eq(craftItem(build(), 0).kind, "ember", "selecting the flare should craft an ember");
+  // slot 2 = lens -> pairs with flare = beacon
+  eq(previewCraft(build(), 2).kind, "beacon", "selecting the lens should offer a beacon");
+  eq(craftItem(build(), 2).kind, "beacon", "selecting the lens should craft a beacon");
+  // Same three items, a different intent, a different result — the point.
+  assert(craftItem(build(), 0).kind !== craftItem(build(), 2).kind,
+    "the selected slot must be able to change the outcome");
+});
+
+check("the craft hint always names what the craft button will actually make", () => {
+  const sim = createRun({ seed: 405 });
+  for (const k of ["flare", "tether", "lens"])
+    sim.inventory.push({ id: `s${sim.inventory.length}`, real: true, kind: k, claimedKind: null });
+  for (const sel of [0, 1, 2]) {
+    const promised = previewCraft(sim, sel).kind;
+    const copy = createRun({ seed: 405 });
+    for (const k of ["flare", "tether", "lens"])
+      copy.inventory.push({ id: `s${copy.inventory.length}`, real: true, kind: k, claimedKind: null });
+    eq(craftItem(copy, sel).kind, promised, `slot ${sel}: hint promised ${promised} but craft made something else`);
+  }
+});
+
+check("selecting a slot with no valid partner still falls back to any craftable pair", () => {
+  const sim = createRun({ seed: 406 });
+  // A stake pairs with nothing; flare+tether behind it still combine.
+  sim.inventory.push({ id: "s0", real: true, kind: "stake", claimedKind: null });
+  sim.inventory.push({ id: "s1", real: true, kind: "flare", claimedKind: null });
+  sim.inventory.push({ id: "s2", real: true, kind: "tether", claimedKind: null });
+  eq(craftItem(sim, 0).kind, "ember", "an unpairable selection must not block a valid craft");
+});
+
+// ---------------------------------------------------------------------------
+// slot ids — never reused, so a stale hallucinated label can't be inherited
+// ---------------------------------------------------------------------------
+check("slot ids are never reused, even across use-then-repickup in one tick", () => {
+  const sim = createRun({ seed: 407 });
+  const seen = new Set();
+  for (let n = 0; n < 4; n++) {
+    const it = sim.items[n];
+    it.discovered = true;
+    sim.player.x = it.x; sim.player.z = it.z;
+    pickupItem(sim);
+    const id = sim.inventory[sim.inventory.length - 1].id;
+    assert(!seen.has(id), `slot id ${id} was reused — a stale percept label could ride along`);
+    seen.add(id);
+    useItem(sim, sim.inventory.length - 1, null); // same tick, same resulting length
+  }
+  eq(seen.size, 4, "four pickups should have issued four distinct ids");
+});
+
+check("slot ids keep climbing across a basin transition", () => {
+  const first = createRun({ seed: 408, level: 1, campaignLength: 3 });
+  const it = first.items[0];
+  it.discovered = true;
+  first.player.x = it.x; first.player.z = it.z;
+  pickupItem(first);
+  const firstId = first.inventory[0].id;
+  const carryOver = {
+    party: first.party.map((ch) => ({
+      id: ch.id, lucidity: ch.lucidity, scars: ch.scars, hallucinating: ch.hallucinating,
+      hallucination: ch.hallucination, goneTime: ch.goneTime, drain: ch.drain, stoic: ch.stoic,
+      chatty: ch.chatty, wander: ch.wander, selfCare: ch.selfCare, humanSlot: ch.humanSlot,
+    })),
+    doses: first.doses, inventory: first.inventory, wood: first.wood, stone: first.stone,
+    stats: first.stats, slotSeq: first.slotSeq,
+  };
+  const second = createRun({ seed: 409, level: 2, campaignLength: 3, carryOver });
+  const it2 = second.items[0];
+  it2.discovered = true;
+  second.player.x = it2.x; second.player.z = it2.z;
+  pickupItem(second);
+  const nextId = second.inventory[second.inventory.length - 1].id;
+  assert(nextId !== firstId, `basin 2 reissued ${nextId}, colliding with a basin's carried slot`);
+});
+
+// ---------------------------------------------------------------------------
+// camera-turn phantom drift — "don't look away" for phantom monoliths/pylons
+// ---------------------------------------------------------------------------
+check("camera-turn phantom drift only ever moves what is currently off-screen", () => {
+  const sim = createRun({ seed: 504 });
+  sim.player.x = 0; sim.player.z = 0; sim.player.yaw = 0;
+  sim.player.hallucination = HALLUCINATION.PHANTOM_MARKER;
+  sim.player.hallucinating = true;
+  const percept = createPercept(sim.player);
+  updatePercept(percept, sim, 0.1); // onset — seeds the real phantom list, overridden below
+
+  percept.phantomMonoliths = [
+    { id: "ph-front", name: "Front", x: 0, z: -10, phantom: true }, // bearing 0: dead ahead at yaw 0
+    { id: "ph-back", name: "Back", x: 0, z: 10, phantom: true }, // bearing π: directly behind
+  ];
+  percept.phantomPylons = [];
+  const front0 = { x: percept.phantomMonoliths[0].x, z: percept.phantomMonoliths[0].z };
+  const back0 = { x: percept.phantomMonoliths[1].x, z: percept.phantomMonoliths[1].z };
+
+  // Turn the camera back and forth inside a narrow arc that keeps "front" on
+  // screen throughout (the view cone is ±0.85 rad) while still accumulating
+  // plenty of total turn. "back" (bearing π) is never inside that cone at
+  // either extreme, so it stays the only eligible candidate whenever a shift
+  // actually fires.
+  for (let i = 0; i < 8; i++) {
+    sim.player.yaw = i % 2 === 0 ? 0.3 : -0.3;
+    updatePercept(percept, sim, 0.05);
+  }
+
+  const front1 = percept.phantomMonoliths.find((m) => m.id === "ph-front");
+  const back1 = percept.phantomMonoliths.find((m) => m.id === "ph-back");
+  eq(front1.x, front0.x, "a phantom kept on screen the whole time must never move (x)");
+  eq(front1.z, front0.z, "a phantom kept on screen the whole time must never move (z)");
+  assert(back1.x !== back0.x || back1.z !== back0.z, "a phantom held off-screen the whole time should have drifted");
+  const r = Math.hypot(back1.x - sim.player.x, back1.z - sim.player.z);
+  assert(r >= 12 && r <= 28, `a drifted phantom should land within its documented reseed radius, got ${r.toFixed(1)}`);
+});
+
+check("turning the camera while lucid banks no turn credit for a later hallucination", () => {
+  const sim = createRun({ seed: 505 });
+  sim.player.x = 0; sim.player.z = 0; sim.player.yaw = 0;
+  sim.player.hallucinating = false;
+  const percept = createPercept(sim.player);
+  // Spin all the way around, several times, while perfectly lucid.
+  for (let i = 0; i < 20; i++) {
+    sim.player.yaw += 1.4;
+    updatePercept(percept, sim, 0.05);
+  }
+  eq(percept.turnAccum, 0, "turn accumulated while lucid must not persist");
+
+  // Go under, then turn only a hair — nowhere near TURN_SHIFT_ANGLE. If lucid
+  // turning had been silently banked, this tiny turn would instantly cash it
+  // in the moment the hallucination begins.
+  sim.player.hallucination = HALLUCINATION.PHANTOM_MARKER;
+  sim.player.hallucinating = true;
+  updatePercept(percept, sim, 0.05); // onset
+  percept.phantomMonoliths = [{ id: "ph-x", x: 0, z: 10, phantom: true }]; // behind, off-screen
+  const before = { x: percept.phantomMonoliths[0].x, z: percept.phantomMonoliths[0].z };
+  sim.player.yaw += 0.05;
+  updatePercept(percept, sim, 0.05);
+  eq(percept.phantomMonoliths[0].x, before.x, "a tiny turn just after onset must not trigger a shift");
+  eq(percept.phantomMonoliths[0].z, before.z, "a tiny turn just after onset must not trigger a shift");
+});
+
+// ---------------------------------------------------------------------------
+// monster flicker — a real companion briefly reads as something else
+// ---------------------------------------------------------------------------
+check("monster flicker fires only while hallucinating, holds its pick, and clears on schedule", () => {
+  const sim = createRun({ seed: 502 });
+  sim.player.x = 0; sim.player.z = 0;
+  const near = sim.companions[0];
+  near.x = 5; near.z = 0; // well within MONSTER_SIGHT
+  for (let i = 1; i < sim.companions.length; i++) { sim.companions[i].x = 9999; sim.companions[i].z = 9999; }
+  const percept = createPercept(sim.player);
+
+  // Force every chance roll to succeed, isolating hallucinating-state and
+  // distance as the only remaining gates under test.
+  sim.rng.chance = () => true;
+
+  sim.player.hallucinating = false;
+  updatePercept(percept, sim, 0.1);
+  eq(percept.monsterId, null, "a forced-success roll must still not flicker while lucid");
+
+  sim.player.hallucination = HALLUCINATION.WRONG_WAY; // any kind — the flicker is independent of it
+  sim.player.hallucinating = true;
+  updatePercept(percept, sim, 0.1); // onset tick: `lying` was computed false before this tick's flip
+  eq(percept.monsterId, null, "the onset tick itself must not roll a flicker yet");
+  updatePercept(percept, sim, 0.1); // now percept.active is already true -> lying is true
+  eq(percept.monsterId, near.id, "the only nearby companion should be the one picked");
+  assert(percept.monsterUntil > sim.time, "a fresh flicker must have a future end time");
+
+  const list = perceivedCompanions(percept, sim);
+  const seenNear = list.find((c) => c.id === near.id);
+  assert(seenNear.monstrous, "the flickering companion must be reported as monstrous");
+  for (const c of list) if (c.id !== near.id) assert(!c.monstrous, `only ${near.id} should read as monstrous, not ${c.id}`);
+
+  // Mid-flicker, even with the roll still forced true, the SAME id must hold
+  // — no re-picking a different companion out from under an active flicker.
+  const heldId = percept.monsterId;
+  updatePercept(percept, sim, 0.05);
+  eq(percept.monsterId, heldId, "a flicker in progress must not be replaced by a new roll");
+
+  // Push past the flicker's own end and force the reroll to fail — it must
+  // actually clear, not silently re-arm forever.
+  sim.time = percept.monsterUntil + 0.01;
+  sim.rng.chance = () => false;
+  updatePercept(percept, sim, 0.01);
+  eq(percept.monsterId, null, "an expired flicker with a failed reroll must clear");
+
+  // Recovering ends an in-progress flicker immediately, not at its own timer.
+  sim.rng.chance = () => true;
+  updatePercept(percept, sim, 0.01);
+  assert(percept.monsterId !== null, "sanity check: a new flicker should have started");
+  sim.player.hallucinating = false;
+  updatePercept(percept, sim, 0.01);
+  eq(percept.monsterId, null, "recovering must clear an in-progress flicker immediately");
+});
+
+check("monster flicker never picks a companion outside sight range, however often the roll succeeds", () => {
+  const sim = createRun({ seed: 503 });
+  sim.player.x = 0; sim.player.z = 0;
+  for (const c of sim.companions) { c.x = 500; c.z = 500; } // nobody is near
+  const percept = createPercept(sim.player);
+  sim.rng.chance = () => true; // force every roll to succeed
+  sim.player.hallucination = HALLUCINATION.CHORUS;
+  sim.player.hallucinating = true;
+  for (let i = 0; i < 21; i++) updatePercept(percept, sim, 0.1);
+  eq(percept.monsterId, null, "with nobody in sight, a flicker must never fire regardless of the roll");
+});
+
+check("a phantom companion is never reported as monstrous — it's already fully fake", () => {
+  const sim = createRun({ seed: 506 });
+  sim.player.x = 0; sim.player.z = 0;
+  sim.player.hallucination = HALLUCINATION.DOUBLED_PARTY;
+  sim.player.hallucinating = true;
+  const percept = createPercept(sim.player);
+  updatePercept(percept, sim, 0.1);
+  assert(percept.phantomCompanions.length > 0, "DOUBLED_PARTY should seed a phantom companion");
+  const list = perceivedCompanions(percept, sim);
+  const phantoms = list.filter((c) => c.phantom);
+  assert(phantoms.length > 0, "the phantom companion should appear in the perceived list");
+  for (const ph of phantoms) assert(!ph.monstrous, "a phantom companion must never also read as monstrous");
+});
+
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// cache-bust structural invariant — no behavioural test can see this
+// ---------------------------------------------------------------------------
+// A stale nested module is invisible to every other test in this file: the
+// source on disk is always correct, so the suite passes while a returning
+// player's browser runs old code. This asserts the SHIPPING SHAPE instead —
+// every cache-bustable URL carries the same token as BUILD.
+// Brain: the-game-prologue#E8 (entry-point-only busting misses nested imports,
+// and the next "still broken after deploy" gets re-diagnosed as a phantom
+// logic bug — which is exactly what happened here, twice), dog#E30 (confirmed
+// insufficient), opticon#E36 (assert every cache-buster equals BUILD).
+check("every module import and asset URL carries the current BUILD token", () => {
+  const srcDir = new URL("../src/", import.meta.url);
+  const build = fsReadFileSync(new URL("main.js", srcDir), "utf8").match(/const BUILD = "([^"]+)"/)?.[1];
+  assert(build, "could not read BUILD out of main.js");
+
+  for (const file of fsReaddirSync(srcDir).filter((f) => f.endsWith(".js"))) {
+    const text = fsReadFileSync(new URL(file, srcDir), "utf8");
+    for (const [, spec] of text.matchAll(/from\s+"(\.\/[^"]+)"/g)) {
+      assert(spec.includes(`?v=${build}`), `src/${file} imports "${spec}" without the current ?v=${build} — it will be served from cache after a deploy`);
+    }
+  }
+
+  const html = fsReadFileSync(new URL("../index.html", import.meta.url), "utf8");
+  for (const asset of ["css/style.css", "src/main.js"]) {
+    assert(html.includes(`${asset}?v=${build}`), `index.html references ${asset} without ?v=${build}`);
+  }
+});
+
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length) {
   for (const f of failures) console.log("  ✗ " + f);

@@ -14,9 +14,9 @@
 // The sim's job is to keep an honest, testable record of what is TRUE; `percept.js`
 // is the only place allowed to lie about it.
 
-import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS } from "./world.js";
-import { makeRng } from "./rng.js";
-import { updateCompanions, companionRemark } from "./party.js";
+import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=mirage-0.7.4";
+import { makeRng } from "./rng.js?v=mirage-0.7.4";
+import { updateCompanions, companionRemark } from "./party.js?v=mirage-0.7.4";
 
 export const PARTY_SIZE = 6; // you + 5 companions — the spec's five NPCs, plus the player
 export const MAX_LUCIDITY = 100;
@@ -28,6 +28,11 @@ export const MAX_LUCIDITY = 100;
 // small enough gap that it should not be quoted as settled. Note the harness bot
 // reads the sim's truth, so none of these numbers price the hallucination layer.
 export const BASE_DRAIN = 1.05; // lucidity/second at rest, before modifiers
+// An orientation window: nobody's meter moves for the first 5 minutes of a
+// basin, so a fresh level doesn't start punishing you before you've even
+// gotten your bearings. `sim.time` resets to 0 at the top of every level
+// (see createRun), so this is measured per-basin, not once across a campaign.
+export const LUCIDITY_GRACE = 300;
 export const ISOLATION_DIST = 13; // units from the party centroid before you count as alone
 export const ISOLATION_MULT = 1.9; // walking off alone burns you down fastest
 export const CONTAGION_DIST = 9; // seeing someone come apart costs you
@@ -70,6 +75,11 @@ export const ITEM_INFO = Object.freeze({
   // Crafted from raw materials, not other items — see STAKE_COST/craftItem.
   // Using it doesn't affect the player directly at all; it plants a pylon.
   stake: { label: "Stake", charge: 60 },
+  // Spawns in the world exactly like flare/tether/lens — it is a REAL pickup,
+  // never a phantom — but it does nothing at all when used. Not every find is
+  // useful; a hallucinating lead can just as easily mislabel a real Husk as a
+  // Flare as the reverse (see percept.js perceivedInventory/perceivedWorldItems).
+  husk: { label: "Husk" },
 });
 // A phantom item's use is always a bad surprise — there is no real effect to
 // fall back on, so reaching for it costs you instead of rewarding you.
@@ -87,21 +97,6 @@ export function recipeKey(a, b) {
   return [a, b].sort().join("+");
 }
 
-/**
- * A slot id that is unique for the life of a campaign.
- *
- * Slot ids used to be `slot<inventory.length>-<time>`, which collides: craft
- * consumes slots 0 and 2, the survivor is still `slot1-…`, and the item pushed
- * in its place is ALSO `slot1-…` if it lands in the same 0.01s bucket — which
- * queued same-frame actions reliably do. Two slots sharing an id share a
- * `percept.itemLabels` entry, so a freshly made item silently inherits the
- * survivor's stale mislabel and both bar cells read the same name. Counter
- * carries across basins (see createRun's carryOver) because the inventory does.
- */
-function newSlotId(sim) {
-  return `slot${sim.nextSlotId++}`;
-}
-
 // --- raw materials -----------------------------------------------------------
 // Trees and stone deposits are always exactly what they look like — there is no
 // deception layer here at all, unlike carried items. A tree cannot be a phantom
@@ -116,6 +111,9 @@ export const RESOURCE_SIGHT_RANGE = ITEM_SIGHT_RANGE; // same ground-clutter sig
 // real effort, short enough not to be a chore. Releasing early or switching
 // to a different tree/deposit resets progress to zero; see updateGatherHold.
 export const GATHER_HOLD_TIME = 1.2;
+// A bare-handed chop/mine yields a small random haul rather than a flat one —
+// a tree or deposit is worth reaching for on its own, not just as a Stake fee.
+export const GATHER_YIELD = Object.freeze({ min: 2, max: 3 });
 // 2 wood + 2 stone -> one Stake (a carried item like any other; see useItem's
 // "stake" case). With 5 of each per basin that's at most 2 stakes a run,
 // scarce enough to matter, not so scarce it's never worth reaching for.
@@ -210,6 +208,12 @@ function makeCharacter(tpl, spawn, index) {
     ...tpl,
     index,
     isPlayer: false,
+    // Which human is driving this mind, if any (couch co-op). null = the AI in
+    // party.js owns it. `isPlayer` stays false for a possessed companion: it
+    // means "is the LEAD", which is a different question and is what the
+    // narration/scoring already keys off.
+    humanSlot: null,
+    yaw: 0, // only read while possessed; the AI steers by goal, not facing
     x: spawn.x,
     z: spawn.z,
     // Hidden state. Nothing in the HUD may read `lucidity` directly — see percept.js.
@@ -261,6 +265,7 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
     role: "Lead",
     index: 0,
     isPlayer: true,
+    humanSlot: 0, // the lead is always human slot 0
     drain: 1.0,
     stoic: 0.5,
     chatty: 0,
@@ -319,9 +324,22 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
         ch.chatty = saved.chatty;
         ch.wander = saved.wander;
         ch.selfCare = saved.selfCare;
+        // Couch co-op: whoever a second player was driving, they keep driving
+        // into the next basin. Without this a joined player would be silently
+        // dropped back to the AI at every level transition — their controller
+        // would just stop working, which reads as a broken pad rather than a
+        // lost slot (Brain: COUCH-MULTIPLAYER/input — a silently dead second
+        // controller is the classic local-multiplayer failure).
+        ch.humanSlot = saved.humanSlot ?? null;
       }
     }
   }
+  // Rebuild the human roster from the restored slots, densely and in slot
+  // order, so `humans[i]` still means "slot i" on the far side of a basin.
+  const rejoined = companions
+    .filter((c) => c.humanSlot !== null)
+    .sort((a, b) => a.humanSlot - b.humanSlot);
+  for (const c of rejoined) c.yaw = player.yaw; // re-form facing the lead, same as possess()
 
   return {
     seed,
@@ -335,6 +353,14 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
     // times per tick (drain, contagion, sightings, endings) and rebuilding it each
     // time was pure allocation churn in the long-run simulations.
     party: [player, ...companions],
+    // Human-controlled minds, indexed by couch-co-op slot. Slot 0 is always the
+    // lead, so `humans[0] === player` and every existing single-player call
+    // site that reads sim.player keeps meaning exactly what it meant. A second
+    // player POSSESSES an existing companion rather than adding a seventh body
+    // to the basin: the party size, the endings, the dissolve rule and the
+    // scoring all stay exactly as balanced, and dropping out is a handoff back
+    // to the AI that is already driving that character.
+    humans: [player, ...rejoined],
     pylons: world.pylons.map((p) => ({ ...p, charge: PYLON_MAX_CHARGE, live: true })),
     // `discovered` is what makes this a game about EXPLORING rather than about
     // walking a known route: a marker's position is not knowledge the party
@@ -359,13 +385,15 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
     // crafting fuel, never carried or used on their own. Carry forward too.
     wood: carryOver ? carryOver.wood : 0,
     stone: carryOver ? carryOver.stone : 0,
+    // Monotonic slot-id counter. Ids used to be `slot{length}-{time}`, which
+    // repeats the moment a use-then-pickup lands in the same 0.01s tick at the
+    // same inventory length — and percept.itemLabels is keyed by slot id, so a
+    // reused id inherited the PREVIOUS slot's hallucinated label. Carried
+    // across basins so a campaign never recycles one either.
+    slotSeq: carryOver ? (carryOver.slotSeq || 0) : 0,
     // Hold-to-gather progress. Always fresh — a half-finished hold from the
     // last basin means nothing here; the trees/deposits are all new.
     gatherHold: { targetId: null, progress: 0 },
-    // Monotonic slot-id source (see newSlotId). Carries over with the
-    // inventory it names — restarting it at 0 in a new basin would mint ids
-    // colliding with the slots the party just walked in still carrying.
-    nextSlotId: carryOver ? carryOver.nextSlotId : 0,
     // The survey log. Entries can be FALSE — that is the point.
     logEntries: [],
     doses: carryOver ? carryOver.doses : DOSE_COUNT,
@@ -377,7 +405,7 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
     // Reused across a campaign's basins (not recreated) so the end-of-campaign
     // debrief reports cumulative totals, not just the final basin's.
     // `falseCrafts` and `phantomsRevealed` are the crafting-deception counters:
-    // how many items the lead built that were never there, and how many times
+    // how many items were built that were never there, and how many times
     // another mind's reach called one of those out (either direction — see
     // handoffToPlayer/offerItem). Both stay hidden until the debrief.
     stats: carryOver ? carryOver.stats : { doseUses: 0, pylonSeconds: 0, recoveries: 0, falseLogs: 0, itemsUsed: 0, phantomItemsUsed: 0, itemsCrafted: 0, falseCrafts: 0, phantomsRevealed: 0 },
@@ -444,6 +472,14 @@ export function tickLucidity(sim, ch, dt) {
     ch.goneTime += dt;
     return 0; // already at the floor; nothing left to take
   }
+  // Zero means gone, whether or not the grace window is still open — grace
+  // only withholds NEW drain, it must never mask a meter already at the
+  // floor (however it got there: a direct set, a future mechanic, ...).
+  if (ch.lucidity <= 0) {
+    beginHallucinating(sim, ch);
+    return 0;
+  }
+  if (sim.time < LUCIDITY_GRACE) return 0; // still inside the orientation window
 
   const centroid = partyCentroid(sim);
   let mult = 1;
@@ -652,6 +688,11 @@ export function discover(sim) {
   }
 }
 
+/** Issue a slot id that is never reused for the life of a campaign. */
+function nextSlotId(sim) {
+  return `slot${sim.slotSeq++}`;
+}
+
 export const discoveredCount = (sim) => sim.monoliths.filter((m) => m.discovered).length;
 
 /**
@@ -659,19 +700,25 @@ export const discoveredCount = (sim) => sim.monoliths.filter((m) => m.discovered
  * counterfeit: a hallucinating lead with nobody lucid nearby to contradict them
  * writes down a monolith that does not exist.
  */
-export function logMarker(sim, phantom = null) {
+export function logMarker(sim, phantom = null, actor = sim.player) {
   if (sim.status !== "playing") return { ok: false, reason: "over" };
 
   const near = sim.monoliths
-    .filter((m) => !m.logged && dist2D(m, sim.player) <= LOG_RADIUS)
-    .sort((a, b) => dist2D(a, sim.player) - dist2D(b, sim.player))[0];
+    .filter((m) => !m.logged && dist2D(m, actor) <= LOG_RADIUS)
+    .sort((a, b) => dist2D(a, actor) - dist2D(b, actor))[0];
 
-  const lucidWitness = sim.companions.find(
-    (c) => !c.hallucinating && bandOf(c.lucidity) !== BAND.BRITTLE && dist2D(c, sim.player) <= CORROBORATE_RADIUS,
+  // Anyone in the party but the surveyor themselves can corroborate — you
+  // cannot be your own witness. Searching `party` rather than `companions` is
+  // what lets a second human vouch for the lead (and the lead for them); in
+  // single player the actor IS the lead, so party-minus-actor is exactly the
+  // companion list this used to search.
+  const lucidWitness = sim.party.find(
+    (c) => c !== actor && !c.hallucinating && bandOf(c.lucidity) !== BAND.BRITTLE
+      && dist2D(c, actor) <= CORROBORATE_RADIUS,
   );
 
-  // Hallucinating lead, standing at nothing, nobody to say so: a false entry.
-  if (!near && sim.player.hallucinating && phantom && !lucidWitness) {
+  // Hallucinating surveyor, standing at nothing, nobody to say so: a false entry.
+  if (!near && actor.hallucinating && phantom && !lucidWitness) {
     sim.logEntries.push({ name: phantom.name, real: false, t: sim.time, corroborated: false });
     sim.stats.falseLogs += 1;
     emit(sim, "logFalse", `Logged ${phantom.name}.`, { phantom: true });
@@ -679,8 +726,8 @@ export function logMarker(sim, phantom = null) {
   }
   if (!near) return { ok: false, reason: "nothing-here" };
 
-  // A lucid companion at your shoulder is what keeps the record honest.
-  if (sim.player.hallucinating && !lucidWitness && sim.rng() < 0.5) {
+  // A lucid mind at your shoulder is what keeps the record honest.
+  if (actor.hallucinating && !lucidWitness && sim.rng() < 0.5) {
     sim.logEntries.push({ name: near.name, real: false, t: sim.time, corroborated: false });
     sim.stats.falseLogs += 1;
     emit(sim, "logFalse", `Logged ${near.name}.`, { phantom: true });
@@ -713,42 +760,41 @@ export const trueLogCount = (sim) => sim.monoliths.filter((m) => m.logged).lengt
  *     is percept.js's business, not this function's — this only ever records
  *     the truth.
  */
-export function pickupItem(sim) {
+export function pickupItem(sim, actor = sim.player) {
   if (sim.status !== "playing") return { ok: false, reason: "over" };
   if (sim.inventory.length >= ITEM_CAP) return { ok: false, reason: "full" };
 
   const near = sim.items
-    .filter((it) => !it.taken && it.discovered && dist2D(it, sim.player) <= ITEM_PICKUP_RADIUS)
-    .sort((a, b) => dist2D(a, sim.player) - dist2D(b, sim.player))[0];
+    .filter((it) => !it.taken && it.discovered && dist2D(it, actor) <= ITEM_PICKUP_RADIUS)
+    .sort((a, b) => dist2D(a, actor) - dist2D(b, actor))[0];
   if (!near) return { ok: false, reason: "nothing-here" };
 
   // Deactivate the instant it's taken — no despawn animation gates a second
   // pickup attempt racing in behind this one.
   near.taken = true;
 
-  // Both branches below emit the SAME kind-agnostic line, for the same reason
-  // `discoverItem` above is kind-agnostic: naming what was picked up here would
-  // print the TRUE kind straight into the subtitles, bypassing percept.js — the
-  // only module allowed to say what the lead thinks they're holding. It used to
-  // read "<True Kind> secured." for a real pickup and a differently-shaped
+  // Both branches emit the SAME kind-agnostic line, for the same reason
+  // `discoverItem` above is kind-agnostic: naming what was picked up here
+  // prints the TRUE kind straight into the subtitles, bypassing percept.js —
+  // the only module allowed to say what a mind thinks it is holding. It used
+  // to read "<True Kind> secured." for a real pickup and a differently-shaped
   // sentence for a phantom, which between them handed the player the true kind
-  // of every real slot AND a tell for every fake one. That made the whole
-  // deception layer decidable at pickup time: with both facts public, a player
-  // could work out the outcome of any craft before committing to it. The item
-  // bar is where a pickup gets named, and the bar is allowed to lie.
-  const secured = "Secured. It settles into your hand.";
+  // of every real slot AND a tell for every fake one. With both facts public,
+  // the outcome of any craft was decidable before committing to it (see
+  // craftItem). The item bar is where a pickup gets named, and the bar can lie.
+  const secured = actor.isPlayer ? "Secured. It settles into your hand." : `${actor.name} takes it.`;
 
-  // A hallucinating lead has a real (not certain) chance that what their hand
-  // closed on was never there at all.
-  if (sim.player.hallucinating && sim.rng.chance(0.45)) {
+  // A hallucinating picker-up has a real (not certain) chance that what their
+  // hand closed on was never there at all.
+  if (actor.hallucinating && sim.rng.chance(0.45)) {
     const claimedKind = sim.rng.pick(ITEM_KINDS);
-    sim.inventory.push({ id: newSlotId(sim), real: false, claimedKind, kind: null });
-    emit(sim, "pickupFalse", secured, { phantom: true });
+    sim.inventory.push({ id: nextSlotId(sim), real: false, claimedKind, kind: null });
+    emit(sim, "pickupFalse", secured, { phantom: true, who: actor.id });
     return { ok: true, real: false };
   }
 
-  sim.inventory.push({ id: newSlotId(sim), real: true, kind: near.itemKind, claimedKind: null });
-  emit(sim, "pickup", secured, { itemKind: near.itemKind });
+  sim.inventory.push({ id: nextSlotId(sim), real: true, kind: near.itemKind, claimedKind: null });
+  emit(sim, "pickup", secured, { itemKind: near.itemKind, who: actor.id });
   return { ok: true, real: true, kind: near.itemKind };
 }
 
@@ -793,12 +839,12 @@ export function companionPickup(sim, ch, targetId = null) {
   // hinges on: you don't find out what you were given until it's in your hand.
   if (ch.hallucinating && sim.rng.chance(0.45)) {
     const claimedKind = sim.rng.pick(ITEM_KINDS);
-    ch.inventory.push({ id: newSlotId(sim), real: false, claimedKind, kind: null });
+    ch.inventory.push({ id: nextSlotId(sim), real: false, claimedKind, kind: null });
     emit(sim, "companionPickup", `${ch.name} picks something up.`, { who: ch.id, phantom: true });
     return { ok: true, real: false };
   }
 
-  ch.inventory.push({ id: newSlotId(sim), real: true, kind: near.itemKind, claimedKind: null });
+  ch.inventory.push({ id: nextSlotId(sim), real: true, kind: near.itemKind, claimedKind: null });
   emit(sim, "companionPickup", `${ch.name} picks something up.`, { who: ch.id, itemKind: near.itemKind });
   return { ok: true, real: true, kind: near.itemKind };
 }
@@ -819,16 +865,17 @@ export function companionPickup(sim, ch, targetId = null) {
 //
 // That last clause is the whole mechanic: a phantom is only ever exposed by a
 // mind that isn't sharing the delusion, which makes a lucid companion a
-// TEST INSTRUMENT and a gone one an echo chamber.
+// TEST INSTRUMENT and a gone one an echo chamber. In couch co-op both players
+// have their own meter, so the same rule quietly turns player two into the
+// instrument — and vice versa.
 
 /**
  * Does this mind currently see through a phantom, or share the delusion?
  *
  * A Lens counts. It never cures anything — the meter and the `hallucinating`
- * flag are untouched — but for its window the lead's reading of the world is
+ * flag are untouched — but for its window that mind's reading of the world is
  * honest, and that has to hold at a crossing too, or the Lens would be a
- * truth-telling instrument with one arbitrary blind spot. Companions have no
- * `lensUntil` field at all, so this reduces to the plain check for them.
+ * truth-telling instrument with one arbitrary blind spot.
  */
 const seesThrough = (sim, ch) => !ch.hallucinating || (ch.lensUntil || 0) > sim.time;
 
@@ -871,7 +918,7 @@ export function handoffToPlayer(sim, ch) {
 }
 
 /**
- * The other direction: the lead puts a carried item in a companion's hands.
+ * The other direction: a player puts a carried item in a companion's hands.
  * This is the only verb in the game that can tell a player something about
  * THEIR OWN state — every other tell is about somebody else. Offer a lucid
  * companion something that was never there and they will say so, which is the
@@ -882,16 +929,16 @@ export function handoffToPlayer(sim, ch) {
  * the failed offer cost something — you were not testing a theory, you were
  * trying to save somebody.
  */
-export function offerItem(sim, slotIndex, companionId, believedKind = null) {
+export function offerItem(sim, slotIndex, companionId, believedKind = null, actor = sim.player) {
   if (sim.status !== "playing") return { ok: false, reason: "over" };
   const slot = sim.inventory[slotIndex];
   if (!slot) return { ok: false, reason: "empty" };
   const target = sim.companions.find((c) => c.id === companionId);
-  if (!target) return { ok: false, reason: "no-target" };
-  if (dist2D(target, sim.player) > OFFER_RADIUS) return { ok: false, reason: "too-far" };
+  if (!target || target === actor) return { ok: false, reason: "no-target" };
+  if (dist2D(target, actor) > OFFER_RADIUS) return { ok: false, reason: "too-far" };
 
-  // Everything below decides on the item as the LEAD understands it. Gating on
-  // the true kind instead turned a refusal into a free oracle: a genuinely
+  // Everything below decides on the item as the OFFERER understands it. Gating
+  // on the true kind instead turned a refusal into a free oracle: a genuinely
   // real Lens refused without being consumed and could be re-offered forever,
   // while a phantom claiming to be a Lens was swallowed — so "did it refuse?"
   // answered "is this real?" at no cost, which is precisely the question this
@@ -902,7 +949,7 @@ export function offerItem(sim, slotIndex, companionId, believedKind = null) {
   // A companion only takes something they could actually use. Refusing the
   // rest also keeps a handed-over item from being walked straight back by the
   // courier logic in party.js. Checked BEFORE the phantom branch so a claimed
-  // Lens refuses identically whether or not there is anything behind it.
+  // Lens (or Husk) refuses identically whether or not anything is behind it.
   if (!(info.restore || info.steadySeconds)) {
     emit(sim, "offerRefused", `${target.name} shakes their head. "That one's yours to carry."`, { who: target.id });
     return { ok: false, reason: "no-use" };
@@ -964,36 +1011,115 @@ export function offerItem(sim, slotIndex, companionId, believedKind = null) {
  * hit" — used by gatherResource itself, by the hold-progress tracker below,
  * and by main.js/hud.js so the prompt and the actual action never disagree.
  */
-export function gatherTarget(sim) {
+// ---------------------------------------------------------------- couch co-op
+//
+// A second player does not add a body to the basin — they take the wheel of a
+// companion who is already in it. That keeps every balance-bearing number the
+// same (party of six, the dissolve rule, the "two companions still walking"
+// win condition) and makes drop-out trivially correct: the AI that was driving
+// that mind a moment ago simply resumes.
+//
+// The interesting half is that a possessed companion has their OWN lucidity
+// meter, which was already ticking down independently — so each human gets
+// their own percept and the two of you are shown DIFFERENT worlds. One of you
+// can be walking toward a marker the other cannot see.
+
+/** Companions the AI still owns — i.e. who a joining player could take over. */
+export function possessableCompanions(sim) {
+  return sim.companions.filter((c) => c.humanSlot === null);
+}
+
+/**
+ * Hand `companion` to a human. Returns the assigned slot, or null if the
+ * companion is already taken. The joining player inherits the mind exactly as
+ * the AI left it — lucidity, scars, whether it is mid-hallucination, and
+ * anything it was carrying — because that continuity IS the character.
+ */
+export function possess(sim, companionId) {
+  const c = sim.companions.find((x) => x.id === companionId);
+  if (!c || c.humanSlot !== null) return null;
+  const slot = sim.humans.length;
+  c.humanSlot = slot;
+  sim.humans.push(c);
+  // Drop the AI's in-flight intentions AT THE MOMENT control changes, not
+  // later when something happens to notice (Brain: lockstep#E2 — clear a
+  // relationship at the point you act on it). A stale goal/path left here
+  // would be resumed verbatim by the AI on release, steering the character
+  // toward somewhere it decided to go minutes ago.
+  c.goal = null;
+  c.goalKind = "follow";
+  c.path = null;
+  c.fetchItemId = null;
+  // Face where the lead is facing, so a joining player doesn't start pointed
+  // at a rock wall (Brain: lockstep#E1 — spawn co-op players together).
+  c.yaw = sim.player.yaw;
+  emit(sim, "join", `${c.name} is yours.`, { who: c.id, slot });
+  return slot;
+}
+
+/**
+ * Hand a possessed companion back to the AI. Explicit by design: an engine
+ * default that quietly destroys or abandons a dropped player's character is a
+ * known failure mode (Brain: COUCH-MULTIPLAYER/session-state — the handoff to
+ * AI is never automatic, and doing it too late leaves the pawn unrecoverable).
+ * Here the character simply stays in the basin and starts following again.
+ *
+ * Slots are released from the end only (the last player to join is the first
+ * to leave), which keeps `humans` densely indexed — no null holes for the
+ * renderer, HUD or input router to special-case.
+ */
+export function release(sim, slot) {
+  if (slot <= 0 || slot >= sim.humans.length) return false; // slot 0 is the lead; never released
+  if (slot !== sim.humans.length - 1) return false;
+  const c = sim.humans[slot];
+  sim.humans.pop();
+  c.humanSlot = null;
+  // Same clearing discipline as possess(), for the same reason: the AI must
+  // start from "where am I now", not from an intention formed before a human
+  // ever touched this character.
+  c.goal = null;
+  c.goalKind = "follow";
+  c.path = null;
+  c.fetchItemId = null;
+  emit(sim, "leave", `${c.name} drifts back to the party.`, { who: c.id });
+  return true;
+}
+
+export function gatherTarget(sim, actor = sim.player) {
   const nearTree = sim.trees
-    .filter((t) => !t.chopped && t.discovered && dist2D(t, sim.player) <= GATHER_RADIUS)
-    .sort((a, b) => dist2D(a, sim.player) - dist2D(b, sim.player))[0];
+    .filter((t) => !t.chopped && t.discovered && dist2D(t, actor) <= GATHER_RADIUS)
+    .sort((a, b) => dist2D(a, actor) - dist2D(b, actor))[0];
   const nearStone = sim.stones
-    .filter((s) => !s.mined && s.discovered && dist2D(s, sim.player) <= GATHER_RADIUS)
-    .sort((a, b) => dist2D(a, sim.player) - dist2D(b, sim.player))[0];
-  const pick = [nearTree, nearStone].filter(Boolean).sort((a, b) => dist2D(a, sim.player) - dist2D(b, sim.player))[0];
+    .filter((s) => !s.mined && s.discovered && dist2D(s, actor) <= GATHER_RADIUS)
+    .sort((a, b) => dist2D(a, actor) - dist2D(b, actor))[0];
+  const pick = [nearTree, nearStone].filter(Boolean).sort((a, b) => dist2D(a, actor) - dist2D(b, actor))[0];
   if (!pick) return null;
   return { ...pick, gatherKind: pick === nearTree ? "tree" : "stone" };
 }
 
-export function gatherResource(sim) {
+export function gatherResource(sim, actor = sim.player) {
   if (sim.status !== "playing") return { ok: false, reason: "over" };
 
-  const pick = gatherTarget(sim);
+  const pick = gatherTarget(sim, actor);
   if (!pick) return { ok: false, reason: "nothing-here" };
 
   if (pick.gatherKind === "tree") {
     const t = sim.trees.find((x) => x.id === pick.id);
     t.chopped = true;
-    sim.wood += 1;
-    emit(sim, "gather", "Wood, cut and carried.", { resource: "wood" });
-    return { ok: true, resource: "wood" };
+    const n = sim.rng.int(GATHER_YIELD.min, GATHER_YIELD.max);
+    sim.wood += n;
+    // x/z ride along on the event so the HUD can animate the haul from the
+    // node's own world position to the Wood pill, instead of the counter
+    // just silently ticking up.
+    emit(sim, "gather", `Wood, cut and carried. (+${n})`, { resource: "wood", amount: n, x: t.x, z: t.z });
+    return { ok: true, resource: "wood", amount: n };
   }
   const s = sim.stones.find((x) => x.id === pick.id);
   s.mined = true;
-  sim.stone += 1;
-  emit(sim, "gather", "Stone, broken free.", { resource: "stone" });
-  return { ok: true, resource: "stone" };
+  const n = sim.rng.int(GATHER_YIELD.min, GATHER_YIELD.max);
+  sim.stone += n;
+  emit(sim, "gather", `Stone, broken free. (+${n})`, { resource: "stone", amount: n, x: s.x, z: s.z });
+  return { ok: true, resource: "stone", amount: n };
 }
 
 /**
@@ -1003,22 +1129,22 @@ export function gatherResource(sim) {
  * out of reach, or switching to a different node all reset progress to zero
  * — a hold is a commitment to ONE node, not a meter you can bank partway.
  */
-function updateGatherHold(sim, dt, interacting) {
-  const target = interacting ? gatherTarget(sim) : null;
+function updateGatherHold(sim, dt, interacting, actor = sim.player, hold = sim.gatherHold) {
+  const target = interacting ? gatherTarget(sim, actor) : null;
   if (!target) {
-    sim.gatherHold.targetId = null;
-    sim.gatherHold.progress = 0;
+    hold.targetId = null;
+    hold.progress = 0;
     return;
   }
-  if (sim.gatherHold.targetId !== target.id) {
-    sim.gatherHold.targetId = target.id;
-    sim.gatherHold.progress = 0;
+  if (hold.targetId !== target.id) {
+    hold.targetId = target.id;
+    hold.progress = 0;
   }
-  sim.gatherHold.progress += dt;
-  if (sim.gatherHold.progress >= GATHER_HOLD_TIME) {
-    gatherResource(sim);
-    sim.gatherHold.targetId = null;
-    sim.gatherHold.progress = 0;
+  hold.progress += dt;
+  if (hold.progress >= GATHER_HOLD_TIME) {
+    gatherResource(sim, actor);
+    hold.targetId = null;
+    hold.progress = 0;
   }
 }
 
@@ -1029,17 +1155,26 @@ function updateGatherHold(sim, dt, interacting) {
  * to fall back on, so it always costs instead of helping: reaching for
  * something that was never there is worse than not reaching at all.
  */
-export function useItem(sim, slotIndex, targetCompanionId) {
+export function useItem(sim, slotIndex, targetCompanionId, actor = sim.player) {
   if (sim.status !== "playing") return { ok: false, reason: "over" };
   const slot = sim.inventory[slotIndex];
   if (!slot) return { ok: false, reason: "empty" };
   sim.inventory.splice(slotIndex, 1);
 
+  // "self" is whoever reached for the item, not always the lead: the pack is
+  // shared (one inventory, one dose supply), but the EFFECT lands on the mind
+  // that used it.
+  const self = actor;
+  // A tether-like item can't be spent on the user themselves — steadying your
+  // own hand is what a flare is for — so the fallback target skips them.
+  const otherThan = (id) => sim.companions.find((c) => c.id === id && c !== self)
+    || sim.companions.find((c) => c !== self);
+
   if (!slot.real) {
-    sim.player.lucidity = Math.max(0, sim.player.lucidity - PHANTOM_ITEM_COST);
+    self.lucidity = Math.max(0, self.lucidity - PHANTOM_ITEM_COST);
     sim.stats.phantomItemsUsed += 1;
-    emit(sim, "itemPhantom", "It wasn't there. It was never there.", {});
-    if (sim.player.lucidity <= 0) beginHallucinating(sim, sim.player);
+    emit(sim, "itemPhantom", "It wasn't there. It was never there.", { who: self.id });
+    if (self.lucidity <= 0) beginHallucinating(sim, self);
     return { ok: true, real: false, kind: null };
   }
 
@@ -1047,38 +1182,39 @@ export function useItem(sim, slotIndex, targetCompanionId) {
   const info = ITEM_INFO[slot.kind];
   switch (slot.kind) {
     case "flare":
-      sim.player.lucidity = Math.min(MAX_LUCIDITY, sim.player.lucidity + info.restore);
-      emit(sim, "itemUsed", "The flare catches. Your head clears, sharply.", { itemKind: "flare" });
+      self.lucidity = Math.min(MAX_LUCIDITY, self.lucidity + info.restore);
+      emit(sim, "itemUsed", "The flare catches. Your head clears, sharply.", { itemKind: "flare", who: self.id });
       break;
     case "tether": {
-      const target = sim.companions.find((c) => c.id === targetCompanionId) || sim.companions[0];
+      const target = otherThan(targetCompanionId);
+      if (!target) break;
       target.steadyUntil = sim.time + info.steadySeconds;
       emit(sim, "itemUsed", `${target.name} steadies.`, { itemKind: "tether", who: target.id });
       break;
     }
     case "lens":
-      sim.player.lensUntil = sim.time + info.clearSeconds;
-      emit(sim, "itemUsed", "For a while, you can trust your own eyes again.", { itemKind: "lens" });
+      self.lensUntil = sim.time + info.clearSeconds;
+      emit(sim, "itemUsed", "For a while, you can trust your own eyes again.", { itemKind: "lens", who: self.id });
       break;
     // Crafted items do both parent effects at once — the payoff for spending
     // two carried slots and a craft action instead of using them separately.
     case "ember": {
-      sim.player.lucidity = Math.min(MAX_LUCIDITY, sim.player.lucidity + info.restore);
-      const target = sim.companions.find((c) => c.id === targetCompanionId) || sim.companions[0];
-      target.steadyUntil = sim.time + info.steadySeconds;
-      emit(sim, "itemUsed", `The ember flares. Your head clears, and ${target.name} steadies.`, { itemKind: "ember", who: target.id });
+      self.lucidity = Math.min(MAX_LUCIDITY, self.lucidity + info.restore);
+      const target = otherThan(targetCompanionId);
+      if (target) target.steadyUntil = sim.time + info.steadySeconds;
+      emit(sim, "itemUsed", `The ember flares. Your head clears${target ? `, and ${target.name} steadies` : ""}.`, { itemKind: "ember", who: target ? target.id : self.id });
       break;
     }
     case "beacon":
-      sim.player.lucidity = Math.min(MAX_LUCIDITY, sim.player.lucidity + info.restore);
-      sim.player.lensUntil = sim.time + info.clearSeconds;
-      emit(sim, "itemUsed", "The beacon burns bright. Your head clears, and so does the screen.", { itemKind: "beacon" });
+      self.lucidity = Math.min(MAX_LUCIDITY, self.lucidity + info.restore);
+      self.lensUntil = sim.time + info.clearSeconds;
+      emit(sim, "itemUsed", "The beacon burns bright. Your head clears, and so does the screen.", { itemKind: "beacon", who: self.id });
       break;
     case "ward": {
-      const target = sim.companions.find((c) => c.id === targetCompanionId) || sim.companions[0];
-      target.steadyUntil = sim.time + info.steadySeconds;
-      sim.player.lensUntil = sim.time + info.clearSeconds;
-      emit(sim, "itemUsed", `The ward holds. ${target.name} steadies, and you can trust your own eyes again.`, { itemKind: "ward", who: target.id });
+      const target = otherThan(targetCompanionId);
+      if (target) target.steadyUntil = sim.time + info.steadySeconds;
+      self.lensUntil = sim.time + info.clearSeconds;
+      emit(sim, "itemUsed", `The ward holds.${target ? ` ${target.name} steadies, and` : ""} you can trust your own eyes again.`, { itemKind: "ward", who: target ? target.id : self.id });
       break;
     }
     // Doesn't affect the player or a companion directly — it plants a pylon
@@ -1089,16 +1225,61 @@ export function useItem(sim, slotIndex, targetCompanionId) {
     case "stake":
       sim.pylons.push({
         id: `stake${sim.pylons.length}-${sim.time.toFixed(2)}`,
-        x: sim.player.x,
-        z: sim.player.z,
+        x: self.x,
+        z: self.z,
         charge: info.charge,
         live: true,
       });
       emit(sim, "itemUsed", "You drive the stake into the ground. It will hold, for a while.", { itemKind: "stake" });
       break;
+    // A real item, honestly picked up, that was simply never going to do
+    // anything — no lucidity, no steadying, no pylon. The only "reveal" here
+    // is whatever the lead believed it was a moment ago; the husk itself was
+    // always exactly this.
+    case "husk":
+      emit(sim, "itemUsed", "It crumbles in your hand. It was never going to be anything.", { itemKind: "husk", who: self.id });
+      break;
     default:
       break;
   }
+  return { ok: true, real: true, kind: slot.kind };
+}
+
+/**
+ * Put a carried slot down. The game told the player to "use or drop" in two
+ * different full-hands messages while having no drop verb at all — so a hand
+ * full of phantoms could only be cleared by USING them, at PHANTOM_ITEM_COST
+ * each (three of them cost a quarter of the meter). The escape hatch the
+ * messages already named now exists.
+ *
+ * A REAL item goes back into the basin at the dropper's feet, discovered, so
+ * it can be picked up again — dropping is a decision about carry space, not a
+ * way to destroy supplies. A PHANTOM has nothing to put down: opening your
+ * hand simply ends the fiction, at no cost. That asymmetry is the honest one —
+ * the phantom was never a thing, so it cannot become a thing on the ground.
+ */
+export function dropItem(sim, slotIndex, actor = sim.player) {
+  if (sim.status !== "playing") return { ok: false, reason: "over" };
+  const slot = sim.inventory[slotIndex];
+  if (!slot) return { ok: false, reason: "empty" };
+  sim.inventory.splice(slotIndex, 1);
+
+  if (!slot.real) {
+    emit(sim, "dropPhantom", "You open your hand. There was nothing in it.",
+      { phantom: true, who: actor.id });
+    return { ok: true, real: false };
+  }
+  sim.items.push({
+    id: `drop${sim.slotSeq++}`,
+    kind: FEATURE.ITEM,
+    itemKind: slot.kind,
+    x: actor.x,
+    z: actor.z,
+    discovered: true,
+    taken: false,
+  });
+  emit(sim, "drop", `${ITEM_INFO[slot.kind].label} set down.`,
+    { itemKind: slot.kind, who: actor.id });
   return { ok: true, real: true, kind: slot.kind };
 }
 
@@ -1116,37 +1297,61 @@ export function useItem(sim, slotIndex, targetCompanionId) {
  * silently skipped rather than treated as a wrong guess.
  */
 /**
+ * What craftItem() would do right now, without doing it — a matching item
+ * pair, or (if none) enough raw materials for a Stake. Shared by craftItem
+ * itself and by previewCraft, so the HUD's "craft available" indicator can
+ * never claim something craftItem then refuses.
+ */
+/**
+ * Which craft is on offer. `prefer` is the player's SELECTED slot: carrying a
+ * Flare, a Tether and a Lens, all three pairs are valid recipes, and a plain
+ * first-match scan silently picked one by pickup order — the same three items
+ * became an Ember or a Ward depending on which you happened to grab first,
+ * with nothing on screen explaining why. Anchoring the pair to the selected
+ * slot turns that into a choice the player already has a control for (cycle
+ * item), and previewCraft reads the same function, so the hint always names
+ * exactly what the craft button will make (Brain: dog#E20 — one resolver, and
+ * every surface driven off its single answer).
+ */
+/**
  * What each carried slot is BELIEVED to be, in inventory order.
  *
  * `believed` is the caller's own reading — percept.js's believedKinds(), which
- * is literally the label the item bar is showing right now. Omitting it falls
- * back to what a LUCID observer would read: a real slot is its true kind, and
- * a phantom still shows the kind it was claiming when it was picked up
- * (permanent, baked at pickup — recovering never un-tells that lie). That
+ * is literally the label the item bar is showing that mind right now. Omitting
+ * it falls back to what a LUCID observer would read: a real slot is its true
+ * kind, and a phantom still shows the kind it was claiming when it was picked
+ * up (permanent, baked at pickup — recovering never un-tells that lie). That
  * fallback is not a testing convenience; it is the reason a stone-cold-lucid
  * lead can still craft a false item, because one ingredient was a phantom
- * somebody handed them.
+ * somebody else handed them.
  */
 function believedInventory(sim, believed) {
   return sim.inventory.map((slot, i) => (believed && believed[i]) || (slot.real ? slot.kind : slot.claimedKind));
 }
 
-/**
- * What craftItem() would do right now, without doing it — a matching item
- * pair, or (if none) enough raw materials for a Stake. Shared by craftItem
- * itself and by previewCraft, so the HUD's "craft available" indicator can
- * never claim something craftItem then refuses.
- *
- * Matches on BELIEF, not truth. A hallucinating lead whose bar reads
- * "flare + tether" gets a craft that fires, because the whole deception is
- * that nothing warns you at the moment you commit — see craftItem.
- */
-function findCraftMatch(sim, believed = null) {
+function findCraftMatch(sim, prefer = -1, believed = null) {
   const view = believedInventory(sim, believed);
+  // Matches on BELIEF, not truth — a phantom ingredient combines exactly like
+  // the real thing, and a mind whose bar is lying gets to commit to the pair it
+  // was shown. Whether the RESULT is real is craftItem's business, not this
+  // function's.
+  const pairFrom = (i, j) => {
+    const a = sim.inventory[i], b = sim.inventory[j];
+    if (!a || !b) return null;
+    const kind = CRAFT_RECIPES[recipeKey(view[i], view[j])];
+    return kind ? { type: "pair", i: Math.min(i, j), j: Math.max(i, j), kind, view } : null;
+  };
+  if (prefer >= 0 && prefer < sim.inventory.length) {
+    for (let k = 0; k < sim.inventory.length; k++) {
+      if (k === prefer) continue;
+      const m = pairFrom(prefer, k);
+      if (m) return m;
+    }
+  }
   for (let i = 0; i < sim.inventory.length; i++) {
     for (let j = i + 1; j < sim.inventory.length; j++) {
-      const kind = CRAFT_RECIPES[recipeKey(view[i], view[j])];
-      if (kind) return { type: "pair", i, j, kind, view };
+      const m = pairFrom(i, j);
+      if (m) return m;
     }
   }
   // Wood and stone carry no deception layer at all (see the "raw materials"
@@ -1163,47 +1368,46 @@ function findCraftMatch(sim, believed = null) {
  * what would it be? Mirrors craftItem()'s eventual success exactly, cap
  * check included, so the indicator is never a promise craftItem breaks.
  */
-export function previewCraft(sim, believed = null) {
-  const match = findCraftMatch(sim, believed);
+export function previewCraft(sim, prefer = -1, believed = null) {
+  const match = findCraftMatch(sim, prefer, believed);
   if (!match) return { ok: false };
   if (match.type === "material" && sim.inventory.length >= ITEM_CAP) return { ok: false };
   return { ok: true, kind: match.kind };
 }
 
 /**
- * Combine two carried items into a stronger one — as the LEAD understands it.
+ * Combine two carried items into a stronger one — as the crafter understands it.
  *
  * The recipe matches on belief (findCraftMatch above), but whether the result
  * is REAL is decided here, on truth: an honest craft needs both ingredients to
- * actually exist AND the lead to have read both of them correctly. Any other
- * combination produces a phantom that CLAIMS to be exactly what the lead set
+ * actually exist AND the crafter to have read both of them correctly. Any
+ * other combination produces a phantom that CLAIMS to be exactly what they set
  * out to make.
  *
- * Two ways to get there, and the second is the one that makes this a party
- * mechanic rather than a solo punishment:
- *   - the lead is hallucinating, so the bar lied about what they were holding;
- *   - the lead is perfectly lucid, but one ingredient was a phantom — picked
- *     up during an earlier episode of their own, or handed over by a companion
- *     who was gone at the time (see companionPickup/handoffToPlayer). A mind
- *     that has never hallucinated can still be carrying somebody else's.
+ * Two ways to get there, and the second is what makes this a party mechanic
+ * rather than a solo punishment:
+ *   - the crafter is hallucinating, so the bar lied about what they held;
+ *   - the crafter is perfectly lucid, but one ingredient was a phantom — from
+ *     an earlier episode of their own, or handed over by a companion who was
+ *     gone at the time (companionPickup/handoffToPlayer). A mind that has never
+ *     hallucinated can still be carrying somebody else's.
  *
  * Nothing about the success is allowed to differ: same event kind, same text,
  * same sound at the call site. You do not find out here. You find out when you
  * reach for it (useItem) or when you try to put it in somebody else's hands
  * (offerItem) — and by then you have spent two slots and a craft on it.
  */
-export function craftItem(sim, believed = null) {
+export function craftItem(sim, prefer = -1, believed = null) {
   if (sim.status !== "playing") return { ok: false, reason: "over" };
 
-  const match = findCraftMatch(sim, believed);
+  const match = findCraftMatch(sim, prefer, believed);
   if (!match) return { ok: false, reason: "no-recipe" };
 
   if (match.type === "pair") {
     const a = sim.inventory[match.i];
     const b = sim.inventory[match.j];
     // Honest only if both ingredients exist AND were read for what they are.
-    const honest =
-      a.real && b.real && match.view[match.i] === a.kind && match.view[match.j] === b.kind;
+    const honest = a.real && b.real && match.view[match.i] === a.kind && match.view[match.j] === b.kind;
 
     sim.inventory.splice(match.j, 1);
     sim.inventory.splice(match.i, 1);
@@ -1212,7 +1416,7 @@ export function craftItem(sim, believed = null) {
     if (!honest) {
       sim.stats.falseCrafts += 1;
       sim.inventory.push({
-        id: newSlotId(sim),
+        id: nextSlotId(sim),
         real: false,
         claimedKind: match.kind, // it will go on insisting it is exactly this
         kind: null,
@@ -1222,12 +1426,7 @@ export function craftItem(sim, believed = null) {
       return { ok: true, kind: match.kind, real: false };
     }
 
-    sim.inventory.push({
-      id: newSlotId(sim),
-      real: true,
-      kind: match.kind,
-      claimedKind: null,
-    });
+    sim.inventory.push({ id: nextSlotId(sim), real: true, kind: match.kind, claimedKind: null });
     emit(sim, "craft", `The two combine. ${ITEM_INFO[match.kind].label} forms in your hands.`, { itemKind: match.kind });
     return { ok: true, kind: match.kind, real: true };
   }
@@ -1237,7 +1436,7 @@ export function craftItem(sim, believed = null) {
   if (sim.inventory.length >= ITEM_CAP) return { ok: false, reason: "full" };
   sim.wood -= STAKE_COST.wood;
   sim.stone -= STAKE_COST.stone;
-  sim.inventory.push({ id: newSlotId(sim), real: true, kind: "stake", claimedKind: null });
+  sim.inventory.push({ id: nextSlotId(sim), real: true, kind: "stake", claimedKind: null });
   sim.stats.itemsCrafted += 1;
   emit(sim, "craft", "Wood and stone lash together. A stake, ready to plant.", { itemKind: "stake" });
   return { ok: true, kind: "stake", real: true };
@@ -1305,6 +1504,32 @@ export function checkEndings(sim) {
  * updateGatherHold, the only per-tick system that cares whether the verb is
  * currently down rather than whether it was just pressed.
  */
+/** Apply one human's movement intent to the mind they are driving. */
+function moveHuman(sim, ch, intent, step) {
+  if (!ch || !intent) return;
+  if (intent.move && (intent.move.x || intent.move.z)) {
+    const speed = (intent.run ? 7.4 : 4.3) * step;
+    // CLAMP, don't normalise. Dividing by the magnitude unconditionally threw
+    // away every analog stick reading: a 20%-tilted stick has magnitude 0.2,
+    // got scaled straight back up to 1, and moved at full sprint — so the
+    // stick behaved as a digital 8-way pad with no fine control at all.
+    // Scaling only when the magnitude EXCEEDS 1 keeps the thing this was
+    // originally for (keyboard diagonals, magnitude √2, must not out-run a
+    // single axis) while letting a partly-tilted stick mean what it says.
+    const len = Math.hypot(intent.move.x, intent.move.z);
+    const scale = len > 1 ? 1 / len : 1;
+    const next = moveWithCollision(
+      sim.world,
+      ch,
+      intent.move.x * scale * speed,
+      intent.move.z * scale * speed,
+    );
+    ch.x = next.x;
+    ch.z = next.z;
+  }
+  if (typeof intent.yaw === "number") ch.yaw = intent.yaw;
+}
+
 export function tick(sim, dt, input = {}) {
   if (sim.status !== "playing") return sim;
   const step = Math.min(dt, 0.1); // clamp: a background tab must not teleport the run
@@ -1312,20 +1537,16 @@ export function tick(sim, dt, input = {}) {
   sim.time += step;
   sim.events.length = 0;
 
-  // Player movement. `input.move` is already yaw-rotated by the caller.
-  if (input.move && (input.move.x || input.move.z)) {
-    const speed = (input.run ? 7.4 : 4.3) * step;
-    const len = Math.hypot(input.move.x, input.move.z) || 1;
-    const next = moveWithCollision(
-      sim.world,
-      sim.player,
-      (input.move.x / len) * speed,
-      (input.move.z / len) * speed,
-    );
-    sim.player.x = next.x;
-    sim.player.z = next.z;
+  // Human movement. `input` is the LEAD's intent (move already yaw-rotated by
+  // the caller); `input.others[i]` is the same shape for couch-co-op slot i+1.
+  // Keeping slot 0 at the top level rather than requiring an array is what
+  // lets every existing caller — the balance harness, the logic tests, the
+  // smoke test's advance() hook — pass exactly what they always did.
+  moveHuman(sim, sim.humans[0], input, step);
+  for (let slot = 1; slot < sim.humans.length; slot++) {
+    const intent = (input.others || [])[slot - 1];
+    if (intent) moveHuman(sim, sim.humans[slot], intent, step);
   }
-  if (typeof input.yaw === "number") sim.player.yaw = input.yaw;
 
   // Pylons recharge only while nobody is drawing on them.
   for (const p of sim.pylons) {
@@ -1352,6 +1573,15 @@ export function tick(sim, dt, input = {}) {
   for (const c of sim.companions) companionRemark(sim, c, step);
 
   updateGatherHold(sim, step, !!input.interact);
+  for (let slot = 1; slot < sim.humans.length; slot++) {
+    const ch = sim.humans[slot];
+    const intent = (input.others || [])[slot - 1];
+    // Each human holds their own chop/mine independently — a shared progress
+    // counter would let one player's release cancel the other's swing. Slot 0
+    // keeps sim.gatherHold so nothing that already reads it has to change.
+    if (!ch.gatherHold) ch.gatherHold = { targetId: null, progress: 0 };
+    updateGatherHold(sim, step, !!(intent && intent.interact), ch, ch.gatherHold);
+  }
 
   checkEndings(sim);
   return sim;

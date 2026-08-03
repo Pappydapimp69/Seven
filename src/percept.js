@@ -11,15 +11,25 @@
 // assert "a hallucinating lead is shown a marker the sim does not contain"
 // without booting a browser.
 
-import { HALLUCINATION, BAND, bandOf, ITEM_INFO } from "./state.js";
-import { ITEM_KINDS } from "./world.js";
+import { HALLUCINATION, BAND, bandOf, ITEM_INFO, LUCIDITY_GRACE } from "./state.js?v=mirage-0.7.4";
+import { ITEM_KINDS } from "./world.js?v=mirage-0.7.4";
 
 const PHANTOM_NAMES = ["the Sixth Stone", "the Watching Slab", "the Other Cairn", "the Hollow Tooth"];
 const PHANTOM_COMPANIONS = ["ODEN", "MARIS", "THE SEVENTH"];
 
-export function createPercept() {
+/**
+ * `eye` is the character this perception belongs to — the mind whose senses
+ * these are. It defaults to null and is resolved to `sim.player` lazily by
+ * eyeOf() below, so every existing single-player caller keeps working
+ * unchanged. Couch co-op passes a real character: a second human is a
+ * possessed companion with their OWN lucidity meter, so they hallucinate
+ * independently, and the whole point of the mode is that two players are
+ * shown different worlds and have to talk about it.
+ */
+export function createPercept(eye = null) {
   return {
-    active: false, // is the LEAD hallucinating
+    eye,
+    active: false, // is this percept's OWN mind hallucinating
     kind: null,
     since: 0,
     intensity: 0, // 0..1, ramps in and out so the shift is felt, not flicked
@@ -34,7 +44,25 @@ export function createPercept() {
     // stable for as long as this hallucination episode lasts (cleared on
     // recovery, same lifetime as the other phantom* fields).
     itemLabels: new Map(),
+    // Camera-turn tracking for shiftOneUnseenPhantom: the eye's own yaw last
+    // tick (null until the first tick has run) and radians turned since the
+    // last drift check.
+    lastYaw: null,
+    turnAccum: 0,
+    // Which real companion (if any) is currently showing as a monster, and
+    // when that flicker ends. See updateMonsterFlicker.
+    monsterId: null,
+    monsterUntil: 0,
   };
+}
+
+/**
+ * The mind a percept belongs to. Falls back to `sim.player` when no eye was
+ * given, which is what keeps every single-player call site (and the whole
+ * existing test suite) working without passing an eye through.
+ */
+function eyeOf(percept, sim) {
+  return percept.eye || sim.player;
 }
 
 /**
@@ -46,7 +74,7 @@ export function createPercept() {
  * mechanical state, not the temporary reprieve.
  */
 export function isClear(percept, sim) {
-  return sim.time < (sim.player.lensUntil || 0);
+  return sim.time < (eyeOf(percept, sim).lensUntil || 0);
 }
 
 // Build the specific lie once, at onset, so it is stable while it lasts. A
@@ -54,6 +82,7 @@ export function isClear(percept, sim) {
 // holds still reads as a place.
 function seedHallucination(percept, sim) {
   const rng = sim.rng;
+  const self = eyeOf(percept, sim); // phantoms are placed around THIS mind, not always the lead
   percept.phantomMonoliths = [];
   percept.phantomCompanions = [];
   percept.phantomPylons = [];
@@ -71,8 +100,8 @@ function seedHallucination(percept, sim) {
         percept.phantomMonoliths.push({
           id: `ph-m${i}`,
           name: rng.pick(PHANTOM_NAMES),
-          x: sim.player.x + Math.cos(a) * r,
-          z: sim.player.z + Math.sin(a) * r,
+          x: self.x + Math.cos(a) * r,
+          z: self.z + Math.sin(a) * r,
           phantom: true,
         });
       }
@@ -84,8 +113,8 @@ function seedHallucination(percept, sim) {
         id: "ph-c0",
         name: rng.pick(PHANTOM_COMPANIONS),
         role: "—",
-        x: sim.player.x - 3,
-        z: sim.player.z - 3,
+        x: self.x - 3,
+        z: self.z - 3,
         phantom: true,
         slot: rng.float(0, Math.PI * 2),
       });
@@ -97,8 +126,8 @@ function seedHallucination(percept, sim) {
       const a = rng.float(0, Math.PI * 2);
       percept.phantomPylons.push({
         id: "ph-p0",
-        x: sim.player.x + Math.cos(a) * rng.float(12, 24),
-        z: sim.player.z + Math.sin(a) * rng.float(12, 24),
+        x: self.x + Math.cos(a) * rng.float(12, 24),
+        z: self.z + Math.sin(a) * rng.float(12, 24),
         phantom: true,
         charge: 100,
       });
@@ -116,11 +145,93 @@ function seedHallucination(percept, sim) {
   }
 }
 
+/**
+ * Signed angle from `b` to `a`, wrapped to (-π, π]. The building block for
+ * "is this bearing currently on screen."
+ */
+function angularDelta(a, b) {
+  let d = (a - b) % (Math.PI * 2);
+  if (d > Math.PI) d -= Math.PI * 2;
+  if (d < -Math.PI) d += Math.PI * 2;
+  return d;
+}
+
+/**
+ * Is a point at world-space offset (dx, dz) within `halfAngle` of dead-centre
+ * for a head facing `yaw`? Three's camera looks down -Z, so after a yaw
+ * rotation θ the forward basis is (-sinθ, -cosθ) (same derivation main.js's
+ * own movement-rotation comment uses) — inverted here to recover the bearing
+ * a target sits at, then compared against facing.
+ */
+function inView(yaw, dx, dz, halfAngle) {
+  if (dx === 0 && dz === 0) return true;
+  const bearing = Math.atan2(-dx, -dz);
+  return Math.abs(angularDelta(bearing, yaw)) <= halfAngle;
+}
+
+// A camera turn of this many radians (~63°) between checks is what lets one
+// unseen phantom drift — see the comment at the call site below for why this
+// is gated on TURNING rather than on elapsed time.
+const TURN_SHIFT_ANGLE = 1.1;
+// Generous vs. the renderer's actual 72° FOV (half = 0.63 rad): near-peripheral
+// counts as "seen" too, so nothing visibly pops right at the screen edge.
+const VIEW_HALF_ANGLE = 0.85;
+
+/**
+ * Nudge ONE currently-unwatched phantom monolith/pylon to a new nearby spot.
+ * Never touches anything on screen right now, and never touches sim truth —
+ * only percept's own phantom lists. A hallucination that holds still reads as
+ * a place (seedHallucination's own rule); this is the exception that proves
+ * it: a place can still be wrong about what's behind you.
+ */
+function shiftOneUnseenPhantom(percept, sim, p) {
+  const candidates = [];
+  for (const m of percept.phantomMonoliths) if (!inView(p.yaw, m.x - p.x, m.z - p.z, VIEW_HALF_ANGLE)) candidates.push(m);
+  for (const ph of percept.phantomPylons) if (!inView(p.yaw, ph.x - p.x, ph.z - p.z, VIEW_HALF_ANGLE)) candidates.push(ph);
+  if (!candidates.length) return;
+  const rng = sim.rng;
+  const target = rng.pick(candidates);
+  const a = rng.float(0, Math.PI * 2);
+  const r = rng.float(12, 28);
+  target.x = p.x + Math.cos(a) * r;
+  target.z = p.z + Math.sin(a) * r;
+}
+
+// A monster-flicker attempt is rolled at most this often per second of
+// hallucinating — rare enough to be "at times," not a constant flicker.
+const MONSTER_CHANCE_PER_SEC = 0.07;
+const MONSTER_SIGHT = 20; // only a companion actually nearby can wear it
+const MONSTER_MIN_DUR = 0.35;
+const MONSTER_MAX_DUR = 0.85;
+
+/**
+ * Briefly make ONE nearby real companion read as a monster instead of
+ * themselves — the same kind of lie perceivedWorldItems already tells about a
+ * carried item's kind, aimed at a person instead: the position and behaviour
+ * underneath are entirely real, only the shown identity is wrong for a beat.
+ */
+function updateMonsterFlicker(percept, sim, p, dt, lying) {
+  if (!lying) { percept.monsterId = null; return; }
+  if (percept.monsterId !== null && sim.time < percept.monsterUntil) return; // mid-flicker, hold
+  percept.monsterId = null; // any prior flicker has ended
+  if (!sim.rng.chance(MONSTER_CHANCE_PER_SEC * dt)) return;
+  const near = sim.companions.filter((c) => Math.hypot(c.x - p.x, c.z - p.z) <= MONSTER_SIGHT);
+  if (!near.length) return;
+  percept.monsterId = sim.rng.pick(near).id;
+  percept.monsterUntil = sim.time + sim.rng.float(MONSTER_MIN_DUR, MONSTER_MAX_DUR);
+}
+
 /** Advance the perceived world. Call once per tick, after state.tick. */
 export function updatePercept(percept, sim, dt) {
-  const p = sim.player;
+  const p = eyeOf(percept, sim);
+  // Set only on the tick a hallucination begins — the same beat
+  // seedHallucination gets to place its phantoms before anything else reacts
+  // to them. The monster flicker gets one tick's grace too: it must not fire
+  // on the very frame the screen starts lying.
+  let justOnset = false;
   if (p.hallucinating && !percept.active) {
     percept.active = true;
+    justOnset = true;
     percept.kind = p.hallucination;
     percept.since = sim.time;
     seedHallucination(percept, sim);
@@ -129,13 +240,34 @@ export function updatePercept(percept, sim, dt) {
     percept.kind = null;
     percept.whisper = null;
     percept.itemLabels.clear();
+    percept.monsterId = null;
   }
+  // Computed AFTER the transition above, not before: on the exact tick
+  // recovery happens, `percept.active` just flipped false, and the turn/
+  // monster logic below must see that immediately rather than re-arming
+  // off a stale "was still hallucinating a moment ago" read.
+  const lying = percept.active && !isClear(percept, sim);
 
   const target = percept.active ? 1 : 0;
   // Ramp in over ~2.5s, out over ~1.2s.
   const rate = target > percept.intensity ? 0.4 : 0.85;
   percept.intensity += Math.sign(target - percept.intensity) * Math.min(Math.abs(target - percept.intensity), rate * dt);
   percept.swayPhase += dt * (0.6 + percept.intensity * 1.8);
+
+  // Turning the camera is what takes a phantom OUT of view in the first
+  // place, so gating drift on ACCUMULATED TURN — not elapsed time — ties the
+  // environment changing directly to the player's own action: sweep your
+  // view around and the half of the world you just left may not be where you
+  // left it. Whatever is on screen right now never moves.
+  if (percept.lastYaw !== null && lying) percept.turnAccum += Math.abs(angularDelta(p.yaw, percept.lastYaw));
+  percept.lastYaw = p.yaw;
+  if (!lying) percept.turnAccum = 0;
+  while (lying && percept.turnAccum >= TURN_SHIFT_ANGLE) {
+    percept.turnAccum -= TURN_SHIFT_ANGLE;
+    shiftOneUnseenPhantom(percept, sim, p);
+  }
+
+  updateMonsterFlicker(percept, sim, p, dt, lying && !justOnset);
 
   // A doubled companion keeps station like a real one, which is why it works.
   for (const ph of percept.phantomCompanions) {
@@ -156,7 +288,15 @@ export function updatePercept(percept, sim, dt) {
  */
 export function distortion(percept, sim) {
   if (isClear(percept, sim)) return 0;
-  const l = sim.player.lucidity;
+  // A carried-over mind can walk into a new basin already low, or even mid-
+  // hallucination (state.js's own carryOver comment: that's deliberate — a
+  // worn-down party stays worn down). But the grace window's whole point is
+  // an orientation beat with nothing to react to yet, so the visible
+  // distortion itself is withheld here even though the underlying state
+  // isn't — same asymmetry as tickLucidity's grace check, applied to what
+  // the screen shows rather than what the meter does.
+  if (sim.time < LUCIDITY_GRACE) return 0;
+  const l = eyeOf(percept, sim).lucidity;
   const pre = l <= 0 ? 0 : l < 14 ? 0.3 : l < 36 ? 0.15 : l < 62 ? 0.05 : 0;
   return Math.max(pre, percept.intensity);
 }
@@ -181,6 +321,7 @@ export function perceivedPylons(percept, sim) {
 
 /** Companions as the lead sees them, phantoms included. */
 export function perceivedCompanions(percept, sim) {
+  const lying = percept.active && !isClear(percept, sim);
   const real = sim.companions.map((c) => ({
     id: c.id,
     name: c.name,
@@ -190,15 +331,18 @@ export function perceivedCompanions(percept, sim) {
     hallucinating: c.hallucinating,
     goalKind: c.goalKind,
     phantom: false,
+    // A brief lie about WHO this is, never about where they are or what
+    // they're doing — see updateMonsterFlicker. Only ever true for a real
+    // companion; a phantom is already fully fake and gains nothing from it.
+    monstrous: lying && c.id === percept.monsterId,
   }));
-  const lying = percept.active && !isClear(percept, sim);
   return lying ? [...real, ...percept.phantomCompanions] : real;
 }
 
 /** The heading the lead thinks they are facing. */
 export function perceivedYaw(percept, sim) {
   const lying = percept.active && !isClear(percept, sim);
-  return sim.player.yaw + (lying ? percept.compassOffset : 0);
+  return eyeOf(percept, sim).yaw + (lying ? percept.compassOffset : 0);
 }
 
 /**
@@ -207,7 +351,9 @@ export function perceivedYaw(percept, sim) {
  * thing sitting in the world — but a REAL item's displayed kind can still be
  * wrong: assigned once per item id per hallucination episode (lazy, so it
  * settles the moment it's first seen rather than reassigning every frame) and
- * cleared on recovery.
+ * cleared on recovery. Drawn from the full kind list, truth included — a
+ * hallucinating lead is lied to about MOST things, not everything; sometimes
+ * what you see is exactly what is there, and you have no way to tell which.
  */
 export function perceivedWorldItems(percept, sim) {
   const lying = percept.active && !isClear(percept, sim);
@@ -215,10 +361,7 @@ export function perceivedWorldItems(percept, sim) {
     .filter((it) => it.discovered && !it.taken)
     .map((it) => {
       if (!lying) return { ...it, shownKind: it.itemKind, misidentified: false };
-      if (!percept.itemLabels.has(it.id)) {
-        const wrong = sim.rng.pick(ITEM_KINDS.filter((k) => k !== it.itemKind));
-        percept.itemLabels.set(it.id, wrong || it.itemKind);
-      }
+      if (!percept.itemLabels.has(it.id)) percept.itemLabels.set(it.id, sim.rng.pick(ITEM_KINDS));
       const shownKind = percept.itemLabels.get(it.id);
       return { ...it, shownKind, misidentified: shownKind !== it.itemKind };
     });
@@ -229,7 +372,10 @@ export function perceivedWorldItems(percept, sim) {
  * in permanently at pickup time (state.js) and always shown as-is — that
  * deception already happened and does not un-happen on recovery. A REAL slot
  * gets the same live per-episode mislabeling as a world item, keyed by the
- * slot's own id.
+ * slot's own id, drawn from every displayable kind INCLUDING its own true
+ * one — a hallucinating lead usually sees the wrong item, but not always, and
+ * has no way to tell which case they're in until they use it (see state.js
+ * useItem and main.js's reveal-on-use check).
  */
 export function perceivedInventory(percept, sim) {
   const lying = percept.active && !isClear(percept, sim);
@@ -239,14 +385,12 @@ export function perceivedInventory(percept, sim) {
     }
     if (!lying) return { index, real: true, shownKind: slot.kind, label: ITEM_INFO[slot.kind].label, misidentified: false };
     if (!percept.itemLabels.has(slot.id)) {
-      // The carried-item lie draws from every displayable kind, crafted
-      // included — a hallucinating lead can believe they're holding an Ember
-      // they never crafted. World items stay restricted to ITEM_KINDS (see
-      // perceivedWorldItems): a crafted item has no ground mesh to mistake it
-      // for, so that lie only makes sense once something is already in hand.
-      const pool = Object.keys(ITEM_INFO).filter((k) => k !== slot.kind);
-      const wrong = sim.rng.pick(pool);
-      percept.itemLabels.set(slot.id, wrong || slot.kind);
+      // Crafted kinds included — a hallucinating lead can believe they're
+      // holding an Ember they never crafted. World items stay restricted to
+      // ITEM_KINDS (see perceivedWorldItems): a crafted item has no ground
+      // mesh to mistake it for, so that lie only makes sense once something
+      // is already in hand.
+      percept.itemLabels.set(slot.id, sim.rng.pick(Object.keys(ITEM_INFO)));
     }
     const shownKind = percept.itemLabels.get(slot.id);
     return { index, real: true, shownKind, label: ITEM_INFO[shownKind].label, misidentified: shownKind !== slot.kind };
@@ -254,14 +398,16 @@ export function perceivedInventory(percept, sim) {
 }
 
 /**
- * What the lead currently believes each carried slot is, in inventory order —
- * literally the labels the item bar is showing this frame.
+ * What THIS percept's own mind currently believes each carried slot is, in
+ * inventory order — literally the labels its item bar is showing this frame.
  *
  * This is the bridge that lets state.js's craftItem work off belief without
  * state.js ever importing this module (the dependency stays one-way, so the
  * sim remains testable headless): main.js reads it here and passes it in.
  * Because it is derived from perceivedInventory itself, a craft can never
- * disagree with what the player was looking at when they pressed the key.
+ * disagree with what that player was looking at when they pressed the key.
+ * In couch co-op the inventory is shared but each player has their own
+ * percept, so the two can genuinely disagree about the same slot.
  */
 export function believedKinds(percept, sim) {
   return perceivedInventory(percept, sim).map((s) => s.shownKind);
@@ -304,7 +450,8 @@ export function rosterRead(percept, sim, companion) {
   // greppable value; the player-facing text is the note.
   if (percept.active) return { tag: "unknown", note: "you can't tell", uncertain: true };
   const band = bandOf(companion.lucidity);
-  const lagging = Math.hypot(companion.x - sim.player.x, companion.z - sim.player.z) > 9;
+  const self = eyeOf(percept, sim);
+  const lagging = Math.hypot(companion.x - self.x, companion.z - self.z) > 9;
   if (companion.hallucinating) return { tag: "gone", note: "not with us", uncertain: false };
   if (companion.goalKind === "pylon") return { tag: "breaking off", note: "heading for a pylon", uncertain: false };
   if (band === BAND.BRITTLE) return { tag: "bad", note: "shaking", uncertain: false };
