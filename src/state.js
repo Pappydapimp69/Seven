@@ -14,9 +14,9 @@
 // The sim's job is to keep an honest, testable record of what is TRUE; `percept.js`
 // is the only place allowed to lie about it.
 
-import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js";
-import { makeRng } from "./rng.js";
-import { updateCompanions, companionRemark } from "./party.js";
+import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=mirage-0.7.4";
+import { makeRng } from "./rng.js?v=mirage-0.7.4";
+import { updateCompanions, companionRemark } from "./party.js?v=mirage-0.7.4";
 
 export const PARTY_SIZE = 6; // you + 5 companions — the spec's five NPCs, plus the player
 export const MAX_LUCIDITY = 100;
@@ -1302,12 +1302,20 @@ function moveHuman(sim, ch, intent, step) {
   if (!ch || !intent) return;
   if (intent.move && (intent.move.x || intent.move.z)) {
     const speed = (intent.run ? 7.4 : 4.3) * step;
-    const len = Math.hypot(intent.move.x, intent.move.z) || 1;
+    // CLAMP, don't normalise. Dividing by the magnitude unconditionally threw
+    // away every analog stick reading: a 20%-tilted stick has magnitude 0.2,
+    // got scaled straight back up to 1, and moved at full sprint — so the
+    // stick behaved as a digital 8-way pad with no fine control at all.
+    // Scaling only when the magnitude EXCEEDS 1 keeps the thing this was
+    // originally for (keyboard diagonals, magnitude √2, must not out-run a
+    // single axis) while letting a partly-tilted stick mean what it says.
+    const len = Math.hypot(intent.move.x, intent.move.z);
+    const scale = len > 1 ? 1 / len : 1;
     const next = moveWithCollision(
       sim.world,
       ch,
-      (intent.move.x / len) * speed,
-      (intent.move.z / len) * speed,
+      intent.move.x * scale * speed,
+      intent.move.z * scale * speed,
     );
     ch.x = next.x;
     ch.z = next.z;

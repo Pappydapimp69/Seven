@@ -11,8 +11,8 @@
 // assert "a hallucinating lead is shown a marker the sim does not contain"
 // without booting a browser.
 
-import { HALLUCINATION, BAND, bandOf, ITEM_INFO, LUCIDITY_GRACE } from "./state.js";
-import { ITEM_KINDS } from "./world.js";
+import { HALLUCINATION, BAND, bandOf, ITEM_INFO, LUCIDITY_GRACE } from "./state.js?v=mirage-0.7.4";
+import { ITEM_KINDS } from "./world.js?v=mirage-0.7.4";
 
 const PHANTOM_NAMES = ["the Sixth Stone", "the Watching Slab", "the Other Cairn", "the Hollow Tooth"];
 const PHANTOM_COMPANIONS = ["ODEN", "MARIS", "THE SEVENTH"];

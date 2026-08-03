@@ -5,15 +5,15 @@ import {
   createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem, dropItem, craftItem, gatherTarget,
   possess, release, possessableCompanions,
   PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js";
-import { createPercept, updatePercept, distortion, perceivedMonoliths } from "./percept.js";
-import { createRenderer } from "./render.js";
-import { createHud, renderDebrief, paintHint } from "./hud.js";
-import { createInput, ACTIONS } from "./input.js";
-import { createAudio } from "./audio.js";
-import { hashSeed } from "./rng.js";
+} from "./state.js?v=mirage-0.7.4";
+import { createPercept, updatePercept, distortion, perceivedMonoliths } from "./percept.js?v=mirage-0.7.4";
+import { createRenderer } from "./render.js?v=mirage-0.7.4";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=mirage-0.7.4";
+import { createInput, ACTIONS } from "./input.js?v=mirage-0.7.4";
+import { createAudio } from "./audio.js?v=mirage-0.7.4";
+import { hashSeed } from "./rng.js?v=mirage-0.7.4";
 
-const BUILD = "mirage-0.7.3";
+const BUILD = "mirage-0.7.4";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
