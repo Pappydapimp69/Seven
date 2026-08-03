@@ -15,10 +15,6 @@ echo "== save/resume (pure) =="
 node tests/save.test.mjs
 echo
 
-echo "== hallucination rates (pure) =="
-node tests/hallucination.test.mjs
-echo
-
 echo "== hallucination (does the player actually SEE the tells?) =="
 node tests/hallucination.test.mjs
 echo
