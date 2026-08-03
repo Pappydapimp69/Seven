@@ -2,11 +2,11 @@
 // input into the sim, the sim into perception, and perception into the screen.
 
 import {
-  createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem, dropItem, craftItem, gatherTarget,
+  createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem, dropItem, craftItem, gatherTarget, offerItem,
   possess, release, possessableCompanions,
   PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
 } from "./state.js?v=mirage-0.8.1";
-import { createPercept, updatePercept, distortion, perceivedMonoliths } from "./percept.js?v=mirage-0.8.1";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=mirage-0.8.1";
 import { createRenderer } from "./render.js?v=mirage-0.8.1";
 import { createHud, renderDebrief, paintHint } from "./hud.js?v=mirage-0.8.1";
 import { createInput, ACTIONS } from "./input.js?v=mirage-0.8.1";
@@ -274,6 +274,8 @@ function advanceLevel() {
     wood: old.wood,
     stone: old.stone,
     stats: old.stats,
+    // Travels with the inventory it names, so ids stay unique across basins.
+    nextSlotId: old.nextSlotId,
   };
   const nextLevel = old.level + 1;
   // Deterministic per-level seed derived from the campaign's own seed, so a
@@ -438,17 +440,50 @@ function handleAction(action, arg, player = run.players[0]) {
       break;
     }
     case ACTIONS.CRAFT: {
-      // Works off the sim's own truth (state.js), never the item bar's
-      // possibly-lying labels — see craftItem's own comment. A hallucinating
-      // lead who thinks they're holding a matching pair can still fail here.
-      const cres = craftItem(sim, player.selectedItem);
+      // Crafts against what THIS player's item bar is SHOWING, not the sim's
+      // truth, so a mind that believes it holds a matching pair always gets to
+      // commit — and finds out what it actually built later (state.craftItem).
+      // `player.selectedItem` anchors WHICH pair, so the hint and the craft
+      // never disagree about what is about to be made.
+      const cres = craftItem(sim, player.selectedItem, believedKinds(percept, sim));
       if (!cres.ok) {
         audio.play("deny");
         hud.say(cres.reason === "full" ? "Hands are full. Use or drop something first." : "Nothing here combines.", "warn");
         break;
       }
+      // Deliberately does NOT branch on cres.real: a false craft has to look,
+      // sound and read exactly like an honest one at the moment it happens.
       audio.play("log");
       player.selectedItem = Math.max(0, sim.inventory.length - 1); // land selection on the new item
+      break;
+    }
+    case ACTIONS.OFFER_ITEM: {
+      if (!sim.inventory.length) {
+        audio.play("deny");
+        hud.say("Nothing carried to offer.", "warn");
+        break;
+      }
+      if (player.selectedItem >= sim.inventory.length) player.selectedItem = 0;
+      const target = sim.companions[player.selected];
+      if (!target) break;
+      const ores = offerItem(
+        sim,
+        player.selectedItem,
+        target.id,
+        believedKinds(percept, sim)[player.selectedItem],
+        actor,
+      );
+      if (!ores.ok) {
+        audio.play("deny");
+        if (ores.reason === "too-far") hud.say(`${target.name} is too far to hand anything to.`, "warn");
+        else if (ores.reason === "no-target") hud.say("Pick someone else to hand it to.", "warn");
+        break;
+      }
+      // Branches on whether the offer was CALLED OUT, never on whether the item
+      // was real: a phantom that two deceived minds pass between them has to
+      // sound exactly like a real one landing, or the sound is the tell.
+      audio.play(ores.revealed ? "logFalse" : "dose");
+      if (player.selectedItem >= sim.inventory.length && player.selectedItem > 0) player.selectedItem -= 1;
       break;
     }
     case ACTIONS.PAUSE:
@@ -787,6 +822,8 @@ function boot() {
   el("btnItem")?.addEventListener("click", () => run && handleAction(ACTIONS.CYCLE_ITEM));
   el("btnUse")?.addEventListener("click", () => run && handleAction(ACTIONS.USE_ITEM));
   el("btnCraft")?.addEventListener("click", () => run && handleAction(ACTIONS.CRAFT));
+  el("btnGive")?.addEventListener("click", () => run && handleAction(ACTIONS.OFFER_ITEM));
+
   // A closing tab, a backgrounded phone, an alt-tab: all of these can end the
   // session between autosaves, so flush on the way out. visibilitychange is the
   // one that actually fires reliably on mobile — beforeunload does not.

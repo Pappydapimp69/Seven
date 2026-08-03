@@ -10,19 +10,19 @@ import {
   createRun, tick, tickLucidity, bandOf, BAND, checkIn, useDose, logMarker, recover,
   beginHallucinating, debrief, trueLogCount, checkEndings, partyCentroid,
   pickupItem, useItem, dropItem, craftItem, previewCraft, gatherResource, gatherTarget, emit,
-  rollTraits, pickHallucinationKind, companionPickup, handoffToPlayer,
+  rollTraits, pickHallucinationKind, companionPickup, handoffToPlayer, offerItem,
   possess, release, possessableCompanions,
   PARTY_SIZE, MAX_LUCIDITY, DOSE_COUNT, RECOVER_AT, RECOVER_TIME, DISSOLVE_TIME,
   TIME_LIMIT, PYLON_RADIUS, LOG_RADIUS, ISOLATION_DIST,
   ITEM_CAP, ITEM_PICKUP_RADIUS, ITEM_INFO, PHANTOM_ITEM_COST, CRAFT_RECIPES, CAMPAIGN_LENGTH, LUCIDITY_GRACE, FULL_DRAIN_AT, graceMultiplier,
   GATHER_RADIUS, GATHER_HOLD_TIME, GATHER_YIELD, STAKE_COST, PYLON_MAX_CHARGE, TRAIT_VARIANCE, COMPANION_TEMPLATES,
-  COMPANION_ITEM_CAP,
+  COMPANION_ITEM_CAP, OFFER_RADIUS,
 } from "../src/state.js";
 import { generateWorld, validate, findPath, isBlockedAt, GRID, ITEM_COUNT, ITEM_KINDS, TREE_COUNT, STONE_COUNT } from "../src/world.js";
 import {
   createPercept, updatePercept, perceivedMonoliths, perceivedPylons, perceivedCompanions,
   perceivedYaw, rosterRead, filterReport, distortion,
-  perceivedWorldItems, perceivedInventory, isClear,
+  perceivedWorldItems, perceivedInventory, isClear, believedKinds,
 } from "../src/percept.js";
 import { HALLUCINATION } from "../src/state.js";
 import { makeRng, hashSeed } from "../src/rng.js";
@@ -1023,34 +1023,80 @@ check("crafting refuses when there's neither a matching item pair nor enough raw
   eq(craftItem(sim).reason, "no-recipe", "wrong refusal with only one item and no materials");
 });
 
-check("two of the same item, or a phantom, refuse to combine", () => {
+check("two of the same item refuse to combine", () => {
   const sim = createRun({ seed: 65 });
   sim.inventory.push({ id: "a", real: true, kind: "flare", claimedKind: null });
   sim.inventory.push({ id: "b", real: true, kind: "flare", claimedKind: null });
   eq(craftItem(sim).reason, "no-recipe", "two flares should not combine into anything");
   eq(sim.inventory.length, 2, "a failed craft must not consume anything");
-
-  const sim2 = createRun({ seed: 66 });
-  sim2.inventory.push({ id: "a", real: true, kind: "flare", claimedKind: null });
-  sim2.inventory.push({ id: "b", real: false, claimedKind: "tether", kind: null }); // a phantom looks like a tether but isn't one
-  eq(craftItem(sim2).reason, "no-recipe", "a phantom ingredient must not knowingly combine into a recipe");
-  eq(sim2.inventory.length, 2, "a failed craft on a phantom pair must not consume anything");
 });
 
-check("craft works off the sim's truth, not the item bar's possibly-lying labels", () => {
-  // A hallucinating lead's item bar can show two items as a matching pair
-  // (percept.js's own lie) while the TRUE kinds underneath don't combine at
-  // all — craftItem never looks at perceivedInventory, only sim.inventory.
+check("a phantom ingredient combines exactly like the real thing, and quietly produces a lie", () => {
+  // The lead here is stone-cold LUCID. They are still carrying a phantom that
+  // claims to be a tether — picked up during an earlier episode, or handed
+  // over by a companion who was gone at the time. Nothing on screen, and
+  // nothing in this call, distinguishes the result from an honest ember.
+  const sim = createRun({ seed: 66 });
+  sim.inventory.push({ id: "a", real: true, kind: "flare", claimedKind: null });
+  sim.inventory.push({ id: "b", real: false, claimedKind: "tether", kind: null });
+  eq(sim.player.hallucinating, false, "test setup: this lead is not hallucinating at all");
+
+  const res = craftItem(sim);
+  assert(res.ok, "a believed-valid pair must combine, whatever is actually behind it");
+  eq(res.kind, "ember", "flare + (claimed) tether should read as an ember");
+  eq(res.real, false, "an ember built on a phantom cannot itself be real");
+  eq(sim.inventory.length, 1, "both ingredients should have been consumed");
+  const out = sim.inventory[0];
+  eq(out.real, false, "the crafted slot must be a phantom");
+  eq(out.claimedKind, "ember", "the phantom should go on claiming to be exactly what was intended");
+  eq(out.kind, null, "a phantom has no true kind");
+  eq(sim.stats.falseCrafts, 1, "a false craft should be counted for the debrief");
+  const ev = sim.events[sim.events.length - 1];
+  eq(ev.kind, "craft", "a false craft must emit the same event kind as an honest one");
+  assert(/Ember forms in your hands/.test(ev.text), "a false craft's text must be indistinguishable from an honest craft's");
+});
+
+check("with no belief view passed, a real pair is read at its true kinds", () => {
+  // The default reading is 'what a lucid observer sees'. Two true flares don't
+  // combine, whatever a lying item bar might have shown, because nothing told
+  // craftItem to believe the bar.
   const sim = createRun({ seed: 67 });
   sim.inventory.push({ id: "a", real: true, kind: "flare", claimedKind: null });
   sim.inventory.push({ id: "b", real: true, kind: "flare", claimedKind: null });
   const percept = createPercept();
   sim.player.hallucinating = true;
   updatePercept(percept, sim, 0.1);
-  percept.itemLabels.set("a", "tether"); // force the lie: shown as tether, really a flare
+  percept.itemLabels.set("a", "tether"); // the bar is lying: shown as tether, really a flare
   const seen = perceivedInventory(percept, sim);
   eq(seen[0].shownKind, "tether", "test setup: the item bar should be lying about slot a");
-  eq(craftItem(sim).reason, "no-recipe", "two true flares still can't combine, whatever the bar showed");
+  eq(craftItem(sim).reason, "no-recipe", "without the belief view, two true flares still can't combine");
+});
+
+check("hand craftItem the lying item bar and the craft fires — and comes out false", () => {
+  // The same setup as above, except the caller now passes what the LEAD
+  // actually believes (main.js does exactly this via percept.believedKinds).
+  // The bar says flare + tether, so the craft commits, and the ember it hands
+  // back was never there.
+  const sim = createRun({ seed: 67 });
+  sim.inventory.push({ id: "a", real: true, kind: "flare", claimedKind: null });
+  sim.inventory.push({ id: "b", real: true, kind: "flare", claimedKind: null });
+  const percept = createPercept();
+  sim.player.hallucinating = true;
+  updatePercept(percept, sim, 0.1);
+  // Pin BOTH labels: perceivedInventory assigns a mislabel lazily per slot, so
+  // leaving slot b to a live roll would make what the bar reads (and therefore
+  // whether a recipe matches at all) different from seed to seed.
+  percept.itemLabels.set("a", "tether");
+  percept.itemLabels.set("b", "flare");
+
+  const believed = believedKinds(percept, sim);
+  eq(believed[0], "tether", "test setup: the belief view should carry the bar's lie");
+  eq(believed[1], "flare", "test setup: the second slot should read as a flare");
+  const res = craftItem(sim, -1, believed);
+  assert(res.ok, "a lead who believes they hold a matching pair must be allowed to commit");
+  eq(res.kind, "ember", "they set out to make an ember");
+  eq(res.real, false, "built out of a misread flare, it cannot be real");
+  eq(sim.inventory[0].claimedKind, "ember", "and it goes on claiming to be one");
 });
 
 // ---------------------------------------------------------------------------
@@ -1394,16 +1440,42 @@ check("handoffToPlayer moves a slot from the companion to the player and reports
   eq(ev.kind, "handoff", "expected a handoff event");
 });
 
-check("handoffToPlayer names a phantom by its claimedKind, matching pickupFalse's own naming convention", () => {
+check("a phantom handed to a GONE lead transfers intact — two deceived minds agree and nothing gives it away", () => {
   const sim = createRun({ seed: 125 });
   const ch = sim.companions[0];
   ch.inventory.push({ id: "cslot", real: false, claimedKind: "lens", kind: null });
+  sim.player.hallucinating = true; // the lead shares the delusion, so it survives the crossing
   const res = handoffToPlayer(sim, ch);
-  assert(res.ok && res.real === false, "expected a phantom handoff to still succeed and report unreal");
+  assert(res.ok && res.real === false, "expected a phantom handoff to succeed between two deceived minds");
   eq(sim.inventory[sim.inventory.length - 1].claimedKind, "lens", "the phantom's claimed kind should ride along into the player's inventory");
   const ev = sim.events[sim.events.length - 1];
   eq(ev.kind, "handoff", "expected a handoff event for a phantom too");
   assert(ev.phantom, "a phantom handoff event should be flagged, even though its text never says so");
+});
+
+check("a phantom handed to a LUCID lead is called out instead of transferring — the crossing rule", () => {
+  const sim = createRun({ seed: 125 });
+  const ch = sim.companions[0];
+  ch.inventory.push({ id: "cslot", real: false, claimedKind: "lens", kind: null });
+  sim.player.hallucinating = false;
+  const before = sim.inventory.length;
+  const res = handoffToPlayer(sim, ch);
+  eq(res.ok, false, "a lucid lead must not accept something that was never there");
+  eq(res.reason, "revealed", "wrong refusal reason for a phantom called out at the crossing");
+  eq(sim.inventory.length, before, "nothing should have entered the lead's inventory");
+  eq(ch.inventory.length, 0, "the companion no longer has whatever they thought they were holding");
+  eq(sim.stats.phantomsRevealed, 1, "a reveal should be counted for the debrief");
+  const ev = sim.events[sim.events.length - 1];
+  eq(ev.kind, "handoffEmpty", "expected the distinct empty-handed event, not a normal handoff");
+});
+
+check("a phantom is called out even when the lead has no room — a reveal needs no free slot to happen in", () => {
+  const sim = createRun({ seed: 125 });
+  const ch = sim.companions[0];
+  ch.inventory.push({ id: "cslot", real: false, claimedKind: "lens", kind: null });
+  for (let i = 0; i < ITEM_CAP; i++) sim.inventory.push({ id: `x${i}`, real: true, kind: "flare", claimedKind: null });
+  const res = handoffToPlayer(sim, ch);
+  eq(res.reason, "revealed", "a full inventory must not mask the reveal as a mundane 'hands full'");
 });
 
 check("handoffToPlayer refuses when the player's inventory is already full, without mutating either array", () => {
@@ -1552,6 +1624,371 @@ check("a fetch errand survives being preempted by a pylon-break instead of perma
     if (sim.inventory.length >= 2) { delivered = true; break; }
   }
   assert(delivered, "the fetch errand never resumed after the pylon crisis resolved — it was permanently stranded");
+});
+
+// ---------------------------------------------------------------------------
+// crafting deception & the crossing rule — belief-based crafting, and who
+// decides when a phantom changes hands
+// ---------------------------------------------------------------------------
+check("an honest craft — two real, correctly-read ingredients — produces a real item and is never counted false", () => {
+  const sim = createRun({ seed: 140 });
+  sim.inventory.push({ id: "a", real: true, kind: "flare", claimedKind: null });
+  sim.inventory.push({ id: "b", real: true, kind: "tether", claimedKind: null });
+  const res = craftItem(sim); // no belief passed: falls back to the lucid reading, which matches truth here
+  assert(res.ok && res.real === true, "an honest, correctly-read pair should craft real");
+  eq(res.kind, "ember", "flare+tether should produce an ember");
+  eq(sim.inventory.length, 1, "crafting should net one item from two");
+  eq(sim.inventory[0].real, true, "the crafted slot should be real");
+  eq(sim.inventory[0].kind, "ember", "the crafted slot should carry the true kind");
+  eq(sim.stats.falseCrafts, 0, "an honest craft must not be counted as false");
+});
+
+check("a false craft and an honest craft emit an INDISTINGUISHABLE event — same kind, byte-identical text", () => {
+  // Honest: a real flare + a real tether, both read correctly -> a real ember.
+  const simHonest = createRun({ seed: 141 });
+  simHonest.inventory.push({ id: "a", real: true, kind: "flare", claimedKind: null });
+  simHonest.inventory.push({ id: "b", real: true, kind: "tether", claimedKind: null });
+  const honestRes = craftItem(simHonest);
+  assert(honestRes.ok && honestRes.real === true, "test setup: expected an honest ember");
+  const honestEv = simHonest.events[simHonest.events.length - 1];
+
+  // False: a real flare + a real LENS, but believed (the lying item bar) as
+  // flare+tether — the recipe matches on belief, but the lens ingredient was
+  // never what it was read as, so the result is a phantom claiming "ember".
+  const simFalse = createRun({ seed: 142 });
+  simFalse.inventory.push({ id: "a", real: true, kind: "flare", claimedKind: null });
+  simFalse.inventory.push({ id: "b", real: true, kind: "lens", claimedKind: null });
+  const falseRes = craftItem(simFalse, -1, ["flare", "tether"]);
+  assert(falseRes.ok && falseRes.real === false, "test setup: expected a false ember");
+  const falseEv = simFalse.events[simFalse.events.length - 1];
+
+  eq(falseEv.kind, honestEv.kind, "a false craft's event kind must match an honest craft's exactly");
+  eq(falseEv.text, honestEv.text, "a false craft's event text must be byte-identical to an honest craft's — nothing may tell the player apart at craft time");
+  eq(honestEv.text, "The two combine. Ember forms in your hands.", "sanity: the expected craft text");
+});
+
+check("a crafted phantom, used later, hits the phantom branch — cost, not payoff", () => {
+  const sim = createRun({ seed: 143 });
+  sim.inventory.push({ id: "a", real: true, kind: "flare", claimedKind: null });
+  sim.inventory.push({ id: "b", real: true, kind: "lens", claimedKind: null });
+  const craftRes = craftItem(sim, -1, ["flare", "tether"]); // false ember, same construction as above
+  assert(craftRes.ok && craftRes.real === false, "test setup: expected a false craft");
+  eq(sim.inventory[0].claimedKind, "ember", "test setup: the crafted phantom should claim to be an ember");
+
+  sim.player.lucidity = 50;
+  const before = sim.player.lucidity;
+  const res = useItem(sim, 0);
+  assert(res.ok && res.real === false, "using a crafted phantom should report unreal");
+  eq(sim.player.lucidity, before - PHANTOM_ITEM_COST, "a crafted phantom should cost lucidity like any other phantom");
+  eq(sim.stats.phantomItemsUsed, 1, "phantomItemsUsed not counted for a crafted phantom");
+  const ev = sim.events[sim.events.length - 1];
+  eq(ev.kind, "itemPhantom", "expected the phantom-use event, not any real ember effect");
+});
+
+check("a crafted phantom's claimedKind survives the lead recovering from the hallucination that produced it", () => {
+  const sim = createRun({ seed: 144 });
+  sim.inventory.push({ id: "a", real: true, kind: "flare", claimedKind: null });
+  sim.inventory.push({ id: "b", real: true, kind: "flare", claimedKind: null });
+  const percept = createPercept();
+  sim.player.hallucinating = true;
+  updatePercept(percept, sim, 0.1); // onset
+  // Pin BOTH labels so the bar reads flare+tether regardless of the live roll
+  // (see "pin BOTH labels" above for why leaving one to chance is flaky).
+  percept.itemLabels.set("a", "flare");
+  percept.itemLabels.set("b", "tether");
+  const believed = believedKinds(percept, sim);
+  const craftRes = craftItem(sim, -1, believed);
+  assert(craftRes.ok && craftRes.real === false, "test setup: expected a false craft built while hallucinating");
+  eq(sim.inventory[0].claimedKind, "ember", "test setup: the phantom should claim to be an ember");
+
+  sim.player.hallucinating = false;
+  updatePercept(percept, sim, 0.1); // recovery — clears itemLabels
+  eq(percept.itemLabels.size, 0, "test setup: recovery should have cleared the per-episode mislabeling");
+  const seen = perceivedInventory(percept, sim);
+  eq(seen[0].real, false, "the crafted slot is still a phantom");
+  eq(seen[0].shownKind, "ember", "a phantom's claimed kind must survive recovery — only per-episode REAL mislabeling is temporary");
+});
+
+check("previewCraft and craftItem agree on belief, for both a pair recipe and the raw-material Stake path", () => {
+  // Pair path: a belief that manufactures a recipe match even though it isn't
+  // an honest reading of either slot.
+  const sim = createRun({ seed: 145 });
+  sim.inventory.push({ id: "a", real: true, kind: "flare", claimedKind: null });
+  sim.inventory.push({ id: "b", real: true, kind: "lens", claimedKind: null });
+  const believedYes = ["flare", "tether"];
+  const preview = previewCraft(sim, -1, believedYes);
+  assert(preview.ok && preview.kind === "ember", "expected an ember preview under this belief");
+  const res = craftItem(sim, -1, believedYes);
+  assert(res.ok, "craftItem should agree with previewCraft's ok:true");
+  eq(res.kind, preview.kind, "craftItem's kind should match previewCraft's kind");
+
+  // A belief with no matching recipe and no raw materials: preview says no,
+  // craftItem refuses for the same reason.
+  const sim2 = createRun({ seed: 146 });
+  sim2.inventory.push({ id: "a", real: true, kind: "flare", claimedKind: null });
+  sim2.inventory.push({ id: "b", real: true, kind: "lens", claimedKind: null });
+  const believedNo = ["flare", "flare"];
+  eq(previewCraft(sim2, -1, believedNo).ok, false, "expected no preview under a non-matching belief");
+  eq(craftItem(sim2, -1, believedNo).ok, false, "craftItem should refuse exactly when previewCraft says no");
+
+  // The Stake path carries no belief layer at all — raw materials only.
+  const sim3 = createRun({ seed: 147 });
+  sim3.wood = STAKE_COST.wood;
+  sim3.stone = STAKE_COST.stone;
+  const stakePreview = previewCraft(sim3);
+  assert(stakePreview.ok && stakePreview.kind === "stake", "expected a stake preview with enough materials");
+  const stakeRes = craftItem(sim3);
+  eq(stakeRes.kind, stakePreview.kind, "craftItem should agree with previewCraft on the stake path too");
+});
+
+check("the Stake can never come out false, even while the lead is hallucinating — raw materials carry no deception", () => {
+  const sim = createRun({ seed: 148 });
+  sim.wood = STAKE_COST.wood;
+  sim.stone = STAKE_COST.stone;
+  sim.player.hallucinating = true;
+  const res = craftItem(sim);
+  assert(res.ok && res.kind === "stake" && res.real === true, "a stake craft must always be real, regardless of the lead's state");
+  eq(sim.stats.falseCrafts, 0, "raw materials cannot produce a false craft");
+});
+
+// ---------------------------------------------------------------------------
+// offerItem — the other direction of the crossing rule: the lead's own reach
+// can expose what THEY were carrying
+// ---------------------------------------------------------------------------
+check("offerItem: a phantom offered to a lucid companion is called out — revealed, consumed, counted", () => {
+  const sim = createRun({ seed: 149 });
+  const target = sim.companions[0];
+  target.hallucinating = false;
+  target.x = sim.player.x;
+  target.z = sim.player.z;
+  sim.inventory.push({ id: "p0", real: false, claimedKind: "flare", kind: null });
+  const res = offerItem(sim, 0, target.id);
+  assert(res.ok && res.real === false, "a phantom offer still 'succeeds' as an action, whatever it reveals");
+  eq(res.revealed, true, "a lucid companion should see through the phantom");
+  eq(sim.inventory.length, 0, "the phantom must be consumed from the player's inventory either way");
+  eq(sim.stats.phantomsRevealed, 1, "a reveal should be counted for the debrief");
+  const ev = sim.events[sim.events.length - 1];
+  eq(ev.kind, "offerEmpty", "expected the offerEmpty event");
+});
+
+check("offerItem: a phantom offered to a hallucinating companion goes unquestioned — two deceived minds agree", () => {
+  const sim = createRun({ seed: 150 });
+  const target = sim.companions[0];
+  target.hallucinating = true;
+  target.x = sim.player.x;
+  target.z = sim.player.z;
+  sim.inventory.push({ id: "p0", real: false, claimedKind: "flare", kind: null });
+  const res = offerItem(sim, 0, target.id);
+  assert(res.ok && res.real === false, "a phantom offer still 'succeeds' as an action");
+  eq(res.revealed, false, "a hallucinating companion should share the delusion, not call it out");
+  eq(sim.inventory.length, 0, "the phantom is still consumed from the player's inventory");
+  eq(sim.stats.phantomsRevealed, 0, "a phantom that goes unquestioned must not be counted as revealed");
+
+  // The point of this branch is that NOTHING marks it. Build the equivalent
+  // REAL hand-over and demand the two are word for word identical — a distinct
+  // event kind, or a line that quietly declines to name the item, would each be
+  // a tell that the thing being passed was never there.
+  const ev = sim.events[sim.events.length - 1];
+  const twin = createRun({ seed: 150 });
+  const twinTarget = twin.companions[0];
+  twinTarget.hallucinating = false;
+  twinTarget.lucidity = 30;
+  twinTarget.x = twin.player.x;
+  twinTarget.z = twin.player.z;
+  twin.inventory.push({ id: "r0", real: true, kind: "flare", claimedKind: null });
+  offerItem(twin, 0, twinTarget.id);
+  const twinEv = twin.events[twin.events.length - 1];
+
+  eq(ev.kind, twinEv.kind, "a deceived hand-over must emit the same event kind as a real one");
+  eq(ev.text, twinEv.text, "and read word for word the same on screen");
+});
+
+check("offerItem: a real Flare helps a lucid, fraying companion and is consumed; a real Lens is refused as 'no-use' and stays put", () => {
+  const sim = createRun({ seed: 151 });
+  const target = sim.companions[0];
+  target.hallucinating = false;
+  target.lucidity = 30; // FRAYING, but present
+  target.x = sim.player.x;
+  target.z = sim.player.z;
+  sim.inventory.push({ id: "flareSlot", real: true, kind: "flare", claimedKind: null });
+  const before = target.lucidity;
+  const res = offerItem(sim, 0, target.id);
+  assert(res.ok && res.real === true && res.reached === true, "a helpful real item should be accepted and reach a lucid companion");
+  eq(target.lucidity, before + ITEM_INFO.flare.restore, "the flare should restore the documented amount");
+  eq(sim.inventory.length, 0, "the flare should be consumed from the player's inventory");
+  const ev1 = sim.events[sim.events.length - 1];
+  eq(ev1.kind, "offerUsed", "expected the offerUsed event for a helpful real item");
+
+  sim.inventory.push({ id: "lensSlot", real: true, kind: "lens", claimedKind: null });
+  const res2 = offerItem(sim, 0, target.id);
+  eq(res2.ok, false, "a Lens has nothing this companion can use right now");
+  eq(res2.reason, "no-use", "wrong refusal reason for an unhelpful real item");
+  eq(sim.inventory.length, 1, "a refused offer must not remove the item");
+  eq(sim.inventory[0].kind, "lens", "the lens should still be sitting, untouched, in the player's inventory");
+  const ev2 = sim.events[sim.events.length - 1];
+  eq(ev2.kind, "offerRefused", "expected the offerRefused event");
+});
+
+check("offerItem: a real Flare offered to a HALLUCINATING companion is consumed but does not reach them", () => {
+  const sim = createRun({ seed: 152 });
+  const target = sim.companions[0];
+  target.hallucinating = true;
+  target.lucidity = 0;
+  target.x = sim.player.x;
+  target.z = sim.player.z;
+  sim.inventory.push({ id: "flareSlot", real: true, kind: "flare", claimedKind: null });
+  const res = offerItem(sim, 0, target.id);
+  assert(res.ok && res.real === true, "the offer itself still succeeds — the item just doesn't help");
+  eq(res.reached, false, "a gone companion must not be reached by a flare");
+  eq(target.lucidity, 0, "lucidity must not change for a companion the item never reached");
+  eq(sim.inventory.length, 0, "the flare is still consumed even though it was lost");
+  const ev = sim.events[sim.events.length - 1];
+  eq(ev.kind, "offerLost", "expected the offerLost event");
+});
+
+check("offerItem refuses 'too-far' when the companion is beyond OFFER_RADIUS, mutating nothing", () => {
+  const sim = createRun({ seed: 153 });
+  const target = sim.companions[0];
+  target.x = sim.player.x + OFFER_RADIUS + 5;
+  target.z = sim.player.z;
+  sim.inventory.push({ id: "flareSlot", real: true, kind: "flare", claimedKind: null });
+  const before = target.lucidity;
+  const res = offerItem(sim, 0, target.id);
+  eq(res.ok, false, "an out-of-range offer must be refused");
+  eq(res.reason, "too-far", "wrong refusal reason");
+  eq(sim.inventory.length, 1, "an out-of-range offer must not touch the inventory");
+  eq(target.lucidity, before, "an out-of-range offer must not touch the companion");
+});
+
+// ---------------------------------------------------------------------------
+// no-tells — the deception is only as good as its worst leak
+//
+// Every check here asserts that two paths are INDISTINGUISHABLE. They exist
+// because a review found four separate places where a real and a false item
+// were being quietly told apart — a subtitle that named the true kind, a
+// different sentence shape for a phantom, a missing definite article, and a
+// refusal that only ever refused real items. Any one of them let a player
+// decide an item's truth without paying the price the design charges for it.
+// ---------------------------------------------------------------------------
+check("a real pickup and a phantom pickup read exactly the same on screen", () => {
+  const real = createRun({ seed: 160 });
+  const it = real.items[0];
+  it.discovered = true;
+  real.player.x = it.x;
+  real.player.z = it.z;
+  pickupItem(real);
+  const realEv = real.events[real.events.length - 1];
+
+  const fake = createRun({ seed: 160 });
+  const fit = fake.items[0];
+  fit.discovered = true;
+  fake.player.x = fit.x;
+  fake.player.z = fit.z;
+  fake.player.hallucinating = true;
+  fake.rng.chance = () => true; // force the phantom branch
+  pickupItem(fake);
+  const fakeEv = fake.events[fake.events.length - 1];
+
+  eq(realEv.text, fakeEv.text, "a phantom pickup must read word for word like a real one");
+  assert(
+    !Object.values(ITEM_INFO).some((info) => realEv.text.includes(info.label)),
+    "a pickup subtitle must not name any item kind — that is the item bar's job, and the bar is allowed to lie",
+  );
+});
+
+check("a real handoff and a phantom handoff read exactly the same on screen", () => {
+  const real = createRun({ seed: 161 });
+  real.player.hallucinating = true; // so the phantom twin below transfers rather than being called out
+  const rch = real.companions[0];
+  rch.inventory.push({ id: "c1", real: true, kind: "flare", claimedKind: null });
+  handoffToPlayer(real, rch);
+  const realEv = real.events[real.events.length - 1];
+
+  const fake = createRun({ seed: 161 });
+  fake.player.hallucinating = true;
+  const fch = fake.companions[0];
+  fch.inventory.push({ id: "c1", real: false, claimedKind: "flare", kind: null });
+  handoffToPlayer(fake, fch);
+  const fakeEv = fake.events[fake.events.length - 1];
+
+  eq(realEv.text, fakeEv.text, "a phantom handed over between two deceived minds must read identically");
+});
+
+check("a claimed Lens is refused whether or not anything is behind it — a refusal is not a free truth oracle", () => {
+  const mk = (slot) => {
+    const sim = createRun({ seed: 162 });
+    const target = sim.companions[0];
+    target.hallucinating = false;
+    target.x = sim.player.x;
+    target.z = sim.player.z;
+    sim.inventory.push(slot);
+    return { sim, res: offerItem(sim, 0, target.id) };
+  };
+  const realLens = mk({ id: "r", real: true, kind: "lens", claimedKind: null });
+  const fakeLens = mk({ id: "p", real: false, claimedKind: "lens", kind: null });
+
+  eq(realLens.res.reason, "no-use", "a real Lens is refused — a companion has no use for it");
+  eq(fakeLens.res.reason, "no-use", "and so is a phantom claiming to be one");
+  eq(realLens.sim.inventory.length, 1, "the real Lens stays in hand");
+  eq(fakeLens.sim.inventory.length, 1, "and so does the phantom — refusing must not consume it either");
+  eq(fakeLens.sim.stats.phantomsRevealed, 0, "a refusal must never double as a reveal");
+});
+
+check("an Ember steadies a gone companion even though its restore cannot reach them", () => {
+  // Regression: the early return for an unreachable restore used to skip the
+  // steady effect below it, so an Ember (restore + steady) did strictly LESS
+  // for a hallucinating companion than a plain Tether (steady only) did.
+  const sim = createRun({ seed: 163 });
+  const target = sim.companions[0];
+  target.x = sim.player.x;
+  target.z = sim.player.z;
+  beginHallucinating(sim, target);
+  sim.inventory.push({ id: "e", real: true, kind: "ember", claimedKind: null });
+
+  const res = offerItem(sim, 0, target.id);
+  assert(res.ok, "the offer itself lands");
+  eq(res.reached, false, "an item cannot pull a mind back from gone — that takes a pylon");
+  assert(target.steadyUntil > sim.time, "but the steadying half must still apply");
+});
+
+check("slot ids stay unique through the pickup/craft shape that used to collide", () => {
+  // Ids used to be `slot<inventory.length>-<time>`. Crafting slots 0 and 2
+  // leaves the survivor holding the index the replacement then reuses, so
+  // within one 0.01s time bucket — which same-frame actions share — the two
+  // collided and ended up sharing a percept.itemLabels entry.
+  const sim = createRun({ seed: 164 });
+  const kinds = ["flare", "flare", "tether"];
+  for (let i = 0; i < 3; i++) {
+    const it = sim.items[i];
+    it.itemKind = kinds[i];
+    it.discovered = true;
+    it.taken = false;
+    sim.player.x = it.x;
+    sim.player.z = it.z;
+    const p = pickupItem(sim);
+    assert(p.ok, `test setup: pickup ${i} should succeed`);
+  }
+  const liveIds = () => sim.inventory.map((s) => s.id);
+  eq(new Set(liveIds()).size, 3, `three pickups in one time bucket produced duplicate ids: ${liveIds().join(", ")}`);
+
+  const res = craftItem(sim); // consumes indices 0 and 2 (flare + tether)
+  assert(res.ok && res.kind === "ember", "test setup: flare + tether should combine");
+  eq(new Set(liveIds()).size, sim.inventory.length, `craft output reused a live slot id: ${liveIds().join(", ")}`);
+});
+
+check("the Lens clause of seesThrough: a hallucinating lead with an active Lens still sees through a phantom handoff", () => {
+  const sim = createRun({ seed: 154 });
+  const ch = sim.companions[0];
+  ch.inventory.push({ id: "cslot", real: false, claimedKind: "lens", kind: null });
+  sim.player.hallucinating = true;
+  sim.player.lensUntil = sim.time + 10; // a Lens window active right now
+  const res = handoffToPlayer(sim, ch);
+  eq(res.ok, false, "a Lens should let a hallucinating lead see through the phantom, not share the delusion");
+  eq(res.reason, "revealed", "wrong refusal reason under a Lens window");
+  eq(ch.inventory.length, 0, "the companion no longer has whatever they thought they were carrying");
+  eq(sim.stats.phantomsRevealed, 1, "a Lens-enabled reveal should still be counted for the debrief");
+  const ev = sim.events[sim.events.length - 1];
+  eq(ev.kind, "handoffEmpty", "expected the empty-handed event under a Lens window");
 });
 
 // ---------------------------------------------------------------------------

@@ -23,7 +23,13 @@ export const SAVE_KEY = "mirage:run";
 // Bumped whenever the shape below changes incompatibly. A save from an older
 // schema is discarded rather than half-read: a partially-applied snapshot is
 // far worse than starting fresh, because it looks like it worked.
-export const SAVE_VERSION = 1;
+//
+// v2: `stats` gained falseCrafts/phantomsRevealed for the crafting deception.
+// Stats are restored by spread, so a v1 snapshot would come back MISSING those
+// two keys, and the first `sim.stats.falseCrafts += 1` would write NaN — which
+// then rides silently into the debrief. Adding a counter to a serialised bag of
+// counters is a schema change even though nothing was renamed or removed.
+export const SAVE_VERSION = 2;
 
 const store = () => (typeof localStorage === "undefined" ? null : localStorage);
 

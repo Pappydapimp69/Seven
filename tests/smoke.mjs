@@ -341,6 +341,124 @@ function assert(cond, msg) {
   assert(craft.itemsCrafted === 1, "craft was not recorded in stats");
   assert(/The two combine/.test(craft.subtitles), `crafting did not show its text: ${JSON.stringify(craft.subtitles)}`);
 
+  // --- crafting deception: the WIRING around it -----------------------------
+  // logic.test.mjs already covers offerItem/craftItem's rules in isolation;
+  // this section is only the parts a logic test cannot reach: the real KeyB
+  // keypress, the #btnGive touch button actually being in the DOM and wired,
+  // the phantom-reveal line actually reaching the subtitle element, and the
+  // belief-based craft indicator actually painting through hud.js.
+
+  // Nothing above this point in the file drives a physical keyboard event —
+  // every verb test so far calls M.act()/M.advance() directly — so this uses
+  // Playwright's own `keyboard`, which for a named key like "KeyB" fires a
+  // genuine trusted keydown/keyup with `code: "KeyB"`, exactly what
+  // input.js's onKeyDown switches on. Unlike M.act()/M.advance(), a real
+  // keydown only gets drained once the game's own rAF loop calls
+  // input.poll() on a LATER frame, so a short real wait follows it — this is
+  // not an assertion on elapsed SIM time (nothing below reads sim.time or a
+  // drain amount), just giving one real frame a chance to land, the same
+  // reason gamepad.mjs's tap()/hold() helpers wait after flipping a button.
+  async function pressKeyAndSettle(code) {
+    await page.evaluate(() => document.activeElement && document.activeElement.blur());
+    await page.keyboard.press(code);
+    await page.waitForTimeout(300);
+  }
+
+  // 1) KeyB is wired to ACTIONS.OFFER_ITEM end to end: give a real, useful
+  // item (a Flare) to the currently-selected companion, in range and lucid,
+  // and confirm it actually reached them.
+  await page.evaluate(() => {
+    const M = window.__mirage;
+    const s = M.sim;
+    s.inventory.length = 0;
+    s.inventory.push({ id: "give-flare", real: true, kind: "flare", claimedKind: null });
+    const c = s.companions[M.selected];
+    c.hallucinating = false;
+    c.lucidity = 50; // clear of both 0 and the 100 cap, so a +40 restore is unambiguous
+    c.x = s.player.x;
+    c.z = s.player.z;
+  });
+  await pressKeyAndSettle("KeyB");
+  const giveKey = await page.evaluate(() => {
+    const M = window.__mirage;
+    const s = M.sim;
+    return { inventory: s.inventory.length, lucidity: s.companions[M.selected].lucidity };
+  });
+  assert(giveKey.inventory === 0, `KeyB should consume the offered slot, inventory still has ${giveKey.inventory}`);
+  assert(giveKey.lucidity >= 89, `KeyB-triggered offer did not restore the companion's lucidity (${giveKey.lucidity})`);
+
+  // 2) The #btnGive touch button exists and fires the same verb — a Tether
+  // this time, so the OTHER "helps" branch (steadySeconds, not restore) is
+  // exercised too. `.click()` here is the element's own DOM method, not
+  // Playwright's visibility-gated page.click() — the touch buttons are
+  // legitimately display:none under the keyboard scheme this whole test runs
+  // under (see gamepad.mjs's own assertion on that), so this proves the
+  // listener is wired without fighting the scheme-adaptive CSS to do it.
+  const btnGiveHandle = await page.$("#btnGive");
+  assert(!!btnGiveHandle, "#btnGive is missing from the DOM");
+  await page.evaluate(() => {
+    const M = window.__mirage;
+    const s = M.sim;
+    s.inventory.length = 0;
+    s.inventory.push({ id: "give-tether", real: true, kind: "tether", claimedKind: null });
+    const c = s.companions[M.selected];
+    c.hallucinating = false;
+    c.steadyUntil = 0;
+  });
+  await page.$eval("#btnGive", (el) => el.click());
+  const btnGive = await page.evaluate(() => {
+    const M = window.__mirage;
+    return { inventory: M.sim.inventory.length, steadyUntil: M.sim.companions[M.selected].steadyUntil };
+  });
+  assert(btnGive.inventory === 0, `#btnGive should consume the offered slot, inventory still has ${btnGive.inventory}`);
+  assert(btnGive.steadyUntil > 0, `#btnGive-triggered offer did not steady the companion (steadyUntil ${btnGive.steadyUntil})`);
+
+  // 3) A phantom offered to a lucid companion is exposed ON SCREEN, not just
+  // in the returned result — the only way a player learns their own item was
+  // fake. Asserted on the SPECIFIC line, not merely non-empty subtitles: a
+  // length>0 check here previously let a real bug through elsewhere in this
+  // file (see the check-in assertion above) — the same class of bug would
+  // hide a reveal behind stale text left over from tests 1/2 above.
+  const offerReveal = await page.evaluate(() => {
+    const M = window.__mirage;
+    const s = M.sim;
+    s.inventory.length = 0;
+    s.inventory.push({ id: "phantom-flare", real: false, claimedKind: "flare", kind: null });
+    const c = s.companions[M.selected];
+    c.hallucinating = false;
+    const before = s.stats.phantomsRevealed;
+    M.act(M.ACTIONS.OFFER_ITEM);
+    M.advance(0.2); // the HUD repaints on the frame loop — give it a frame, same as the survey/check-in assertions above
+    return {
+      inventory: s.inventory.length,
+      phantomsRevealed: s.stats.phantomsRevealed - before,
+      subtitles: document.getElementById("subtitles").innerText,
+    };
+  });
+  assert(offerReveal.inventory === 0, `offering a phantom should still consume the slot, inventory still has ${offerReveal.inventory}`);
+  assert(offerReveal.phantomsRevealed === 1, "offering a phantom to a lucid companion did not record a reveal");
+  assert(/There's nothing there\./.test(offerReveal.subtitles), `phantom reveal text did not reach the subtitles: ${JSON.stringify(offerReveal.subtitles)}`);
+
+  // 4) The craft-ready indicator reflects BELIEF, not truth, end to end
+  // through hud.js: two real items that genuinely combine (Flare + Tether ->
+  // Ember, per CRAFT_RECIPES) should light #craftHint up and name the result
+  // — the guard that the new belief-view plumbing didn't quietly break the
+  // ordinary, honest case.
+  const craftHint = await page.evaluate(() => {
+    const M = window.__mirage;
+    const s = M.sim;
+    s.inventory.length = 0;
+    s.inventory.push({ id: "hint-a", real: true, kind: "flare", claimedKind: null });
+    s.inventory.push({ id: "hint-b", real: true, kind: "tether", claimedKind: null });
+    M.advance(0.2); // let hud.update() run at least once against the new inventory
+    const el = document.getElementById("craftHint");
+    const res = { visible: el.classList.contains("show"), text: el.textContent };
+    s.inventory.length = 0; // leave a clean slate for the gathering/stake tests below, which expect no leftover craftable pair
+    return res;
+  });
+  assert(craftHint.visible, "craftHint did not appear for a genuine Flare+Tether pair");
+  assert(/Ember/.test(craftHint.text), `craftHint did not name the expected result: ${JSON.stringify(craftHint.text)}`);
+
   // --- item hallucinations: a mislabeled real item reveals on use, a husk is
   // real but does nothing --------------------------------------------------
   const reveal = await page.evaluate(() => {

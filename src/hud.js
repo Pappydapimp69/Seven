@@ -6,7 +6,7 @@
 // the one hallucinating. The only place a real number is ever printed is the
 // debrief, after the run is over.
 
-import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho } from "./percept.js?v=mirage-0.8.1";
+import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds } from "./percept.js?v=mirage-0.8.1";
 import { LOG_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, gatherTarget, GATHER_HOLD_TIME, previewCraft } from "./state.js?v=mirage-0.8.1";
 
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
@@ -167,10 +167,21 @@ export function createHud(sim, percept, opts = {}) {
       else if (ev.kind === "discoverItem") say(ev.text, "");
       else if (ev.kind === "discoverResource") say(ev.text, "");
       else if (ev.kind === "gather") say(ev.text, "good");
+      // Same text AND same styling: a phantom pickup used to be flagged "gone"
+      // (red) while a real one read "good", which told the player which slots
+      // were fake without them ever reaching for one.
       else if (ev.kind === "pickup") say(ev.text, "good");
-      else if (ev.kind === "pickupFalse") say(ev.text, "gone");
+      else if (ev.kind === "pickupFalse") say(ev.text, "good");
       else if (ev.kind === "companionPickup") say(ev.text, "");
-      else if (ev.kind === "handoff") say(ev.text, ev.phantom ? "gone" : "good");
+      // A phantom handoff the lead ACCEPTS reads as good news, because to them
+      // it is — the styling must not be the thing that gives it away.
+      else if (ev.kind === "handoff") say(ev.text, "good");
+      // The two reveals, though, are the game telling the truth for once.
+      else if (ev.kind === "handoffEmpty") say(ev.text, "gone");
+      else if (ev.kind === "offerEmpty") say(ev.text, "gone");
+      else if (ev.kind === "offerUsed") say(ev.text, "good");
+      else if (ev.kind === "offerLost") say(ev.text, "warn");
+      else if (ev.kind === "offerRefused") say(ev.text, "warn");
       else if (ev.kind === "itemUsed") {
         say(ev.text, "good");
         if (ITEM_INFO[ev.itemKind]?.restore) flash();
@@ -344,11 +355,18 @@ export function createHud(sim, percept, opts = {}) {
     }
 
     // Craft accessibility: name what's craftable the moment it's possible,
-    // rather than making the player guess and press blind.
+    // rather than making the player guess and press blind. Reads the same
+    // belief view the craft itself will use, so a lead being lied to about
+    // what they're carrying gets INVITED into the false craft by name — the
+    // indicator has to be as wrong as the item bar above it, or it would
+    // quietly become the one honest instrument on the screen.
     if (el.craftHint) {
       // Same selected slot craftItem will use, so the hint can never name a
-      // different result than the button produces.
-      const preview = previewCraft(sim, selectedItem);
+      // different result than the button produces — and the same belief view,
+      // so a mind being lied to about what it carries gets INVITED into the
+      // false craft by name. The indicator has to be as wrong as the item bar
+      // above it, or it quietly becomes the one honest instrument on screen.
+      const preview = previewCraft(sim, selectedItem, believedKinds(percept, sim));
       if (preview.ok && sim.status === "playing") {
         el.craftHint.textContent = `Craft ready: ${ITEM_INFO[preview.kind].label}`;
         el.craftHint.classList.add("show");
@@ -360,8 +378,8 @@ export function createHud(sim, percept, opts = {}) {
 
   function setHints(scheme) {
     const text = {
-      keyboard: "WASD move · Shift run · E survey/pick up, hold to gather · Z cycle item · X use item · V drop · C craft · 1–5 check in · Shift+1–5 dose · Esc pause",
-      gamepad: "Stick move · [A] survey/pick up, hold to gather · [RT] cycle item · [B] use item · D-pad Up craft · D-pad Down drop · [X] check in · [Y] dose · [LB]/[RB] select · [Start] pause",
+      keyboard: "WASD move · Shift run · E survey/pick up, hold to gather · Z cycle item · X use item · V drop · B give · C craft · 1–5 check in · Shift+1–5 dose · Esc pause",
+      gamepad: "Stick move · [A] survey/pick up, hold to gather · [RT] cycle item · [B] use item · D-pad Up craft · D-pad Down drop · D-pad Right give · [X] check in · [Y] dose · [LB]/[RB] select · [Start] pause",
       touch: "Left half steers · right half looks · buttons bottom-right",
     }[scheme] || "";
     paintHint(el.hints, text);
@@ -381,11 +399,17 @@ export function renderDebrief(container, report) {
   const falseNote = report.falseLogs
     ? `<p class="debrief-warn">${report.falseLogs} entr${report.falseLogs === 1 ? "y was" : "ies were"} written at nothing.</p>`
     : "";
+  // The count of things you built that were never there. Withheld for the
+  // entire run — this is the first and only moment the game admits it.
+  const craftNote = report.falseCrafts
+    ? `<p class="debrief-warn">${report.falseCrafts} of the ${report.itemsCrafted} thing${report.itemsCrafted === 1 ? "" : "s"} you made ${report.falseCrafts === 1 ? "was" : "were"} never there.</p>`
+    : "";
   container.innerHTML = `
     <div class="debrief-card">
       <h2>${verdict}</h2>
       <p class="debrief-sub">Basin ${report.level} of ${report.campaignLength} · ${report.logged} of ${report.total} markers really surveyed · ${Math.floor(report.time / 60)}m ${report.time % 60}s</p>
       ${falseNote}
+      ${craftNote}
       <table class="debrief-table">
         <tr><th>Who</th><th>Lucidity</th><th>State</th><th>Scars</th><th>Lost to it</th></tr>
         ${report.party
@@ -397,7 +421,7 @@ export function renderDebrief(container, report) {
           )
           .join("")}
       </table>
-      <p class="debrief-foot">Doses used ${report.doseUses} · recoveries ${report.recoveries} · items used ${report.itemsUsed} · crafted ${report.itemsCrafted} · phantom items ${report.phantomItemsUsed} · wood left ${report.wood} · stone left ${report.stone}</p>
+      <p class="debrief-foot">Doses used ${report.doseUses} · recoveries ${report.recoveries} · items used ${report.itemsUsed} · crafted ${report.itemsCrafted} · phantom items ${report.phantomItemsUsed} · called out ${report.phantomsRevealed} · wood left ${report.wood} · stone left ${report.stone}</p>
       <button id="againBtn" class="big-btn" data-row="0" data-col="0">New basin</button>
     </div>`;
 }

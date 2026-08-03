@@ -33,6 +33,10 @@ export const ACTIONS = Object.freeze({
   USE_ITEM: "useItem",
   DROP_ITEM: "dropItem",
   CRAFT: "craft",
+  // Put the selected item in the selected companion's hands. Doubles as the
+  // only way to find out something is wrong with YOUR OWN reading of it — see
+  // state.offerItem.
+  OFFER_ITEM: "offerItem",
   PAUSE: "pause",
 });
 
@@ -123,6 +127,7 @@ export function createInput(canvas, opts = {}) {
       case "KeyX": push(ACTIONS.USE_ITEM); break;
       case "KeyC": push(ACTIONS.CRAFT); break;
       case "KeyV": push(ACTIONS.DROP_ITEM); break;
+      case "KeyB": push(ACTIONS.OFFER_ITEM); break;
       case "Escape": push(ACTIONS.PAUSE); break;
       case "Space": e.preventDefault(); break;
       default: return;
@@ -283,6 +288,7 @@ export function createInput(canvas, opts = {}) {
     if (edges[7]) queue.push(ACTIONS.CYCLE_ITEM);
     if (edges[12]) queue.push(ACTIONS.CRAFT);
     if (edges[13]) queue.push(ACTIONS.DROP_ITEM);
+    if (edges[15]) queue.push(ACTIONS.OFFER_ITEM);
 
     return {
       move: { x: lx, z: ly },
@@ -346,6 +352,7 @@ export function createInput(canvas, opts = {}) {
     if (edges[7]) push(ACTIONS.CYCLE_ITEM); // RT
     if (edges[12]) push(ACTIONS.CRAFT); // D-pad Up
     if (edges[13]) push(ACTIONS.DROP_ITEM); // D-pad Down — mirrors craft above it
+    if (edges[15]) push(ACTIONS.OFFER_ITEM); // D-pad Right — handing it across, sideways
     if (edges[9]) push(ACTIONS.PAUSE); // Start
     state.look.dx += rx * 13;
     state.look.dy += ry * 9;

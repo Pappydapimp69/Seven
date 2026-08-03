@@ -948,6 +948,22 @@ export function perceivedInventory(percept, sim) {
 }
 
 /**
+ * What THIS percept's own mind currently believes each carried slot is, in
+ * inventory order — literally the labels its item bar is showing this frame.
+ *
+ * This is the bridge that lets state.js's craftItem work off belief without
+ * state.js ever importing this module (the dependency stays one-way, so the
+ * sim remains testable headless): main.js reads it here and passes it in.
+ * Because it is derived from perceivedInventory itself, a craft can never
+ * disagree with what that player was looking at when they pressed the key.
+ * In couch co-op the inventory is shared but each player has their own
+ * percept, so the two can genuinely disagree about the same slot.
+ */
+export function believedKinds(percept, sim) {
+  return perceivedInventory(percept, sim).map((s) => s.shownKind);
+}
+
+/**
  * Filter a check-in through the LISTENER's state. The speaker already shaded it
  * in state.checkIn; this is the second filter, and the reason a report is never
  * evidence on its own.
