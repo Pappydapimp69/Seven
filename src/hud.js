@@ -297,7 +297,13 @@ export function createHud(sim, percept) {
 
     const dis = distortion(percept, sim);
     el.vignette.style.opacity = String(Math.min(0.92, dis * 0.9));
-    el.vignette.classList.toggle("lost", percept.active);
+    // Gated on `dis`, not raw `percept.active`: the .lost class starts a CSS
+    // animation (breathe) that overrides the inline opacity above for as long
+    // as it's applied, so during the grace window (dis === 0 by construction,
+    // even if percept.active is already true from carried-over state) this
+    // must stay off — otherwise the animation alone makes the screen pulse
+    // regardless of what distortion() computed.
+    el.vignette.classList.toggle("lost", dis > 0);
 
     renderSlots(el.items, selectedItem, percept);
 
