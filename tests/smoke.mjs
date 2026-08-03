@@ -61,7 +61,30 @@ function serve() {
 //     live WebGL canvas measured ~5s here and occasionally blew the 30s default.
 //     That is the environment being slow, not the game being wrong, so the fix is
 //     a real timeout rather than a smaller assertion.
-const SHOT = { animations: "disabled", timeout: 90000 };
+const SHOT = { animations: "disabled", timeout: 180000 };
+
+/**
+ * Take a review screenshot WITHOUT letting it fail the run.
+ *
+ * These captures assert nothing — they exist so a human can look at a frame.
+ * But compositing a full-viewport animated overlay over a live WebGL canvas
+ * under swiftshader is brutally CPU-bound: measured at 177s on this machine
+ * for the in-hallucination frame, against a scene whose draw calls and
+ * triangle count were unchanged (21 / 21546). A slow compositor turning an
+ * otherwise green suite red is a false alarm that costs a debugging cycle
+ * every time, and worse, trains you to ignore the suite. So: try, and if the
+ * environment cannot do it in time, say so in the notes and carry on. Every
+ * real assertion around these lines still runs.
+ */
+async function shoot(page, name) {
+  try {
+    await page.screenshot({ path: path.join(ROOT, "tests", name), ...SHOT });
+    return true;
+  } catch (e) {
+    notes.push(`SKIP screenshot ${name} — ${e.name || "error"} (environment too slow to composite; no assertion lost)`);
+    return false;
+  }
+}
 
 const failures = [];
 const notes = [];
@@ -139,7 +162,7 @@ function assert(cond, msg) {
 
   // A frame from the opening position, for visual review: the party in
   // formation, in daylight, before any of the test's teleports.
-  await page.screenshot({ path: path.join(ROOT, "tests", "shot-start.png"), ...SHOT });
+  await shoot(page, "shot-start.png");
 
   // --- drive the sim on ITS OWN CLOCK -------------------------------------
   const walked = await page.evaluate(() => {
@@ -204,7 +227,7 @@ function assert(cond, msg) {
   assert(gone.realMonoliths === 6, "perception contaminated the sim's own record");
 
   // A frame from inside a hallucination, for visual review.
-  await page.screenshot({ path: path.join(ROOT, "tests", "shot-gone.png"), ...SHOT });
+  await shoot(page, "shot-gone.png");
 
   // Whatever kind was drawn, the perceived world must diverge from the real one
   // in the way that kind promises.
@@ -671,8 +694,9 @@ function assert(cond, msg) {
   assert(paused.dt === 0, `the sim advanced ${paused.dt}s while paused`);
   assert(paused.dl === 0, `the party drained ${paused.dl} while paused`);
 
-  const shot = path.join(ROOT, "tests", `shot-${SCENARIO}.png`);
-  await page.screenshot({ path: shot, ...SHOT });
+  const shotName = `shot-${SCENARIO}.png`;
+  const shot = path.join(ROOT, "tests", shotName);
+  const shotOk = await shoot(page, shotName);
 
   // Console errors are checked LAST so a functional failure is reported first.
   assert(errors.length === 0, `console errors: ${errors.slice(0, 5).join(" | ")}`);
@@ -681,7 +705,7 @@ function assert(cond, msg) {
   server.close();
 
   for (const n of notes) console.log("  · " + n);
-  console.log(`SCREENSHOT: ${shot}`);
+  if (shotOk) console.log(`SCREENSHOT: ${shot}`);
   if (failures.length) {
     console.log("\nSMOKE FAILED:");
     for (const f of failures) console.log("  ✗ " + f);

@@ -5,16 +5,16 @@ import {
   createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem, dropItem, craftItem, gatherTarget, offerItem,
   possess, release, possessableCompanions,
   PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=mirage-0.8.1";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=mirage-0.8.1";
-import { createRenderer } from "./render.js?v=mirage-0.8.1";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=mirage-0.8.1";
-import { createInput, ACTIONS } from "./input.js?v=mirage-0.8.1";
-import { createAudio } from "./audio.js?v=mirage-0.8.1";
-import { hashSeed } from "./rng.js?v=mirage-0.8.1";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave } from "./save.js?v=mirage-0.8.1";
+} from "./state.js?v=mirage-0.9.0";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=mirage-0.9.0";
+import { createRenderer } from "./render.js?v=mirage-0.9.0";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=mirage-0.9.0";
+import { createInput, ACTIONS } from "./input.js?v=mirage-0.9.0";
+import { createAudio } from "./audio.js?v=mirage-0.9.0";
+import { hashSeed } from "./rng.js?v=mirage-0.9.0";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave } from "./save.js?v=mirage-0.9.0";
 
-const BUILD = "mirage-0.8.1";
+const BUILD = "mirage-0.9.0";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
