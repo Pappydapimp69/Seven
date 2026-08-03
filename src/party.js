@@ -8,7 +8,7 @@
 // who lags, who starts narrating things that aren't there. Each rule below exists
 // to make an internal number legible from the outside without printing it.
 
-import { findPath, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, GRID } from "./world.js?v=mirage-0.7.4";
+import { findPath, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, GRID } from "./world.js?v=mirage-0.8.0";
 import {
   BAND,
   bandOf,
@@ -20,7 +20,7 @@ import {
   recipeKey,
   companionPickup,
   handoffToPlayer,
-} from "./state.js?v=mirage-0.7.4";
+} from "./state.js?v=mirage-0.8.0";
 
 // Higher band = worse. Lets a per-companion trait move the pylon-seeking
 // trigger EARLIER than the uniform BRITTLE tell everyone else gets, without
@@ -51,6 +51,25 @@ const KNOWN_PYLON_DIST = 24; // how close they must have been to remember a pylo
 const SEEK_PYLON_DIST = 70; // and how far they will then travel back to one
 const REPATH_INTERVAL = 0.9; // seconds between path recomputes
 const SEEK_ITEM_DIST = 55; // how far an idle companion will travel on a fetch errand
+
+// --- what "gone" looks like from the outside ---------------------------------
+// A companion's hallucination is only a tell if the lead can SEE it. The
+// original phantom errand sent them at a uniformly-random cell anywhere in the
+// basin the instant their meter hit zero, and recorded runs showed the cost:
+// the MEDIAN distance from the lead while a companion was hallucinating was
+// ~48 units, and only ~10% of all gone-seconds had them both inside legible
+// range and on screen. The player's report — "nobody else seemed to
+// hallucinate" — was literally true as a perceptual claim: it was happening
+// off-screen, over the ridge, every time.
+//
+// Nothing below makes them easier to recover or less lost. It only puts the
+// first part of the episode where it can be witnessed.
+const LOST_DWELL = 7; // seconds of standing/turning before they commit to an errand
+const LOST_DWELL_DRIFT = 2.6; // how far they'll shuffle during that dwell
+const LOST_STALL_MIN = 2.5; // pause on arriving somewhere, before inventing the next place
+const LOST_STALL_MAX = 6.0;
+const LOST_GOAL_NEAR = 16; // phantom errands stay in the neighbourhood...
+const LOST_GOAL_FAR = 42; // ...instead of crossing the whole basin in one leg
 
 const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 
@@ -177,18 +196,42 @@ function findFetchableItem(sim, c) {
   return bestD <= SEEK_ITEM_DIST ? best : null;
 }
 
-/** Where a hallucinating companion has decided to go. Confident, and wrong. */
+/**
+ * Where a hallucinating companion has decided to go. Confident, and wrong.
+ *
+ * Three flavours, each one a different way of being wrong in front of you:
+ * a real marker for an unreal reason, a spot near the LEAD (they are certain
+ * they are the one guiding the party — see GONE_LINES' "I'm not lost. You're
+ * lost. Follow me."), or nothing in particular, which is the worst to watch.
+ *
+ * Every destination is now drawn from the NEIGHBOURHOOD rather than from the
+ * whole grid. That is the difference between a mind coming apart where you can
+ * see it and one that simply leaves: the old uniform-over-the-basin draw meant
+ * the very first leg of every episode was a straight line out of sight.
+ */
 function phantomGoal(sim, c) {
   const rng = sim.rng;
-  // Half the time they head for a real place for an unreal reason; the rest of
-  // the time they walk at nothing in particular, which is worse to watch.
-  if (rng.chance(0.5) && sim.monoliths.length) {
-    const m = rng.pick(sim.monoliths);
+  const roll = rng.float(0, 1);
+  if (roll < 0.34 && sim.monoliths.length) {
+    // Nearest markers first, so the leg is short enough to be watched.
+    const reachable = sim.monoliths.filter((m) => dist(c, m) <= LOST_GOAL_FAR * 1.6);
+    const m = rng.pick(reachable.length ? reachable : sim.monoliths);
     return { x: m.x, z: m.z, label: m.name };
   }
+  if (roll < 0.6) {
+    // A point beside the lead, snapshotted now — they are walking to where you
+    // WERE, with total conviction. Not a follow: they do not re-aim as you move.
+    const a = rng.float(0, Math.PI * 2);
+    const r = rng.float(3, 9);
+    return { x: sim.player.x + Math.cos(a) * r, z: sim.player.z + Math.sin(a) * r, label: null };
+  }
+  const here = worldToCell(c.x, c.z);
   for (let tries = 0; tries < 20; tries++) {
-    const cx = rng.int(2, GRID - 3);
-    const cz = rng.int(2, GRID - 3);
+    const a = rng.float(0, Math.PI * 2);
+    const r = rng.float(LOST_GOAL_NEAR, LOST_GOAL_FAR);
+    const cx = Math.round(here.cx + (Math.cos(a) * r) / CELL);
+    const cz = Math.round(here.cz + (Math.sin(a) * r) / CELL);
+    if (cx < 2 || cz < 2 || cx > GRID - 3 || cz > GRID - 3) continue;
     if (sim.world.blocked[cz * GRID + cx]) continue;
     return { ...cellToWorld(cx, cz), label: null };
   }
@@ -212,12 +255,66 @@ export function updateCompanions(sim, dt) {
 
     if (c.hallucinating) {
       // No formation, no orders, no lead. Just the errand they have invented.
+      c.goalKind = "hallucinating";
+      // The moment they go. state.js sets the flag; this is the first tick of
+      // party.js's that sees it, so it is where the episode's own clock starts.
+      if (c.lostSince === undefined || c.lostSince === null) {
+        c.lostSince = sim.time;
+        c.lostStallUntil = 0;
+        c.goal = null;
+      }
+
+      // The dwell: for the first few seconds they do not go anywhere. They
+      // stand roughly where they stopped and turn, which is the whole tell —
+      // wrong colour, wrong behaviour, still close enough to be seen. Without
+      // it the announcement ("X stops making sense") and the departure land on
+      // the same tick and the player is told about something already gone.
+      if (sim.time - c.lostSince < LOST_DWELL) {
+        c.path = null;
+        if (!c.goal) {
+          const a = sim.rng.float(0, Math.PI * 2);
+          c.goal = { x: c.x + Math.cos(a) * LOST_DWELL_DRIFT, z: c.z + Math.sin(a) * LOST_DWELL_DRIFT, label: null };
+        }
+        // A drift, not a walk — a quarter pace, so they stay watchable.
+        const wasX = c.x, wasZ = c.z;
+        stepToward(sim, c, c.goal, LOST_SPEED * 0.25, dt);
+        // Once the drift has run out (or they are wedged), they turn on the
+        // spot rather than standing frozen: looking at something that isn't
+        // there. Applied only when they did NOT move, because stepToward owns
+        // `facing` whenever it actually walks them somewhere.
+        if (Math.abs(c.x - wasX) < 1e-4 && Math.abs(c.z - wasZ) < 1e-4) {
+          c.facing = (c.facing || 0) + dt * (0.55 + c.wander * 0.9);
+        }
+        continue;
+      }
+
+      // Arrived somewhere, and now certain it is the place. They stand at it
+      // for a beat before inventing the next one — the pause is what gives the
+      // lead a chance to close the distance, and it is what "It's right here.
+      // I'm standing at it. Log it." is describing.
+      if (c.lostStallUntil > sim.time) {
+        c.path = null;
+        c.facing = (c.facing || 0) + dt * 0.35;
+        continue;
+      }
       if (!c.goal || dist(c, c.goal) < 2.2) {
+        if (c.goal) {
+          c.lostStallUntil = sim.time + sim.rng.float(LOST_STALL_MIN, LOST_STALL_MAX);
+          c.goal = null;
+          c.path = null;
+          continue;
+        }
         c.goal = phantomGoal(sim, c);
-        c.goalKind = "hallucinating";
       }
       stepToward(sim, c, c.goal, LOST_SPEED * (0.7 + c.wander * 0.5), dt);
       continue;
+    }
+    // Back with us: the episode clock resets so the next one gets its own
+    // dwell. Kept here rather than in state.recover() so the whole shape of a
+    // gone companion lives in this one module.
+    if (c.lostSince !== undefined && c.lostSince !== null) {
+      c.lostSince = null;
+      c.lostStallUntil = 0;
     }
 
     // A hallucinating mind still physically holds whatever it was carrying —
@@ -361,6 +458,16 @@ const LINES = {
   ],
 };
 
+// A gone companion narrates, and that narration is the ONE tell that crosses
+// distance and fog — the body colour and the wrong heading both need line of
+// sight, this does not. So it is deliberately the loudest channel a
+// hallucinating companion has, and it fires on its own cadence below rather
+// than through the band formula the lucid pools use.
+//
+// The pool is sized to that cadence, not to a writing budget: at one line
+// every ~5-11s a ~70-second episode spends fourteen-odd lines, so nine of them
+// meant the same handful looping inside a single episode. Sixteen plus a
+// no-immediate-repeat rule is what the measured rate actually needs.
 const GONE_LINES = [
   "It's right here. I'm standing at it. Log it.",
   "The others went ahead. Hours ago. You saw them go.",
@@ -371,7 +478,20 @@ const GONE_LINES = [
   "You already logged this one. Don't you remember?",
   "The camp moved closer. It does that, near the end.",
   "I'm not lost. You're lost. Follow me.",
+  "Stop shouting. I can hear you fine from here.",
+  "Who's that walking with you? No — the other one.",
+  "I've done this stretch four times today. Four.",
+  "Don't come any closer. You're standing in it.",
+  "The light's on the wrong side of the ridge.",
+  "I'll wait here. Somebody has to hold the place.",
+  "It's easier now. You should try it.",
 ];
+
+// A gone companion's own line cadence, in seconds. Fast enough that "somebody
+// out there is not okay" reaches you across the basin; slow enough to stay
+// speech and not a stream.
+const GONE_REMARK_MIN = 5;
+const GONE_REMARK_MAX = 11;
 
 // A role-flavored line, mixed in alongside the general band pool so a
 // Surveyor sounds like a surveyor even while frayed, not just a generic
@@ -406,6 +526,18 @@ const ROLE_LINES = {
  */
 export function companionRemark(sim, c, dt) {
   ensureMemory(c);
+  // Going under cuts straight through whatever silence was left on the clock.
+  // Otherwise the announcement that a mind has broken can be followed by up to
+  // half a minute of that mind saying nothing, which reads as nothing having
+  // happened — and it is the SPOKEN line, not the body, that reaches a lead
+  // who is forty metres away in fog. `goneAnnounced` also latches so the
+  // shortcut fires once per episode, not once per tick.
+  if (c.hallucinating && !c.goneAnnounced) {
+    c.goneAnnounced = true;
+    c.remarkCooldown = 0;
+  } else if (!c.hallucinating) {
+    c.goneAnnounced = false;
+  }
   c.remarkCooldown -= dt;
   if (c.remarkCooldown > 0) return null;
 
@@ -414,10 +546,21 @@ export function companionRemark(sim, c, dt) {
   // Worse state, more talking — except the stoic, who go quiet instead, and that
   // silence is its own signal.
   const urgency = { steady: 0.35, unsettled: 0.7, fraying: 1.1, brittle: 1.5, gone: 1.2 }[band] || 0.5;
-  c.remarkCooldown = Math.max(3.5, 16 / (chatty * urgency)) * sim.rng.float(0.75, 1.3);
+  // A gone mind runs on its own clock, not the band formula: temperament stops
+  // mattering once you are past the point of choosing what to mention, and the
+  // formula's stoic-and-quiet term would otherwise silence exactly the
+  // companion the lead most needs to hear.
+  c.remarkCooldown = c.hallucinating
+    ? sim.rng.float(GONE_REMARK_MIN, GONE_REMARK_MAX)
+    : Math.max(3.5, 16 / (chatty * urgency)) * sim.rng.float(0.75, 1.3);
 
   if (c.hallucinating) {
-    const text = sim.rng.pick(GONE_LINES);
+    // Never the same line twice running. Filtering the pool costs no extra rng
+    // draw — `pick` still rolls exactly once, just over a shorter list — which
+    // keeps the per-tick draw count stable for seed reproducibility.
+    const pool = GONE_LINES.filter((l) => l !== c.lastGoneLine);
+    const text = sim.rng.pick(pool);
+    c.lastGoneLine = text;
     emit(sim, "chatter", `${c.name}: ${text}`, { who: c.id, gone: true });
     return text;
   }

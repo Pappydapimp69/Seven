@@ -8,7 +8,7 @@
 // nowhere near sufficient — it passes happily while the rng stream is off by
 // one draw, which only shows up minutes later as a different basin.
 
-import { createRun, tick, LUCIDITY_GRACE, beginHallucinating, pickupItem, gatherResource } from "../src/state.js";
+import { createRun, tick, LUCIDITY_GRACE, FULL_DRAIN_AT, beginHallucinating, pickupItem, gatherResource } from "../src/state.js";
 import { makeRng } from "../src/rng.js";
 import {
   serializeRun, deserializeRun, saveRun, loadSave, clearSave, hasSave,
@@ -83,7 +83,7 @@ check("a fresh run round-trips through serialise/deserialise unchanged", () => {
 
 check("a run mid-flight round-trips, INCLUDING the rng stream position", () => {
   const sim = createRun({ seed: 77, difficulty: "standard", level: 1, campaignLength: 3 });
-  sim.time = LUCIDITY_GRACE; // past grace so drain and its rng draws are live
+  sim.time = FULL_DRAIN_AT; // past grace so drain and its rng draws are live
   advance(sim, 40, { move: { x: 0.4, z: -1 }, yaw: 0.3 });
 
   const restored = deserializeRun(serializeRun(sim));
@@ -99,7 +99,7 @@ check("a run mid-flight round-trips, INCLUDING the rng stream position", () => {
 
 check("a resumed run diverges from one resumed WITHOUT the rng word — the guard works", () => {
   const sim = createRun({ seed: 31, difficulty: "bleak", level: 1, campaignLength: 3 });
-  sim.time = LUCIDITY_GRACE;
+  sim.time = FULL_DRAIN_AT;
   advance(sim, 45, { move: { x: 1, z: -1 }, yaw: 0 });
 
   const data = serializeRun(sim);
@@ -119,7 +119,7 @@ check("a resumed run diverges from one resumed WITHOUT the rng word — the guar
 
 check("carried progress survives: logs, gathers, pickups, doses, scars, planted pylons", () => {
   const sim = createRun({ seed: 808, difficulty: "standard", level: 2, campaignLength: 3 });
-  sim.time = LUCIDITY_GRACE;
+  sim.time = FULL_DRAIN_AT;
 
   // Log a marker, take an item, chop a tree, spend a dose, scar a companion.
   const m = sim.monoliths[0];
@@ -197,7 +197,7 @@ function withFakeStorage(fn) {
 check("saveRun/loadSave/clearSave round-trip through storage", () => {
   withFakeStorage(() => {
     const sim = createRun({ seed: 21, difficulty: "gentle" });
-    sim.time = LUCIDITY_GRACE;
+    sim.time = FULL_DRAIN_AT;
     advance(sim, 20);
     assert(saveRun(sim, 1234), "saveRun reported failure");
     assert(hasSave(), "hasSave did not see the save");

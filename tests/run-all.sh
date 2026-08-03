@@ -15,6 +15,14 @@ echo "== save/resume (pure) =="
 node tests/save.test.mjs
 echo
 
+echo "== hallucination rates (pure) =="
+node tests/hallucination.test.mjs
+echo
+
+echo "== hallucination (does the player actually SEE the tells?) =="
+node tests/hallucination.test.mjs
+echo
+
 echo "== balance (whole runs to a terminal state) =="
 node tests/balance.mjs "${BALANCE_SEEDS:-12}"
 echo
@@ -31,6 +39,9 @@ if [ -d /opt/pw-browsers ] && node -e 'require("/opt/node22/lib/node_modules/pla
   echo
   echo "== resume (real browser, save slot) =="
   node tests/resume.mjs
+  echo
+  echo "== menu nav (real browser, changing menu shape) =="
+  node tests/menu-nav.mjs
 else
   echo "== smoke + gamepad: SKIPPED — Playwright/Chromium not available here =="
   echo "   (the 3D layer was NOT exercised in this run)"

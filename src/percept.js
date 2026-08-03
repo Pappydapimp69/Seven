@@ -11,8 +11,8 @@
 // assert "a hallucinating lead is shown a marker the sim does not contain"
 // without booting a browser.
 
-import { HALLUCINATION, BAND, bandOf, ITEM_INFO, LUCIDITY_GRACE } from "./state.js?v=mirage-0.7.4";
-import { ITEM_KINDS } from "./world.js?v=mirage-0.7.4";
+import { HALLUCINATION, BAND, bandOf, ITEM_INFO, LUCIDITY_GRACE } from "./state.js?v=mirage-0.8.0";
+import { ITEM_KINDS } from "./world.js?v=mirage-0.8.0";
 
 const PHANTOM_NAMES = ["the Sixth Stone", "the Watching Slab", "the Other Cairn", "the Hollow Tooth"];
 const PHANTOM_COMPANIONS = ["ODEN", "MARIS", "THE SEVENTH"];
@@ -197,18 +197,69 @@ function shiftOneUnseenPhantom(percept, sim, p) {
   target.z = p.z + Math.sin(a) * r;
 }
 
-// A monster-flicker attempt is rolled at most this often per second of
-// hallucinating — rare enough to be "at times," not a constant flicker.
-const MONSTER_CHANCE_PER_SEC = 0.07;
-const MONSTER_SIGHT = 20; // only a companion actually nearby can wear it
-const MONSTER_MIN_DUR = 0.35;
-const MONSTER_MAX_DUR = 0.85;
+// How often a monster-flicker attempt is rolled, per second of hallucinating.
+//
+// SIZED TO THE OBSERVED TRIGGER RATE, NOT TO WHAT SOUNDS REASONABLE. The
+// original 0.07/s read as "rare enough to be at times" on paper and was
+// "never" in play, because it was rated against a hallucination episode that
+// does not exist. Three gates multiply, and each one was measured:
+//
+//   * episode length — recorded runs put the MEDIAN lead-hallucination at ~7
+//     seconds. You go under, you get to a pylon or burn a dose. The rate was
+//     implicitly sized for a minute-long episode nobody has.
+//   * distance — companions hold formation BEHIND the lead and lag further as
+//     they fray, so the recorded nearest-companion distance while the lead is
+//     under has a MEDIAN of ~22 units. The old 20-unit gate sat just inside
+//     that median, so it was shut more often than open.
+//   * facing — and the formation is behind you by construction, so an
+//     unbiased pick spent most of its rolls on a body at the player's back.
+//
+// Measured end to end on the shipped code, same seeds and same player
+// behaviour, the player sees a monster in an 8s episode 8% -> 45% of the time,
+// in a 20s episode 37% -> 85%, in a 60s episode 78% -> 100%, and the median
+// wait for the first one drops from 23.6s to 8.6s. The on-screen duty cycle
+// goes 0.5% -> 3.9%: about one second in twenty-five of a hallucination has a
+// monster in it, for half a second to a second and a quarter at a time. That
+// is "briefly, at times," and it is nothing like a strobe.
+//
+// Re-measure before changing any of these. The only number that matters is how
+// often a real player actually SEES one, and it is not derivable from the rate.
+const MONSTER_CHANCE_PER_SEC = 0.45;
+// Only a companion actually nearby can wear it. Widened from 20 to clear the
+// measured ~22-unit median above; 26 still sits inside the fog's legible range
+// at full distortion (density 0.032, ~40% transmittance at 26 units), so a
+// flicker at the edge of the gate is a dark shape you can still read.
+const MONSTER_SIGHT = 26;
+// Long enough to survive a glance and a head-turn, short enough to leave you
+// unsure you saw it. The old 0.35s floor could begin and end between two
+// looks at the same body.
+const MONSTER_MIN_DUR = 0.5;
+const MONSTER_MAX_DUR = 1.25;
 
 /**
  * Briefly make ONE nearby real companion read as a monster instead of
  * themselves — the same kind of lie perceivedWorldItems already tells about a
  * carried item's kind, aimed at a person instead: the position and behaviour
  * underneath are entirely real, only the shown identity is wrong for a beat.
+ *
+ * The pick is restricted to a companion who is currently ON SCREEN. A lie
+ * nobody is looking at is not a lie anyone is told, and the formation puts the
+ * party behind the lead by construction — an unbiased pick spent four rolls in
+ * five on a body at the player's back, where it changed nothing except to fire
+ * main.js's audio sting for a monster the player could not see. Restricting the
+ * pool moved the OBSERVED rate (flickers the player is actually looking at)
+ * from 0.5% of hallucinating time to 3.9% while cutting total flickers, and it
+ * made the sting mean something: it now always arrives with something visible.
+ *
+ * The trade is deliberate — you can no longer wheel around and find a companion
+ * already mid-flicker; the change always happens under your eye instead. That
+ * is the better beat anyway, and shiftOneUnseenPhantom already owns the
+ * "the world was different behind you" half of this idea.
+ *
+ * Costs no extra rng draw: it narrows the pool `pick` reads, it does not roll
+ * again. VIEW_HALF_ANGLE (0.85) is deliberately NARROWER than the renderer's
+ * real horizontal half-FOV (~0.94 at 16:9), so anything this calls on-screen
+ * genuinely is, with margin — no flicker is spent right at the screen edge.
  */
 function updateMonsterFlicker(percept, sim, p, dt, lying) {
   if (!lying) { percept.monsterId = null; return; }
@@ -217,9 +268,18 @@ function updateMonsterFlicker(percept, sim, p, dt, lying) {
   if (!sim.rng.chance(MONSTER_CHANCE_PER_SEC * dt)) return;
   const near = sim.companions.filter((c) => Math.hypot(c.x - p.x, c.z - p.z) <= MONSTER_SIGHT);
   if (!near.length) return;
-  percept.monsterId = sim.rng.pick(near).id;
+  const onScreen = near.filter((c) => inView(p.yaw, c.x - p.x, c.z - p.z, VIEW_HALF_ANGLE));
+  if (!onScreen.length) return;
+  percept.monsterId = sim.rng.pick(onScreen).id;
   percept.monsterUntil = sim.time + sim.rng.float(MONSTER_MIN_DUR, MONSTER_MAX_DUR);
 }
+
+export const MONSTER_TUNING = Object.freeze({
+  chancePerSec: MONSTER_CHANCE_PER_SEC,
+  sight: MONSTER_SIGHT,
+  minDur: MONSTER_MIN_DUR,
+  maxDur: MONSTER_MAX_DUR,
+});
 
 /** Advance the perceived world. Call once per tick, after state.tick. */
 export function updatePercept(percept, sim, dt) {
@@ -328,6 +388,11 @@ export function perceivedCompanions(percept, sim) {
     role: c.role,
     x: c.x,
     z: c.z,
+    // Which way they are actually pointed. The renderer turns a lucid
+    // companion to face the lead (they are with you); a gone one is drawn on
+    // their own heading instead, which is what "not with us" looks like from
+    // twenty metres away with no meter to read.
+    facing: c.facing || 0,
     hallucinating: c.hallucinating,
     goalKind: c.goalKind,
     phantom: false,

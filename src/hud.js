@@ -6,8 +6,8 @@
 // the one hallucinating. The only place a real number is ever printed is the
 // debrief, after the run is over.
 
-import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory } from "./percept.js?v=mirage-0.7.4";
-import { LOG_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, gatherTarget, GATHER_HOLD_TIME, previewCraft } from "./state.js?v=mirage-0.7.4";
+import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory } from "./percept.js?v=mirage-0.8.0";
+import { LOG_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, gatherTarget, GATHER_HOLD_TIME, previewCraft } from "./state.js?v=mirage-0.8.0";
 
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 

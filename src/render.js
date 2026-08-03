@@ -6,9 +6,9 @@
 // list as the real ones.
 
 import * as THREE from "../lib/three.module.js";
-import { CELL, GRID, cellToWorld } from "./world.js?v=mirage-0.7.4";
-import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=mirage-0.7.4";
-import { PYLON_RADIUS } from "./state.js?v=mirage-0.7.4";
+import { CELL, GRID, cellToWorld } from "./world.js?v=mirage-0.8.0";
+import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=mirage-0.8.0";
+import { PYLON_RADIUS } from "./state.js?v=mirage-0.8.0";
 
 const PALETTE = {
   sky: 0x0a0f16,
@@ -462,10 +462,14 @@ export function createRenderer(canvas, sim) {
       obj.userData.lastZ = c.z;
       obj.userData.bob += moved * 2.6;
       obj.position.set(c.x, terrainHeight(c.x, c.z) + Math.abs(Math.sin(obj.userData.bob)) * 0.07, c.z);
-      // Face travel direction; fall back to facing the lead when standing still.
+      // A companion who is with you looks at you. One who has gone does not —
+      // they are drawn on their own heading, walking at something you can't
+      // see. That difference is legible at a distance where the body colour
+      // has already fogged out, and it is the only tell that survives the
+      // whole length of an episode.
       const dx = px - c.x;
       const dz = pz - c.z;
-      obj.rotation.y = Math.atan2(dx, dz);
+      obj.rotation.y = c.hallucinating && !c.phantom ? c.facing || 0 : Math.atan2(dx, dz);
       if (c.monstrous) {
         // A lie about identity, not position — the figure keeps its real
         // spot and facing, only reads wrong for a beat. Wrong proportions

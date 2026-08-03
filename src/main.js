@@ -5,16 +5,16 @@ import {
   createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem, dropItem, craftItem, gatherTarget,
   possess, release, possessableCompanions,
   PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=mirage-0.7.5";
-import { createPercept, updatePercept, distortion, perceivedMonoliths } from "./percept.js?v=mirage-0.7.5";
-import { createRenderer } from "./render.js?v=mirage-0.7.5";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=mirage-0.7.5";
-import { createInput, ACTIONS } from "./input.js?v=mirage-0.7.5";
-import { createAudio } from "./audio.js?v=mirage-0.7.5";
-import { hashSeed } from "./rng.js?v=mirage-0.7.5";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave } from "./save.js?v=mirage-0.7.5";
+} from "./state.js?v=mirage-0.8.0";
+import { createPercept, updatePercept, distortion, perceivedMonoliths } from "./percept.js?v=mirage-0.8.0";
+import { createRenderer } from "./render.js?v=mirage-0.8.0";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=mirage-0.8.0";
+import { createInput, ACTIONS } from "./input.js?v=mirage-0.8.0";
+import { createAudio } from "./audio.js?v=mirage-0.8.0";
+import { hashSeed } from "./rng.js?v=mirage-0.8.0";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave } from "./save.js?v=mirage-0.8.0";
 
-const BUILD = "mirage-0.7.5";
+const BUILD = "mirage-0.8.0";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -63,7 +63,13 @@ const menu = { root: null, row: 0, col: 0 };
 
 function menuElements() {
   const sel = ROOT_SELECTOR[menu.root];
-  return sel ? Array.from(document.querySelectorAll(`${sel} [data-row]`)) : [];
+  if (!sel) return [];
+  // HIDDEN CONTROLS ARE NOT IN THE GRID. `display:none` still matches a
+  // querySelector, so once the title screen gained a Resume button that only
+  // appears when a save exists, a controller pressing Down landed focus on an
+  // invisible row and confirm did nothing — the pad looked broken. Anything
+  // that can be conditionally shown has to be filtered here, not just styled.
+  return Array.from(document.querySelectorAll(`${sel} [data-row]`)).filter((e) => e.offsetParent !== null);
 }
 function currentFocusEl() {
   return menuElements().find((e) => Number(e.dataset.row) === menu.row && Number(e.dataset.col) === menu.col);
@@ -813,6 +819,8 @@ if (typeof window !== "undefined") {
     act: (action, arg) => run && handleAction(action, arg),
     /** Leave the run for the title screen — what "quit" does, for tests. */
     toTitle() { run = null; paused = false; screens("title"); },
+    /** Drive the menu grid down one row — for testing focus over a changing menu. */
+    menuDown() { menuNavY(1); },
     // Couch co-op, driven without physical controllers. The real join path is
     // a pad press (pollCoopJoin); this is the same possession + percept +
     // viewport wiring with the device step skipped, so a test can exercise
