@@ -2472,6 +2472,54 @@ check("every module import and asset URL carries the current BUILD token", () =>
   );
 });
 
+// ---------------------------------------------------------------------------
+// palette accessibility — the "gone" tell may not rest on hue
+// ---------------------------------------------------------------------------
+// Read straight out of render.js's source rather than importing it, so this
+// needs no WebGL and no Three. The values are the real ones either way.
+check("a gone companion is distinguishable from a well one WITHOUT colour vision", () => {
+  const src = fsReadFileSync(new URL("../src/render.js", import.meta.url), "utf8");
+  const hex = (name) => {
+    const m = src.match(new RegExp(`\\b${name}:\\s*0x([0-9a-fA-F]{6})`));
+    assert(m, `PALETTE.${name} not found in render.js`);
+    return parseInt(m[1], 16);
+  };
+  const lum = (h) => {
+    const c = [(h >> 16) & 255, (h >> 8) & 255, h & 255].map((v) => {
+      v /= 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  };
+  const ratio = (a, b) => {
+    const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+    return (hi + 0.05) / (lo + 0.05);
+  };
+  // Crude but standard channel-collapse stand-ins for the three common types
+  // of colour-vision deficiency. Exact transforms differ between models; what
+  // matters is that a tell surviving all of these is not relying on hue.
+  const cvd = (h, type) => {
+    let r = (h >> 16) & 255, g = (h >> 8) & 255, b = h & 255;
+    if (type === "prot") { const m = r * 0.567 + g * 0.433; r = m; g = r * 0.558 + g * 0.442; }
+    if (type === "deut") { const m = r * 0.625 + g * 0.375; r = m; g = r * 0.7 + g * 0.3; }
+    if (type === "trit") { b = b * 0.95 + g * 0.05; }
+    return ((r & 255) << 16) | ((g & 255) << 8) | (b & 255);
+  };
+  const worst = (a, b) => Math.min(...["normal", "prot", "deut", "trit"].map((t) =>
+    ratio(t === "normal" ? a : cvd(a, t), t === "normal" ? b : cvd(b, t))));
+
+  const body = hex("body"), bodyLost = hex("bodyLost"), monster = hex("monster");
+  const goneContrast = worst(body, bodyLost);
+  assert(goneContrast >= 3,
+    `a gone companion must clear WCAG 3:1 against a well one under every CVD type, got ${goneContrast.toFixed(2)} — this tell would be hue-only`);
+  const monsterContrast = worst(body, monster);
+  assert(monsterContrast >= 3,
+    `a monstrous companion must clear 3:1 against a well one, got ${monsterContrast.toFixed(2)}`);
+  // And the two lies must not collapse into each other.
+  assert(worst(bodyLost, monster) >= 1.5,
+    `gone and monstrous must stay separable, got ${worst(bodyLost, monster).toFixed(2)}`);
+});
+
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length) {
   for (const f of failures) console.log("  ✗ " + f);
