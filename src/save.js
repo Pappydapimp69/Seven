@@ -17,7 +17,7 @@
 //     options (dbh#E4, wrong-sky#E2). And an ended run is never saved, so a
 //     "Resume" can't drop you back onto the frame you already lost.
 
-import { createRun } from "./state.js?v=mirage-0.9.0";
+import { createRun } from "./state.js?v=mirage-0.9.1";
 
 export const SAVE_KEY = "mirage:run";
 // Bumped whenever the shape below changes incompatibly. A save from an older
@@ -278,4 +278,52 @@ export function describeSave(data) {
     seconds: Math.floor(data.time % 60),
     party: walking,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Preferences
+// ---------------------------------------------------------------------------
+// A SEPARATE key from the run slot, deliberately. Preferences outlive runs:
+// finish() clears the run save, and a player who just lost a campaign should
+// not also find their volume back at default. Keeping them in one blob would
+// tie the lifetime of "how loud is this" to the lifetime of "where was I",
+// which are unrelated questions.
+export const SETTINGS_KEY = "mirage:settings";
+
+const DEFAULT_SETTINGS = { volume: 0.7, muted: false, difficulty: "standard", coop: "solo" };
+
+/** Preferences, with unknown/corrupt values replaced by defaults rather than trusted. */
+export function loadSettings() {
+  const ls = store();
+  if (!ls) return { ...DEFAULT_SETTINGS };
+  try {
+    const raw = ls.getItem(SETTINGS_KEY);
+    if (!raw) return { ...DEFAULT_SETTINGS };
+    const d = JSON.parse(raw) || {};
+    return {
+      // Clamped and whitelisted on the way IN: a hand-edited or
+      // partially-written localStorage entry should degrade to a playable
+      // default, never to a muted game with an out-of-range gain that looks
+      // like broken audio.
+      volume: typeof d.volume === "number" && d.volume >= 0 && d.volume <= 1 ? d.volume : DEFAULT_SETTINGS.volume,
+      muted: typeof d.muted === "boolean" ? d.muted : DEFAULT_SETTINGS.muted,
+      difficulty: ["gentle", "standard", "bleak"].includes(d.difficulty) ? d.difficulty : DEFAULT_SETTINGS.difficulty,
+      coop: ["solo", "couch"].includes(d.coop) ? d.coop : DEFAULT_SETTINGS.coop,
+    };
+  } catch {
+    return { ...DEFAULT_SETTINGS };
+  }
+}
+
+/** Merge and persist. Partial updates are the normal case (one control moved). */
+export function saveSettings(patch) {
+  const ls = store();
+  if (!ls) return false;
+  try {
+    const next = { ...loadSettings(), ...patch };
+    ls.setItem(SETTINGS_KEY, JSON.stringify(next));
+    return true;
+  } catch {
+    return false;
+  }
 }

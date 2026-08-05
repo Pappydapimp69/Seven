@@ -12,7 +12,7 @@ import { createRun, tick, LUCIDITY_GRACE, FULL_DRAIN_AT, beginHallucinating, pic
 import { makeRng } from "../src/rng.js";
 import {
   serializeRun, deserializeRun, saveRun, loadSave, clearSave, hasSave,
-  describeSave, SAVE_KEY, SAVE_VERSION,
+  describeSave, SAVE_KEY, SAVE_VERSION, loadSettings, saveSettings, SETTINGS_KEY,
 } from "../src/save.js";
 
 let passed = 0;
@@ -262,6 +262,53 @@ check("describeSave reports progress without ever leaking a meter", () => {
   eq(d.seconds, 5, "seconds");
   const asText = JSON.stringify(d);
   assert(!/lucidity/i.test(asText), "describeSave leaked a lucidity value onto the title screen");
+});
+
+// ---------------------------------------------------------------------------
+// preferences — separate lifetime from the run
+// ---------------------------------------------------------------------------
+check("preferences survive a run being cleared", () => {
+  withFakeStorage(() => {
+    saveSettings({ volume: 0.35, difficulty: "bleak" });
+    const sim = createRun({ seed: 91 });
+    saveRun(sim, 1);
+    clearSave(); // what finish() does when a run ends
+    const s = loadSettings();
+    eq(s.volume, 0.35, "losing a run reset the volume");
+    eq(s.difficulty, "bleak", "losing a run reset the pressure preference");
+    eq(hasSave(), false, "the run slot should still be gone");
+  });
+});
+
+check("saveSettings merges rather than replacing", () => {
+  withFakeStorage(() => {
+    saveSettings({ volume: 0.35 });
+    saveSettings({ difficulty: "gentle" });
+    const s = loadSettings();
+    eq(s.volume, 0.35, "a later partial write clobbered an unrelated preference");
+    eq(s.difficulty, "gentle", "the later write did not land");
+  });
+});
+
+check("out-of-range or junk preferences degrade to defaults, not to a broken game", () => {
+  withFakeStorage((map) => {
+    map.set(SETTINGS_KEY, JSON.stringify({ volume: 45, muted: "yes", difficulty: "impossible", coop: "hive" }));
+    const s = loadSettings();
+    eq(s.volume, 0.7, "an out-of-range volume should fall back, not deafen or mute");
+    eq(s.muted, false, "a non-boolean muted should fall back");
+    eq(s.difficulty, "standard", "an unknown difficulty should fall back");
+    eq(s.coop, "solo", "an unknown party mode should fall back");
+  });
+});
+
+check("corrupt or absent preference storage reads as defaults", () => {
+  withFakeStorage((map) => {
+    map.set(SETTINGS_KEY, "{{{not json");
+    eq(loadSettings().volume, 0.7, "corrupt preferences should read as defaults");
+  });
+  // And with no storage at all (the Node default here).
+  eq(loadSettings().difficulty, "standard", "missing storage should read as defaults");
+  eq(saveSettings({ volume: 0.1 }), false, "saveSettings should report failure with no storage");
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed`);

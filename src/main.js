@@ -5,16 +5,16 @@ import {
   createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem, dropItem, craftItem, gatherTarget, offerItem,
   possess, release, possessableCompanions,
   PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=mirage-0.9.0";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=mirage-0.9.0";
-import { createRenderer } from "./render.js?v=mirage-0.9.0";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=mirage-0.9.0";
-import { createInput, ACTIONS } from "./input.js?v=mirage-0.9.0";
-import { createAudio } from "./audio.js?v=mirage-0.9.0";
-import { hashSeed } from "./rng.js?v=mirage-0.9.0";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave } from "./save.js?v=mirage-0.9.0";
+} from "./state.js?v=mirage-0.9.1";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=mirage-0.9.1";
+import { createRenderer } from "./render.js?v=mirage-0.9.1";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=mirage-0.9.1";
+import { createInput, ACTIONS } from "./input.js?v=mirage-0.9.1";
+import { createAudio } from "./audio.js?v=mirage-0.9.1";
+import { hashSeed } from "./rng.js?v=mirage-0.9.1";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings } from "./save.js?v=mirage-0.9.1";
 
-const BUILD = "mirage-0.9.0";
+const BUILD = "mirage-0.9.1";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -755,10 +755,25 @@ function frame(now) {
 // ---- menu wiring -----------------------------------------------------------
 function boot() {
   el("buildLabel").textContent = BUILD;
-  let difficulty = "standard";
+  // Preferences OUTLIVE runs — they live in their own storage key, so losing a
+  // campaign (which clears the run slot) never also resets your volume.
+  const prefs = loadSettings();
+  let difficulty = prefs.difficulty;
+  audio.setVolume(prefs.volume);
+  for (const b of document.querySelectorAll("[data-vol]")) {
+    b.classList.toggle("sel", Number(b.dataset.vol) === prefs.volume);
+  }
+  for (const b of document.querySelectorAll("[data-diff]")) {
+    b.classList.toggle("sel", b.dataset.diff === prefs.difficulty);
+  }
+  coopAllowed = prefs.coop === "couch";
+  for (const b of document.querySelectorAll("[data-coop-opt]")) {
+    b.classList.toggle("sel", b.dataset.coopOpt === prefs.coop);
+  }
   for (const btn of document.querySelectorAll("[data-diff]")) {
     btn.addEventListener("click", () => {
       difficulty = btn.dataset.diff;
+      saveSettings({ difficulty });
       for (const b of document.querySelectorAll("[data-diff]")) b.classList.toggle("sel", b === btn);
     });
   }
@@ -768,6 +783,7 @@ function boot() {
   for (const btn of document.querySelectorAll("[data-coop-opt]")) {
     btn.addEventListener("click", () => {
       coopAllowed = btn.dataset.coopOpt === "couch";
+      saveSettings({ coop: btn.dataset.coopOpt });
       for (const b of document.querySelectorAll("[data-coop-opt]")) b.classList.toggle("sel", b === btn);
     });
   }
@@ -802,7 +818,9 @@ function boot() {
   // into the same row/col grid nav as everything else in the pause menu.
   for (const btn of document.querySelectorAll("[data-vol]")) {
     btn.addEventListener("click", () => {
-      audio.setVolume(Number(btn.dataset.vol));
+      const v = Number(btn.dataset.vol);
+      audio.setVolume(v);
+      saveSettings({ volume: v });
       for (const b of document.querySelectorAll("[data-vol]")) b.classList.toggle("sel", b === btn);
     });
   }

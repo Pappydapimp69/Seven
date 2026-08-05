@@ -45,6 +45,9 @@ if [ -d /opt/pw-browsers ] && node -e 'require("/opt/node22/lib/node_modules/pla
   echo
   echo "== campaign (real browser, basin -> basin + save) =="
   node tests/campaign.mjs
+  echo
+  echo "== settings (real browser, preferences across a reload) =="
+  node tests/settings.mjs
 else
   echo "== smoke + gamepad: SKIPPED — Playwright/Chromium not available here =="
   echo "   (the 3D layer was NOT exercised in this run)"
