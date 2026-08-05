@@ -2957,6 +2957,38 @@ check("a gone companion is distinguishable from a well one WITHOUT colour vision
     `gone and monstrous must stay separable, got ${worst(bodyLost, monster).toFixed(2)}`);
 });
 
+// ---------------------------------------------------------------------------
+// discoverability — a bound verb the how-to never mentions
+// ---------------------------------------------------------------------------
+// "give" shipped as a real, bound verb (offerItem, the only way to learn
+// something about your OWN state) and appeared in the in-run hint strip while
+// the How to play panel never mentioned it. A player saw a button prompt for a
+// mechanic the game never explained. Cheap structural guard: every verb named
+// in the keyboard hint strip must also appear somewhere in the how-to.
+check("every verb in the control hints is explained in How to play", () => {
+  const hud = fsReadFileSync(new URL("../src/hud.js", import.meta.url), "utf8");
+  const html = fsReadFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const strip = hud.match(/keyboard:\s*"([^"]+)"/)?.[1];
+  assert(strip, "could not find the keyboard hint strip in hud.js");
+
+  let howto = html.slice(html.indexOf('id="howto"'));
+  assert(howto.length > 200, "could not locate the how-to panel in index.html");
+  // Drop the key-summary line at the bottom of the panel. It MIRRORS the hint
+  // strip, so leaving it in makes this check tautological: it would happily
+  // confirm that "give" appears in a list of keys while the panel never says
+  // what giving does. The verb has to be explained in PROSE.
+  howto = howto.replace(/<p class="howto-keys"[\s\S]*$/, "");
+  const plain = howto.replace(/<[^>]+>/g, " ").toLowerCase();
+
+  // Each hint segment reads "<key(s)> <verb words>"; the verb words are what a
+  // player would search the how-to for.
+  const VERBS = ["survey", "gather", "cycle item", "use item", "drop", "give", "craft", "check in", "dose", "pause"];
+  for (const verb of VERBS) {
+    assert(strip.toLowerCase().includes(verb), `test is stale: "${verb}" is no longer in the hint strip`);
+    assert(plain.includes(verb.split(" ")[0]), `the hint strip offers "${verb}" but How to play never mentions it`);
+  }
+});
+
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length) {
   for (const f of failures) console.log("  ✗ " + f);

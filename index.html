@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0a0f16" />
   <title>MIRAGE — five minds and yours</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230a0f16'/%3E%3Cpath d='M4 22h24' stroke='%23596579' stroke-width='2'/%3E%3Crect x='9' y='8' width='4' height='14' fill='%2374e0ff'/%3E%3Crect x='19' y='11' width='4' height='11' fill='%23b06a72'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="css/style.css?v=mirage-0.9.1" />
+  <link rel="stylesheet" href="css/style.css?v=mirage-0.9.2" />
 </head>
 <body>
   <canvas id="gl"></canvas>
@@ -68,8 +68,9 @@
         with at least two companions still walking with you.</p>
         <p><b>The meters are invisible.</b> Nobody has a bar. You read your party
         instead: who lags, who goes quiet, who starts narrating a ridge that
-        isn't moving. Ask them — but a fraying companion shades the truth and one
-        who is gone will tell you they're fine.</p>
+        isn't moving. <b>Check in</b> on anyone (<b>1</b>–<b>5</b>) to ask how they
+        are — but a fraying companion shades the truth, and one who is gone
+        will tell you they're fine.</p>
         <p><b>Pylons</b> are the only renewable relief. Stand inside one and
         everybody in range comes back up; they run down while in use and recharge
         while left alone. Three <b>lumen doses</b> exist for six people.</p>
@@ -85,6 +86,16 @@
         and used — you only find out which kind of surprise it was the moment
         you use it. In couch co-op, the shared pack shows a DIFFERENT label to
         each of you — whoever's still lucid sees the truth about the same slot.</p>
+        <p><b>Give.</b> <b>B</b> (or the gamepad B) gives the selected item to a
+        nearby companion. This is the only verb in
+        the game that can tell you something about <em>your own</em> state:
+        offer a lucid companion something that was never there and they will
+        say so — the one way to find out that the last thing you picked up, or
+        were handed, or built, was a lie. It is not a free probe, though. A
+        companion only accepts something they could actually use, and if it IS
+        real they use it on the spot. So a failed offer costs you the slot's
+        worth of doubt, and a successful one costs you the item: you weren't
+        testing a theory, you were trying to help somebody.</p>
         <p><b>Carrying and dropping.</b> Three slots. <b>V</b> (or D-pad Down)
         puts the selected one down at your feet — a real item stays there to be
         picked up again, and a phantom simply stops being. Dropping is how you
@@ -98,11 +109,14 @@
         what the item bar told you, so a hallucinating lead can still reach
         for a pair that doesn't combine — or doesn't exist.</p>
         <p><b>Trees and stone</b> turn up too — walk up and HOLD survey/pick up
-        to chop wood or mine stone. It takes a moment (watch the prompt fill),
+        to gather: chop wood, or mine stone. It takes a moment (watch the prompt fill),
         and letting go early or wandering to a different one starts it over.
         Neither a tree nor a deposit ever lies about what it is. Enough of
         both crafts a Stake — plant it anywhere and it works exactly like a
         pylon from then on.</p>
+        <p><b>Pause</b> (<b>Esc</b>, or Start on a pad) stops the basin
+        completely — the clock and every meter hold while you're in there, so
+        it is a safe place to think, not a risk. Volume lives in that menu too.</p>
         <p><b>The basin isn't alone.</b> Clearing one survey pushes the party
         into the next, harder basin — carrying doses, items, materials, and
         every scar with them. The campaign ends when you fail one, or clear
@@ -113,7 +127,7 @@
         out with Select; the party AI simply resumes that mind.</p>
         <p class="howto-keys">WASD move · Shift run · mouse look · <b>E</b> survey/pick up, hold to gather ·
         <b>Z</b> cycle item · <b>X</b> use item · <b>V</b> drop · <b>C</b> craft ·
-        <b>1–5</b> check in · <b>Shift+1–5</b> dose · <b>Q/R</b> select · <b>Esc</b> pause</p>
+        <b>B</b> give · <b>1–5</b> check in · <b>Shift+1–5</b> dose · <b>Q/R</b> select · <b>Esc</b> pause</p>
       </div>
 
       <p class="build">MIRAGE <span id="buildLabel">—</span></p>
@@ -210,7 +224,7 @@
   <!-- DEBRIEF -->
   <div id="debriefLayer" class="screen hidden"></div>
 
-  <script type="module" src="src/main.js?v=mirage-0.9.1"></script>
+  <script type="module" src="src/main.js?v=mirage-0.9.2"></script>
   <noscript><p style="color:#ccd">MIRAGE needs JavaScript and WebGL.</p></noscript>
 </body>
 </html>
