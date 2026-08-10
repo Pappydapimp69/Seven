@@ -701,6 +701,60 @@ function assert(cond, msg) {
   assert(paused.dt === 0, `the sim advanced ${paused.dt}s while paused`);
   assert(paused.dl === 0, `the party drained ${paused.dl} while paused`);
 
+
+  // ---- the record's repair verb, on screen ---------------------------------
+  // The strike is bound to the SURVEY key, so nothing in the control hints says
+  // it exists, and a player cannot be expected to remember which of six entries
+  // they wrote while their mind was gone. The contextual prompt is the entire
+  // discoverability channel — and a logic test on strikeTargetAt cannot prove
+  // it reaches the DOM. Brain: opticon#E — the two defects a green suite missed
+  // were both about what the player was TOLD, not what the code did.
+  {
+    const promptRead = await page.evaluate(() => {
+      const M = window.__mirage;
+      const s = M.sim;
+      // Somewhere well clear of every real marker, so nothing else claims the
+      // prompt's single slot.
+      const spot = { x: s.world.camp.x + 40, z: s.world.camp.z + 40 };
+      s.logEntries.push({ name: "Ghost Pillar", real: false, t: s.time, corroborated: false, ...spot });
+      s.player.x = spot.x;
+      s.player.z = spot.z;
+      s.player.hallucinating = false;
+      M.advance(0.1);
+      const lucid = document.getElementById("actionPromptText")?.textContent || "";
+      const shown = document.getElementById("actionPrompt")?.classList.contains("show");
+      // ...and it must vanish for a mind that cannot be trusted to audit
+      // itself. Driven through the sim (lucidity to zero) rather than by
+      // setting the flag by hand: `hallucinating` is a state the rules OWN,
+      // and poking it directly leaves the kind unset, so the first version of
+      // this check was asserting against a mind the game did not consider
+      // gone.
+      s.player.lucidity = 0;
+      M.advance(0.1);
+      const reallyGone = !!s.player.hallucinating;
+      const gone = document.getElementById("actionPromptText")?.textContent || "";
+      s.logEntries.pop();
+      return { lucid, shown, gone, reallyGone };
+    });
+    assert(promptRead.shown, "no action prompt was shown while standing at a false claim");
+    assert(
+      /strike/i.test(promptRead.lucid) && /Ghost Pillar/.test(promptRead.lucid),
+      `the strike prompt did not name the entry: "${promptRead.lucid}"`,
+    );
+    assert(promptRead.reallyGone, "the lead never actually went under — the second case proves nothing");
+    // The prompt must read IDENTICALLY to a mind that is gone. An offer that
+    // disappears when you are hallucinating is a lucidity meter: press it,
+    // notice nothing happened, and you have learned the one thing the game
+    // exists to keep from you. The rules refuse the strike; the screen does not
+    // let on. (First version of this check asserted the opposite and would have
+    // shipped that leak.)
+    assert(
+      promptRead.gone === promptRead.lucid,
+      `the prompt changed when the lead went under — "${promptRead.lucid}" became "${promptRead.gone}"`,
+    );
+    notes.push(`strike prompt: "${promptRead.lucid}"`);
+  }
+
   const shotName = `shot-${SCENARIO}.png`;
   const shot = path.join(ROOT, "tests", shotName);
   const shotOk = await shoot(page, shotName);

@@ -8,7 +8,7 @@
 
 import {
   createRun, tick, tickLucidity, bandOf, BAND, checkIn, useDose, logMarker, recover,
-  beginHallucinating, debrief, trueLogCount, badLogCount, checkEndings, partyCentroid,
+  beginHallucinating, debrief, trueLogCount, badLogCount, strikeTargetAt, claimedEntryAt, checkEndings, partyCentroid,
   pickupItem, useItem, dropItem, craftItem, previewCraft, gatherResource, gatherTarget, emit,
   rollTraits, pickHallucinationKind, companionPickup, handoffToPlayer, offerItem,
   possess, release, possessableCompanions,
@@ -3090,6 +3090,83 @@ check("striking needs a lucid mind — you cannot audit your own hallucination",
   eq(badLogCount(sim), 1, "a hallucinating surveyor struck an entry from the record");
 });
 
+
+
+// Every ending the rules can produce must have its OWN words on the debrief.
+// `discredited` shipped without any and fell through to "DARK" — the game
+// naming the wrong cause of death for its own newest failure, which no
+// functional test could see because the ending fired perfectly. Parsed out of
+// the source rather than mocked, so adding an ending to state.js without
+// adding a verdict to hud.js fails here.
+check("every ending the rules can set has its own debrief verdict", () => {
+  const rules = fsReadFileSync(new URL("../src/state.js", import.meta.url), "utf8");
+  const hud = fsReadFileSync(new URL("../src/hud.js", import.meta.url), "utf8");
+
+  const endings = [...rules.matchAll(/sim\.ending\s*=\s*"([a-z]+)"/g)].map((m) => m[1]);
+  assert(endings.length >= 4, `only found ${endings.length} endings to check — the parse broke`);
+
+  const block = hud.slice(hud.indexOf("const VERDICTS"), hud.indexOf("const verdict ="));
+  const seen = new Map();
+  for (const e of new Set(endings)) {
+    const m = block.match(new RegExp(`${e}:\\s*"([^"]+)"`));
+    assert(m, `ending "${e}" has no verdict in hud.js — it will inherit the fallback`);
+    // Two endings MAY share words only if they mean the same thing to a player
+    // (extracted/advance are both "you did the survey"); a silent collision
+    // between a win and a loss is the failure this is really guarding.
+    seen.set(e, m[1]);
+  }
+  const lost = ["dissolved", "discredited", "darkness"].filter((e) => seen.has(e));
+  const won = ["extracted", "advance"].filter((e) => seen.has(e));
+  for (const l of lost) {
+    for (const w of won) {
+      assert(seen.get(l) !== seen.get(w), `losing ending "${l}" reads the same as winning "${w}"`);
+    }
+  }
+  assert(new Set(lost.map((e) => seen.get(e))).size === lost.length, "two different losses read identically");
+});
+
+// The repair verb has to be REACHABLE. Striking is bound to the survey key, so
+// nothing in the input map hints it exists; without a prompt a player would
+// have to remember which of six entries they wrote while their mind was gone,
+// and where. Brain: assert-every-bound-verb-is-explained.
+check("standing at a false claim while lucid offers the strike", () => {
+  const sim = createRun({ seed: 12 });
+  const spot = { x: sim.world.camp.x + 40, z: sim.world.camp.z + 40 };
+  sim.logEntries.push({ name: "Ghost Pillar", real: false, t: 1, corroborated: false, ...spot });
+  sim.player.x = spot.x;
+  sim.player.z = spot.z;
+  const target = strikeTargetAt(sim, sim.player);
+  assert(target && target.name === "Ghost Pillar", "no strike offered where an entry claims a marker");
+
+  // What the SCREEN shows and what the RULES allow must come apart here. If the
+  // prompt vanished while under, its absence would be a perfectly reliable
+  // readout of your own hallucination — the one fact MIRAGE never tells you.
+  beginHallucinating(sim, sim.player);
+  eq(strikeTargetAt(sim, sim.player), null, "a hallucinating mind was allowed to audit the record");
+  assert(claimedEntryAt(sim, sim.player), "the OFFER vanished while hallucinating — that absence is a tell");
+
+  // And the verb really is refused — but it must not LOOK refused. Silence
+  // would be the loudest tell in the game: press the key, watch nothing
+  // happen, and you have learned you are hallucinating. So the same event
+  // arrives with the same text, and only `believedOnly` (which nothing on
+  // screen renders differently) separates it from a real correction.
+  const res = logMarker(sim);
+  eq(badLogCount(sim), 1, "a hallucinating mind struck an entry from the record");
+  assert(res.ok && !res.struck, "the refused strike did not report itself as attempted");
+  const ev = sim.events.find((e) => e.kind === "logStrike");
+  assert(ev, "no strike event was emitted for a hallucinating lead — the silence IS the tell");
+  assert(ev.believedOnly, "a refused strike was not marked as belief-only");
+  assert(/struck from the record/.test(ev.text), `the refused strike read differently: "${ev.text}"`);
+
+  // The wording must be byte-identical to the real thing.
+  const clean = createRun({ seed: 12 });
+  clean.logEntries.push({ id: "e0", name: "Ghost Pillar", real: false, t: 1, corroborated: false, ...spot });
+  clean.player.x = spot.x;
+  clean.player.z = spot.z;
+  logMarker(clean);
+  const realEv = clean.events.find((e) => e.kind === "logStrike");
+  eq(realEv.text, ev.text, "a real strike and a believed one do not read the same");
+});
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length) {

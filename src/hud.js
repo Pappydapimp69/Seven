@@ -6,8 +6,8 @@
 // the one hallucinating. The only place a real number is ever printed is the
 // debrief, after the run is over.
 
-import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds } from "./percept.js?v=mirage-0.9.5";
-import { LOG_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, gatherTarget, GATHER_HOLD_TIME, previewCraft } from "./state.js?v=mirage-0.9.5";
+import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds } from "./percept.js?v=mirage-0.9.6";
+import { LOG_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, gatherTarget, GATHER_HOLD_TIME, previewCraft, claimedEntryAt } from "./state.js?v=mirage-0.9.6";
 
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 
@@ -163,6 +163,14 @@ export function createHud(sim, percept, opts = {}) {
       else if (ev.kind === "recover") say(ev.text, "good");
       else if (ev.kind === "log") say(ev.text, "good");
       else if (ev.kind === "logFalse") say(ev.text, "gone");
+      else if (ev.kind === "logStrike") {
+        // Styled "good" for BOTH outcomes. A believed-only strike that arrived
+        // in a different colour would be the tell all over again, one layer
+        // down — the point is that a correction you cannot trust looks exactly
+        // like one you can.
+        say(ev.text, "good");
+        if (ev.believedOnly && ev.entryId) percept.believedStruck.add(ev.entryId);
+      }
       else if (ev.kind === "dose") say(ev.text, "good");
       else if (ev.kind === "discoverItem") say(ev.text, "");
       else if (ev.kind === "discoverResource") say(ev.text, "");
@@ -254,6 +262,13 @@ export function createHud(sim, percept, opts = {}) {
     const pickup = nearestPickupItem(viewer, actor);
     const gatherable = gatherTarget(sim, actor);
     const near = nearestUnloggedName(viewer, actor);
+    // claimedEntryAt, NOT strikeTargetAt: the prompt must read the same to a
+    // mind that is gone as to one that is not, or its absence becomes a
+    // lucidity readout. The rules refuse the verb; the screen never admits it.
+    const claim = claimedEntryAt(sim, actor);
+    // An entry this mind believes it already crossed out stops being offered,
+    // exactly as a genuinely struck one does.
+    const strikeable = claim && !viewer.believedStruck?.has(claim.id) ? claim : null;
     if (pickup && sim.status === "playing") {
       els.text.textContent = `Pick up ${ITEM_INFO[pickup.shownKind].label}`;
       els.prompt.classList.add("show");
@@ -265,6 +280,18 @@ export function createHud(sim, percept, opts = {}) {
       els.fill.style.width = `${Math.min(100, Math.max(0, pct))}%`;
     } else if (near && sim.status === "playing") {
       els.text.textContent = `Survey ${near.name}`;
+      els.prompt.classList.add("show");
+      els.fill.style.width = "0%";
+    } else if (strikeable && sim.status === "playing") {
+      // The only channel that makes the repair reachable. A player cannot be
+      // expected to remember which of six entries they wrote while their mind
+      // was gone, or where — so the record does not accuse anyone, the GROUND
+      // does: stand where an entry claims a marker, find nothing, and the game
+      // offers to cross it out. Nothing here reveals which entries are false
+      // from a distance; you still have to go and look. And a lead who is under
+      // sees this same offer, presses it, and nothing happens — which is what
+      // being unreliable is supposed to feel like from the inside.
+      els.text.textContent = `Nothing here — strike ${strikeable.name} from the record`;
       els.prompt.classList.add("show");
       els.fill.style.width = "0%";
     } else {
@@ -390,14 +417,28 @@ export function createHud(sim, percept, opts = {}) {
 
 /** The debrief screen — the one and only place hidden state is revealed. */
 export function renderDebrief(container, report) {
-  const verdict =
-    report.status === "won"
-      ? "SURVEY COMPLETE"
-      : report.ending === "dissolved"
-        ? "THE PARTY DISSOLVED"
-        : "DARK";
+  // Every ending needs its own words. `discredited` used to fall through this
+  // chain to "DARK", so a run that got home and had its record thrown out was
+  // told the light ran out — the game reporting the wrong cause of death for
+  // its own newest failure. tests/logic.test.mjs now asserts one distinct
+  // verdict per ending, so the next one added cannot inherit someone else's.
+  const VERDICTS = {
+    extracted: "SURVEY COMPLETE",
+    advance: "SURVEY COMPLETE",
+    dissolved: "THE PARTY DISSOLVED",
+    discredited: "THE RECORD IS REJECTED",
+    darkness: "DARK",
+  };
+  const verdict = VERDICTS[report.ending] || (report.status === "won" ? "SURVEY COMPLETE" : "DARK");
+  // The one ending you can still do something about next time, so it says how.
+  const discreditNote =
+    report.ending === "discredited"
+      ? `<p class="debrief-warn">You walked home with ${report.badLogs} entr${report.badLogs === 1 ? "y" : "ies"} naming ${report.badLogs === 1 ? "a marker" : "markers"} that ${report.badLogs === 1 ? "is" : "are"} not out there. Nobody can tell which half of the survey to trust, so none of it counts.<br>Stand where an entry claims a marker, while lucid, and survey again — finding nothing is what strikes it from the record.</p>`
+      : "";
   const falseNote = report.falseLogs
-    ? `<p class="debrief-warn">${report.falseLogs} entr${report.falseLogs === 1 ? "y was" : "ies were"} written at nothing.</p>`
+    ? `<p class="debrief-warn">${report.falseLogs} entr${report.falseLogs === 1 ? "y was" : "ies were"} written at nothing.` +
+      (report.strikes ? ` You struck ${report.strikes} back out.` : "") +
+      `</p>`
     : "";
   // The count of things you built that were never there. Withheld for the
   // entire run — this is the first and only moment the game admits it.
@@ -408,6 +449,7 @@ export function renderDebrief(container, report) {
     <div class="debrief-card">
       <h2>${verdict}</h2>
       <p class="debrief-sub">Basin ${report.level} of ${report.campaignLength} · ${report.logged} of ${report.total} markers really surveyed · ${Math.floor(report.time / 60)}m ${report.time % 60}s</p>
+      ${discreditNote}
       ${falseNote}
       ${craftNote}
       <table class="debrief-table">

@@ -11,8 +11,8 @@
 // assert "a hallucinating lead is shown a marker the sim does not contain"
 // without booting a browser.
 
-import { HALLUCINATION, BAND, bandOf, ITEM_INFO, LUCIDITY_GRACE, CORROBORATE_RADIUS } from "./state.js?v=mirage-0.9.5";
-import { ITEM_KINDS } from "./world.js?v=mirage-0.9.5";
+import { HALLUCINATION, BAND, bandOf, ITEM_INFO, LUCIDITY_GRACE, CORROBORATE_RADIUS } from "./state.js?v=mirage-0.9.6";
+import { ITEM_KINDS } from "./world.js?v=mirage-0.9.6";
 
 const PHANTOM_NAMES = ["the Sixth Stone", "the Watching Slab", "the Other Cairn", "the Hollow Tooth"];
 const PHANTOM_COMPANIONS = ["ODEN", "MARIS", "THE SEVENTH"];
@@ -40,6 +40,13 @@ export function createPercept(eye = null) {
     compassOffset: 0,
     swayPhase: 0,
     whisper: null,
+    // Entries this mind believes it has crossed out. A strike attempted while
+    // hallucinating is refused by the rules but must LOOK like it worked (see
+    // logMarker), so the belief is recorded here and the record is not. Unlike
+    // the phantom* fields this deliberately SURVIVES recovery: the false
+    // confidence that the record was cleaned is the lasting damage, and coming
+    // back to your senses does not hand you a list of what you got wrong.
+    believedStruck: new Set(),
     // World-item misidentification, keyed by the item's own id so it stays
     // stable for as long as this hallucination episode lasts (cleared on
     // recovery, same lifetime as the other phantom* fields).

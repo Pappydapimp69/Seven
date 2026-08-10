@@ -14,9 +14,9 @@
 // The sim's job is to keep an honest, testable record of what is TRUE; `percept.js`
 // is the only place allowed to lie about it.
 
-import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=mirage-0.9.5";
-import { makeRng } from "./rng.js?v=mirage-0.9.5";
-import { updateCompanions, companionRemark } from "./party.js?v=mirage-0.9.5";
+import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=mirage-0.9.6";
+import { makeRng } from "./rng.js?v=mirage-0.9.6";
+import { updateCompanions, companionRemark } from "./party.js?v=mirage-0.9.6";
 
 export const PARTY_SIZE = 6; // you + 5 companions — the spec's five NPCs, plus the player
 export const MAX_LUCIDITY = 100;
@@ -795,24 +795,40 @@ export function logMarker(sim, phantom = null, actor = sim.player) {
   // Lucid, standing where the record CLAIMS a marker, and there is nothing here:
   // strike the claim. Same verb, opposite outcome — "write down what is at this
   // spot" correctly answers "nothing", and crossing the entry out is what that
-  // answer looks like on paper. It needs no new binding and no new UI, and it is
-  // the only way a corrupted record gets repaired.
-  if (!near && !actor.hallucinating) {
-    const bad = sim.logEntries.find(
-      (e) => !e.real && !e.struck && typeof e.x === "number" && dist2D(e, actor) <= LOG_RADIUS,
-    );
-    if (bad) {
-      bad.struck = true;
-      bad.struckAt = sim.time;
-      sim.stats.strikes = (sim.stats.strikes || 0) + 1;
-      emit(sim, "logStrike", `${bad.name} struck from the record. There is nothing here.`, { name: bad.name });
-      return { ok: true, real: false, struck: true };
+  // answer looks like on paper. It needs no new binding, and it is the only way
+  // a corrupted record gets repaired.
+  if (!near) {
+    const claim = claimedEntryAt(sim, actor);
+    if (claim) {
+      // A mind that is under cannot audit itself — but it must not be TOLD
+      // that. Silence would be the loudest tell in the game: press the key,
+      // watch nothing happen, and you have learned you are hallucinating, which
+      // is the single fact this whole system exists to withhold. So the strike
+      // LOOKS identical from the inside. The same line arrives, the offer stops
+      // being made (percept.believedStruck), and the entry stays exactly where
+      // it was — waiting on the debrief.
+      //
+      // This is the deception applied to the repair itself, and it is the
+      // reason the record is worth walking home carefully: you cannot trust
+      // your own corrections either.
+      const real = !actor.hallucinating;
+      if (real) {
+        claim.struck = true;
+        claim.struckAt = sim.time;
+        sim.stats.strikes = (sim.stats.strikes || 0) + 1;
+      }
+      emit(sim, "logStrike", `${claim.name} struck from the record. There is nothing here.`, {
+        name: claim.name,
+        entryId: claim.id,
+        believedOnly: !real,
+      });
+      return { ok: true, real: false, struck: real };
     }
   }
 
   // Hallucinating surveyor, standing at nothing, nobody to say so: a false entry.
   if (!near && actor.hallucinating && phantom && !lucidWitness) {
-    sim.logEntries.push({ name: phantom.name, real: false, t: sim.time, corroborated: false, x: actor.x, z: actor.z });
+    sim.logEntries.push({ id: `e${sim.logEntries.length}`, name: phantom.name, real: false, t: sim.time, corroborated: false, x: actor.x, z: actor.z });
     sim.stats.falseLogs += 1;
     emit(sim, "logFalse", `Logged ${phantom.name}.`, { phantom: true });
     return { ok: true, real: false };
@@ -821,7 +837,7 @@ export function logMarker(sim, phantom = null, actor = sim.player) {
 
   // A lucid mind at your shoulder is what keeps the record honest.
   if (actor.hallucinating && !lucidWitness && sim.rng() < 0.5) {
-    sim.logEntries.push({ name: near.name, real: false, t: sim.time, corroborated: false, x: actor.x, z: actor.z });
+    sim.logEntries.push({ id: `e${sim.logEntries.length}`, name: near.name, real: false, t: sim.time, corroborated: false, x: actor.x, z: actor.z });
     sim.stats.falseLogs += 1;
     emit(sim, "logFalse", `Logged ${near.name}.`, { phantom: true });
     return { ok: true, real: false };
@@ -840,6 +856,42 @@ export function logMarker(sim, phantom = null, actor = sim.player) {
     id: near.id,
   });
   return { ok: true, real: true, corroborated: !!lucidWitness };
+}
+
+/**
+ * An unstruck entry of the record claiming a marker at the actor's feet — what
+ * they can SEE from where they are standing, with no judgement about whether
+ * their mind is fit to act on it.
+ *
+ * This is deliberately NOT gated on lucidity, and the difference matters more
+ * than it looks. The HUD draws its prompt from this, so the offer to strike an
+ * entry appears identically whether or not the lead is under. Gating it would
+ * have made the prompt's absence a reliable readout of your own hallucination —
+ * "the strike option vanished, so I must be gone" — in the one game whose whole
+ * premise is that you cannot tell from the inside. A tell that only fires when
+ * you are lied to is worse than no tell: it is a lucidity meter with extra
+ * steps.
+ *
+ * `strikeTargetAt` below is the RULES' answer to the same question, and it is
+ * gated. The verb fails silently for a mind that cannot audit itself.
+ */
+export function claimedEntryAt(sim, actor = sim.player) {
+  if (!actor) return null;
+  return (
+    sim.logEntries.find(
+      (e) => !e.real && !e.struck && typeof e.x === "number" && dist2D(e, actor) <= LOG_RADIUS,
+    ) || null
+  );
+}
+
+/**
+ * The false entry `actor` may actually cross out. You cannot audit a record
+ * using the faculty that corrupted it — so a hallucinating mind gets null here
+ * while still being SHOWN the offer (see claimedEntryAt).
+ */
+export function strikeTargetAt(sim, actor = sim.player) {
+  if (!actor || actor.hallucinating) return null;
+  return claimedEntryAt(sim, actor);
 }
 
 export const trueLogCount = (sim) => sim.monoliths.filter((m) => m.logged).length;
