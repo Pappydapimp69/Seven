@@ -8,7 +8,7 @@
 
 import {
   createRun, tick, tickLucidity, bandOf, BAND, checkIn, useDose, logMarker, recover,
-  beginHallucinating, debrief, trueLogCount, checkEndings, partyCentroid,
+  beginHallucinating, debrief, trueLogCount, badLogCount, checkEndings, partyCentroid,
   pickupItem, useItem, dropItem, craftItem, previewCraft, gatherResource, gatherTarget, emit,
   rollTraits, pickHallucinationKind, companionPickup, handoffToPlayer, offerItem,
   possess, release, possessableCompanions,
@@ -3039,6 +3039,57 @@ check("the stick deadzone preserves direction at every angle and deflection", ()
   assert(Math.abs(mags[mags.length - 1] - 1) < 1e-9, `a fully-pushed stick should reach 1, got ${mags[mags.length - 1]}`);
   assert(Math.hypot(stick(0.05, -0.05).x, stick(0.05, -0.05).y) === 0, "a resting stick should read as zero");
 });
+
+
+// --- the record is the graded object ---------------------------------------
+// Measured before this existed: sweeping CORROBORATE_RADIUS from 11 to 0 took
+// false log entries from 23.8 to 260.1 per run and did not move the win rate by
+// a single seed. The game's central verb — you write down a marker that was
+// never there — cost nothing at all.
+
+check("a survey that names a marker which isn't out there is discredited, not won", () => {
+  const sim = createRun({ seed: 4 });
+  for (const m of sim.monoliths) m.logged = true;
+  sim.logEntries.push({ name: "Ghost Pillar", real: false, t: 1, corroborated: false, x: 0, z: 0 });
+  for (const c of sim.party) { c.x = sim.world.camp.x; c.z = sim.world.camp.z; }
+  tick(sim, 0.05, {});
+  eq(sim.status, "lost", "a corrupt record still extracted");
+  eq(sim.ending, "discredited", "wrong ending for a corrupt record");
+});
+
+check("striking a false entry repairs the record, and the same run then wins", () => {
+  const sim = createRun({ seed: 4 });
+  for (const m of sim.monoliths) m.logged = true;
+  // Somewhere in the basin, well away from every real marker.
+  const spot = { x: sim.world.camp.x + 40, z: sim.world.camp.z + 40 };
+  sim.logEntries.push({ name: "Ghost Pillar", real: false, t: 1, corroborated: false, ...spot });
+
+  // Stand where the entry claims a marker, lucid, with nothing there: the same
+  // LOG verb crosses it out. No new binding, no new UI.
+  sim.player.x = spot.x;
+  sim.player.z = spot.z;
+  sim.player.hallucinating = false;
+  const res = logMarker(sim);
+  assert(res.struck, "logging at an empty claimed site did not strike the entry");
+  eq(badLogCount(sim), 0, "the record is still carrying the struck entry");
+
+  for (const c of sim.party) { c.x = sim.world.camp.x; c.z = sim.world.camp.z; }
+  tick(sim, 0.05, {});
+  eq(sim.status, "won", "a repaired record did not extract");
+  eq(sim.ending, "extracted", "wrong ending for a repaired record");
+});
+
+check("striking needs a lucid mind — you cannot audit your own hallucination", () => {
+  const sim = createRun({ seed: 4 });
+  const spot = { x: sim.world.camp.x + 40, z: sim.world.camp.z + 40 };
+  sim.logEntries.push({ name: "Ghost Pillar", real: false, t: 1, corroborated: false, ...spot });
+  sim.player.x = spot.x;
+  sim.player.z = spot.z;
+  beginHallucinating(sim, sim.player);
+  logMarker(sim);
+  eq(badLogCount(sim), 1, "a hallucinating surveyor struck an entry from the record");
+});
+
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length) {

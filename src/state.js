@@ -482,7 +482,7 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
     // how many items were built that were never there, and how many times
     // another mind's reach called one of those out (either direction — see
     // handoffToPlayer/offerItem). Both stay hidden until the debrief.
-    stats: carryOver ? carryOver.stats : { doseUses: 0, pylonSeconds: 0, recoveries: 0, falseLogs: 0, itemsUsed: 0, phantomItemsUsed: 0, itemsCrafted: 0, falseCrafts: 0, phantomsRevealed: 0 },
+    stats: carryOver ? carryOver.stats : { doseUses: 0, pylonSeconds: 0, recoveries: 0, falseLogs: 0, strikes: 0, itemsUsed: 0, phantomItemsUsed: 0, itemsCrafted: 0, falseCrafts: 0, phantomsRevealed: 0 },
     level,
     campaignLength,
   };
@@ -792,9 +792,27 @@ export function logMarker(sim, phantom = null, actor = sim.player) {
       && dist2D(c, actor) <= CORROBORATE_RADIUS,
   );
 
+  // Lucid, standing where the record CLAIMS a marker, and there is nothing here:
+  // strike the claim. Same verb, opposite outcome — "write down what is at this
+  // spot" correctly answers "nothing", and crossing the entry out is what that
+  // answer looks like on paper. It needs no new binding and no new UI, and it is
+  // the only way a corrupted record gets repaired.
+  if (!near && !actor.hallucinating) {
+    const bad = sim.logEntries.find(
+      (e) => !e.real && !e.struck && typeof e.x === "number" && dist2D(e, actor) <= LOG_RADIUS,
+    );
+    if (bad) {
+      bad.struck = true;
+      bad.struckAt = sim.time;
+      sim.stats.strikes = (sim.stats.strikes || 0) + 1;
+      emit(sim, "logStrike", `${bad.name} struck from the record. There is nothing here.`, { name: bad.name });
+      return { ok: true, real: false, struck: true };
+    }
+  }
+
   // Hallucinating surveyor, standing at nothing, nobody to say so: a false entry.
   if (!near && actor.hallucinating && phantom && !lucidWitness) {
-    sim.logEntries.push({ name: phantom.name, real: false, t: sim.time, corroborated: false });
+    sim.logEntries.push({ name: phantom.name, real: false, t: sim.time, corroborated: false, x: actor.x, z: actor.z });
     sim.stats.falseLogs += 1;
     emit(sim, "logFalse", `Logged ${phantom.name}.`, { phantom: true });
     return { ok: true, real: false };
@@ -803,7 +821,7 @@ export function logMarker(sim, phantom = null, actor = sim.player) {
 
   // A lucid mind at your shoulder is what keeps the record honest.
   if (actor.hallucinating && !lucidWitness && sim.rng() < 0.5) {
-    sim.logEntries.push({ name: near.name, real: false, t: sim.time, corroborated: false });
+    sim.logEntries.push({ name: near.name, real: false, t: sim.time, corroborated: false, x: actor.x, z: actor.z });
     sim.stats.falseLogs += 1;
     emit(sim, "logFalse", `Logged ${near.name}.`, { phantom: true });
     return { ok: true, real: false };
@@ -825,6 +843,19 @@ export function logMarker(sim, phantom = null, actor = sim.player) {
 }
 
 export const trueLogCount = (sim) => sim.monoliths.filter((m) => m.logged).length;
+
+/**
+ * Entries claiming a marker that was never there, and never crossed out. This is
+ * what the survey is graded on.
+ *
+ * It was measured to be worth NOTHING before this existed: sweeping the
+ * corroboration radius from 11 to 0 took false entries from 23.8 to 260.1 per
+ * run and did not move the win rate by a single seed. The game's central verb —
+ * you write down a marker that was never there — was decorative. Every tell
+ * built for it made the lie more visible; none of it made the lie COST
+ * anything.
+ */
+export const badLogCount = (sim) => sim.logEntries.filter((e) => !e.real && !e.struck).length;
 
 /**
  * Pick up whatever the lead is standing next to. Two ways this can go wrong,
@@ -1551,6 +1582,23 @@ export function checkEndings(sim) {
     // rumour, not a survey.
     const atCamp = sim.party.filter((c) => dist2D(c, sim.world.camp) <= 9);
     if (atCamp.includes(sim.player) && atCamp.length >= 3) {
+      // You walked the record home. Now it gets read. Every marker that exists
+      // is in it — but if it also contains markers that do not, the survey is
+      // not a survey, and nobody can tell which half to trust. Go back out and
+      // strike them: stand where the entry claims a marker and log again.
+      const bad = badLogCount(sim);
+      if (bad > 0) {
+        sim.status = "lost";
+        sim.ending = "discredited";
+        emit(
+          sim,
+          "end",
+          bad === 1
+            ? "The record names one marker that isn't out there. None of it can be trusted."
+            : `The record names ${bad} markers that aren't out there. None of it can be trusted.`,
+        );
+        return;
+      }
       if (sim.level < sim.campaignLength) {
         // More basins in this campaign — main.js catches this status and
         // rebuilds a fresh basin (advanceLevel), carrying the party forward
@@ -1710,6 +1758,8 @@ export function debrief(sim) {
     logged: trueLogCount(sim),
     total: sim.monoliths.length,
     falseLogs: sim.stats.falseLogs,
+    strikes: sim.stats.strikes || 0,
+    badLogs: badLogCount(sim),
     doseUses: sim.stats.doseUses,
     recoveries: sim.stats.recoveries,
     itemsUsed: sim.stats.itemsUsed,

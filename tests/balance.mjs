@@ -165,6 +165,13 @@ function playRun(seed, policy, difficulty = "standard") {
     // A deceived surveyor counts their OWN log, false entries and all — they do
     // not have trueLogCount, that is the point of a false entry.
     const believedLogs = lied ? sim.logEntries.length : trueLogCount(sim);
+    // Lucid again, with the survey done: walk the record and check it. An entry
+    // that claims a marker leads somewhere; if nothing is there, striking it is
+    // the same verb as logging. A bot that skips this comes home discredited.
+    if (lied && !believesLies() && trueLogCount(sim) >= sim.monoliths.length) {
+      const bad = sim.logEntries.find((e) => !e.real && !e.struck && typeof e.x === "number");
+      if (bad) return { target: bad, kind: "strike" };
+    }
     if (believedLogs >= sim.monoliths.length) return { target: sim.world.camp, kind: "camp" };
     // Nothing in hand: keep sweeping the basin for the ones still out there.
     const next = sweep.filter((p) => !p.visited);
@@ -258,6 +265,13 @@ function playRun(seed, policy, difficulty = "standard") {
       continue;
     }
 
+    if (goalKind === "strike" && dist(goal, sim.player) <= LOG_RADIUS * 0.85) {
+      logMarker(sim); // lucid, and there is nothing here: the claim is crossed out
+      goal = null;
+      step({ move: { x: 0, z: 0 }, yaw: sim.player.yaw });
+      continue;
+    }
+
     if (goalKind === "marker" && dist(goal, sim.player) <= LOG_RADIUS * 0.85) {
       logMarker(sim);
       goal = null;
@@ -307,12 +321,14 @@ function summarise(label, reports) {
   const wins = reports.filter((r) => r.status === "won").length;
   const dissolved = reports.filter((r) => r.ending === "dissolved").length;
   const dark = reports.filter((r) => r.ending === "darkness").length;
+  const discredited = reports.filter((r) => r.ending === "discredited").length;
   const avg = (f) => (reports.reduce((s, r) => s + f(r), 0) / n).toFixed(1);
   const goneSecs = reports.map((r) => r.party.reduce((s, p) => s + p.goneSeconds, 0));
   console.log(
     `${label.padEnd(11)} n=${n}  won ${String(wins).padStart(3)} (${String(((wins / n) * 100).toFixed(0)).padStart(3)}%)` +
-      `  dissolved ${dissolved}  dark ${dark}` +
+      `  dissolved ${dissolved}  dark ${dark}  discredited ${discredited}` +
       `  found ${avg((r) => r.found)}/6  logged ${avg((r) => r.logged)}/6  false ${avg((r) => r.falseLogs)}` +
+      `  struck ${avg((r) => r.strikes)}  left-in ${avg((r) => r.badLogs)}` +
       `  time ${avg((r) => r.time)}s  party-seconds-lost ${(goneSecs.reduce((a, b) => a + b, 0) / n).toFixed(0)}`,
   );
   return { n, wins, dissolved, dark, winRate: wins / n };
