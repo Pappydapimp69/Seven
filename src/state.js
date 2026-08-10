@@ -14,9 +14,9 @@
 // The sim's job is to keep an honest, testable record of what is TRUE; `percept.js`
 // is the only place allowed to lie about it.
 
-import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=mirage-0.9.4";
-import { makeRng } from "./rng.js?v=mirage-0.9.4";
-import { updateCompanions, companionRemark } from "./party.js?v=mirage-0.9.4";
+import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=mirage-0.9.5";
+import { makeRng } from "./rng.js?v=mirage-0.9.5";
+import { updateCompanions, companionRemark } from "./party.js?v=mirage-0.9.5";
 
 export const PARTY_SIZE = 6; // you + 5 companions — the spec's five NPCs, plus the player
 export const MAX_LUCIDITY = 100;
@@ -27,6 +27,17 @@ export const MAX_LUCIDITY = 100;
 // careful 88% vs reckless 75% on standard over 8 seeds — directionally right, and a
 // small enough gap that it should not be quoted as settled. Note the harness bot
 // reads the sim's truth, so none of these numbers price the hallucination layer.
+// NOT tuned against tests/balance.mjs. Tightening the formation removed most of
+// the isolation drain the game used to collect (that multiplier is measured from
+// the party CENTROID, and a scattered party was paying it on several people at
+// once), and the obvious response was to raise this until the harness bot
+// started losing again. That response is invalid, and the harness says why in
+// its own header: the bot reads the sim's truth, so it is never shown a marker
+// that isn't there and never believes a companion who is wrong. It is a
+// COMPLETABILITY oracle and nothing else. Tuning drain until an omniscient bot
+// struggles sets the rate for a player who cannot be deceived — and then hands
+// it to one who can. See tests/balance.mjs's `deceived` policy for the only bot
+// in here whose win rate is allowed to inform this number.
 export const BASE_DRAIN = 1.05; // lucidity/second at rest, before modifiers
 // An orientation window, in two parts: a hard freeze where NOTHING moves, then
 // an ease-in to full drain. `sim.time` resets to 0 at the top of every level
@@ -341,12 +352,22 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
   // forward = (-sin(yaw), -cos(yaw)), so yaw = atan2(-toCentre.x, -toCentre.z).
   player.yaw = Math.atan2(-(0 - spawn.x), -(0 - spawn.z));
 
-  // The party forms up BEHIND the lead — a fan at 5–7 units, not a ring at 3.
-  // Any closer and five companions are simply standing in the camera.
+  // The party forms up AROUND the lead, in the same bearings party.js will ask
+  // them to hold — mostly forward, one behind. This used to be `+sin, +cos`,
+  // which is the exact negative of the camera's forward basis, so the opening
+  // second of every basin put all five squarely in the one place the lead
+  // cannot look. First impressions of a party are made standing still.
+  const SPAWN_FAN = [
+    { bearing: -0.30, r: 7.0 },
+    { bearing: 0.55, r: 5.6 },
+    { bearing: -0.55, r: 5.6 },
+    { bearing: 0.30, r: 7.0 },
+    { bearing: 2.75, r: 4.6 },
+  ];
   const companions = COMPANION_TEMPLATES.map((tpl, i) => {
-    const a = player.yaw + (i - 2) * 0.5;
-    const r = 5.2 + (i % 2) * 1.4;
-    const spot = { x: spawn.x + Math.sin(a) * r, z: spawn.z + Math.cos(a) * r };
+    const f = SPAWN_FAN[i % SPAWN_FAN.length];
+    const a = player.yaw + f.bearing;
+    const spot = { x: spawn.x - Math.sin(a) * f.r, z: spawn.z - Math.cos(a) * f.r };
     return makeCharacter(tpl, spot, i + 1);
   });
   // Traits are rolled once per CAMPAIGN, not per basin — carryOver below
@@ -1584,6 +1605,42 @@ function moveHuman(sim, ch, intent, step) {
   if (typeof intent.yaw === "number") ch.yaw = intent.yaw;
 }
 
+// How fast the party's anchor swings onto a new direction of travel, in
+// units of "fraction of the remaining error per second". Slow enough that
+// sidestepping and small corrections don't slosh the whole formation; fast
+// enough that a deliberate change of course has everyone re-formed within
+// about a second.
+const HEADING_TRACK = 3.2;
+const HEADING_MIN_STEP = 1e-4; // below this the lead is standing still, not walking
+
+/**
+ * The direction the lead is TRAVELLING, smoothed — which is what party.js
+ * anchors the formation to, deliberately NOT the lead's yaw.
+ *
+ * In a first-person game the camera IS the body, so a yaw-anchored formation
+ * rotates the entire party every time the player looks around. Two things fall
+ * out of that, and both were in the build: the rear guard orbits to stay behind
+ * you, so a full 360-degree turn never brings them into frame even once (the
+ * sweep case in tests/formation.mjs catches exactly this), and the flanks swirl
+ * across the screen on every glance, which reads as five people milling about
+ * rather than five people holding a line.
+ *
+ * Anchored to travel instead, the formation is a thing standing in the WORLD:
+ * look left and the left flank stays where it was and you look AT them.
+ */
+function updateLeadHeading(sim, wasX, wasZ, step) {
+  const p = sim.player;
+  if (typeof p.heading !== "number") p.heading = p.yaw || 0;
+  const dx = p.x - wasX, dz = p.z - wasZ;
+  if (Math.hypot(dx, dz) < HEADING_MIN_STEP) return; // standing still: hold the line as it is
+  // Same basis as the camera: forward = (-sin, -cos).
+  const target = Math.atan2(-dx, -dz);
+  let err = target - p.heading;
+  while (err > Math.PI) err -= Math.PI * 2;
+  while (err < -Math.PI) err += Math.PI * 2;
+  p.heading += err * Math.min(1, HEADING_TRACK * step);
+}
+
 export function tick(sim, dt, input = {}) {
   if (sim.status !== "playing") return sim;
   const step = Math.min(dt, 0.1); // clamp: a background tab must not teleport the run
@@ -1596,7 +1653,9 @@ export function tick(sim, dt, input = {}) {
   // Keeping slot 0 at the top level rather than requiring an array is what
   // lets every existing caller — the balance harness, the logic tests, the
   // smoke test's advance() hook — pass exactly what they always did.
+  const wasX = sim.player.x, wasZ = sim.player.z;
   moveHuman(sim, sim.humans[0], input, step);
+  updateLeadHeading(sim, wasX, wasZ, step);
   for (let slot = 1; slot < sim.humans.length; slot++) {
     const intent = (input.others || [])[slot - 1];
     if (intent) moveHuman(sim, sim.humans[slot], intent, step);

@@ -8,7 +8,7 @@
 // who lags, who starts narrating things that aren't there. Each rule below exists
 // to make an internal number legible from the outside without printing it.
 
-import { findPath, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, GRID } from "./world.js?v=mirage-0.9.4";
+import { findPath, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, GRID } from "./world.js?v=mirage-0.9.5";
 import {
   BAND,
   bandOf,
@@ -20,7 +20,7 @@ import {
   recipeKey,
   companionPickup,
   handoffToPlayer,
-} from "./state.js?v=mirage-0.9.4";
+} from "./state.js?v=mirage-0.9.5";
 
 // Higher band = worse. Lets a per-companion trait move the pylon-seeking
 // trigger EARLIER than the uniform BRITTLE tell everyone else gets, without
@@ -43,10 +43,52 @@ function seekThresholdBand(c) {
   return BAND.BRITTLE;
 }
 
-const FOLLOW_RADIUS = 4.4; // formation stand-off from the lead
-const FOLLOW_SLACK = 2.0; // don't jitter inside this band
+const FOLLOW_SLACK = 0.9; // don't jitter inside this band
 const WALK_SPEED = 4.6; // a touch faster than the player's walk, so they can catch up
 const LOST_SPEED = 3.1; // a hallucinating companion moves with unhurried certainty
+
+// --- why a follower needs a gear the leader doesn't have ---------------------
+// Holding a station that MOVES WITH the lead is not the same problem as walking
+// to a fixed point, and a flat WALK_SPEED silently only solves the second one.
+// The lead walks at 4.3 and runs at 7.4; a companion capped at 4.6 has 0.3 units
+// per second of surplus, so a slot that is 12 units away takes forty seconds to
+// reach and any sprint or corner re-opens the gap faster than that.
+//
+// Measured with the flat speed, across 6 seeds x 90s of walking: the four
+// FORWARD slots sat a mean of 60-89 DEGREES off their assigned bearing — beside
+// or behind the lead, permanently chasing — while the rear guard, whose station
+// is the one that falls into your lap for free, held to 11 degrees. That is the
+// mechanical cause of "they just scatter and do their own thing": the formation
+// was never wrong, it was simply never REACHED.
+const CATCHUP_MAX = 9.2; // enough headroom to hold station through a lead's sprint
+
+// --- and why holding station must not be free --------------------------------
+// Giving everyone that gear cost the game its pressure: over 24 seeds the party
+// went from 118 companion-seconds-lost per reckless run to 4, and the two runs
+// that ended in the dark stopped happening. Almost all of MIRAGE's difficulty
+// was, without anyone designing it that way, a side effect of followers being
+// mechanically unable to keep up.
+//
+// So the gear is conditional. A steady mind holds its station; a fraying one
+// stops CLOSING and then stops KEEPING PACE, because base speed drops under the
+// lead's 4.3 walk. The party still strings out and people still get lost — but
+// now that only happens to people who are coming apart, which is a thing you can
+// watch happen to a specific named companion, rather than a flat tax on everyone
+// from the first second of the run.
+//
+// The old formulation multiplied one flat speed by a `drag` factor, which could
+// not express this: it scaled the ability to keep pace and the ability to close
+// a gap together, so tuning either one moved the other.
+const GRIP = {
+  steady:    { base: 4.7, gain: 1.7 },
+  unsettled: { base: 4.4, gain: 1.1 },
+  fraying:   { base: 3.9, gain: 0.5 },
+  brittle:   { base: 3.3, gain: 0.25 },
+};
+function followSpeed(gap, band) {
+  const g = GRIP[band] || GRIP.steady;
+  return Math.min(CATCHUP_MAX, g.base + gap * g.gain);
+}
 const KNOWN_PYLON_DIST = 24; // how close they must have been to remember a pylon
 const SEEK_PYLON_DIST = 70; // and how far they will then travel back to one
 const REPATH_INTERVAL = 0.9; // seconds between path recomputes
@@ -138,14 +180,77 @@ function blockedBetween(sim, a, b) {
  * they are not standing in the camera. With forward = (-sinθ, -cosθ), the
  * behind-the-lead direction is (+sinθ, +cosθ), which is what this uses.
  */
+// Where each companion walks, as a BEARING FROM THE LEAD'S FACING (radians;
+// 0 is dead ahead, +/-PI is directly behind) and a stand-off distance.
+//
+// This used to be `lead + (sin a, cos a) * r`, which is the exact NEGATIVE of
+// the camera's forward vector (-sin, -cos) — so all five companions were pinned
+// permanently BEHIND the player. Measured: they were on screen 0.0% of the
+// time, at a median of 6.2 units, following 100% of the time. A perfectly
+// disciplined squad, standing in the one place the player can never look.
+//
+// That reads to a player as "they scatter and do their own thing", because the
+// only time you ever see anyone is when you happen to turn, and they are
+// somewhere different every time you do. The party did not need to be made more
+// cohesive; it needed to be VISIBLE.
+//
+// So: two walking point (staggered further out so they do not wall off the
+// view), two on the flanks just inside the frame edge, and one rear guard.
+// Four of the five sit inside a 90-degree horizontal FOV at any moment.
+const FORMATION = [
+  { bearing: -0.30, r: 7.0 }, // point, left of centre — the scout
+  { bearing: 0.55, r: 5.6 },  // right flank
+  { bearing: -0.55, r: 5.6 }, // left flank
+  { bearing: 0.30, r: 7.0 },  // point, right of centre
+  { bearing: 2.75, r: 4.6 },  // rear guard — see the note below
+];
+
+// How far a blocked station may be nudged before we give up and stand by the
+// lead. Ordered nearest-first so a companion never takes a bigger detour than
+// the formation needs: pull straight in, then swing off the bearing, then both.
+const SLOT_FALLBACKS = [
+  { scale: 1, swing: 0 },
+  { scale: 0.72, swing: 0 },
+  { scale: 1, swing: 0.38 },
+  { scale: 1, swing: -0.38 },
+  { scale: 0.72, swing: 0.38 },
+  { scale: 0.72, swing: -0.38 },
+  { scale: 0.5, swing: 0 },
+  { scale: 1, swing: 0.8 },
+  { scale: 1, swing: -0.8 },
+  { scale: 0.42, swing: 0.8 },
+  { scale: 0.42, swing: -0.8 },
+];
+
 function formationSlot(sim, c) {
   const lead = sim.player;
-  const yaw = lead.yaw || 0;
-  const i = c.index - 1; // 0..4
-  const spread = (i - 2) * 0.55; // fan out
-  const a = yaw + spread;
-  const r = FOLLOW_RADIUS + (i % 2) * 1.3;
-  return { x: lead.x + Math.sin(a) * r, z: lead.z + Math.cos(a) * r };
+  // Anchored to the lead's smoothed direction of TRAVEL, not their yaw — see
+  // updateLeadHeading in state.js. A yaw-anchored formation orbits the player
+  // whenever they look around, which means the rear guard can never be looked
+  // at and the flanks swirl on every glance.
+  const heading = typeof lead.heading === "number" ? lead.heading : lead.yaw || 0;
+  const slot = FORMATION[(c.index - 1) % FORMATION.length];
+  const base = heading + slot.bearing;
+  // A station AHEAD of the lead is regularly inside the very spire the lead is
+  // about to walk around — measured at 31-38% of following-seconds for the four
+  // forward slots, against 7% for the rear guard, whose ground the lead has just
+  // finished walking over. An unreachable target does not read as "unreachable":
+  // the companion paths at it, gets wedged, re-paths, and drifts, which from the
+  // lead's seat is indistinguishable from wandering off. So the station is
+  // resolved against geometry here, before anyone is asked to stand on it.
+  //
+  // Deterministic — no rng draws — so the per-tick roll count stays stable and
+  // seeded runs stay reproducible.
+  for (const f of SLOT_FALLBACKS) {
+    const a = base + f.swing;
+    const r = slot.r * f.scale;
+    // Negated to match the camera's forward basis (-sin, -cos): bearing 0 is
+    // genuinely ahead of the player, not behind them.
+    const p = { x: lead.x - Math.sin(a) * r, z: lead.z - Math.cos(a) * r };
+    if (!isBlockedAt(sim.world, p.x, p.z)) return p;
+  }
+  // Boxed in on every side: close up on the lead rather than stand in stone.
+  return { x: lead.x, z: lead.z };
 }
 
 function updateMemory(sim, c) {
@@ -402,13 +507,31 @@ export function updateCompanions(sim, dt) {
       }
     }
 
+    // Coming back is an event too. Breaking off already announces itself
+    // ("X breaks off toward a pylon"), so without this the log only ever
+    // records people LEAVING — five departures and no returns reads exactly
+    // like a party that scatters, even when everyone is in fact back on
+    // station. Latched on the goalKind transition so it fires once per
+    // absence, and only for absences the lead could have noticed.
+    if (c.goalKind && c.goalKind !== "follow" && c.goalKind !== "resting") {
+      c.wasAway = c.goalKind;
+    }
     c.goalKind = "follow";
     const slot = formationSlot(sim, c);
     const d = dist(c, slot);
+    if (c.wasAway && d <= FOLLOW_SLACK * 2.5) {
+      const how = c.wasAway === "hallucinating" ? `${c.name} is back with us.` : `${c.name} falls back into formation.`;
+      c.wasAway = null;
+      emit(sim, "break", how, { who: c.id });
+    }
     if (d > FOLLOW_SLACK) {
-      // Fraying companions lag: the gap between them and the lead is the tell.
-      const drag = band === BAND.FRAYING ? 0.72 : band === BAND.UNSETTLED ? 0.9 : 1;
-      stepToward(sim, c, slot, WALK_SPEED * drag, dt);
+      // Fraying companions lag: the gap between them and the lead is the tell,
+      // and GRIP above is what makes that gap open at a rate you can read.
+      stepToward(sim, c, slot, followSpeed(d, band), dt);
+    } else {
+      // On station. Face where the lead faces, so a held formation reads as a
+      // formation and not as five people who happen to be standing near you.
+      c.facing = sim.player.heading ?? sim.player.yaw;
     }
   }
 }

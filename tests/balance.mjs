@@ -16,7 +16,8 @@
 // difficulty for a human who is shown markers that do not exist and told by their
 // own party that everything is fine — costs it almost nothing.
 
-import { createRun, tick, logMarker, trueLogCount, debrief, LOG_RADIUS, PYLON_RADIUS } from "../src/state.js";
+import { createRun, tick, logMarker, trueLogCount, debrief, LOG_RADIUS, PYLON_RADIUS, FULL_DRAIN_AT } from "../src/state.js";
+import { createPercept, updatePercept } from "../src/percept.js";
 import { findPath, worldToCell, cellToWorld, floodFill, GRID } from "../src/world.js";
 
 const SEEDS = Number(process.argv[2] || 40);
@@ -50,7 +51,7 @@ function sweepPoints(sim) {
 
 /**
  * Drive one run to a terminal state.
- * @param policy "careful" | "reckless" — see the constants below
+ * @param policy "careful" | "reckless" | "deceived" — see the constants below
  */
 function playRun(seed, policy, difficulty = "standard") {
   const sim = createRun({ seed, difficulty });
@@ -74,10 +75,68 @@ function playRun(seed, policy, difficulty = "standard") {
   const REST_TARGET = 60;
   const REST_CAP = 20; // seconds per visit
 
+  // --- the handicap ---------------------------------------------------------
+  // careful/reckless read sim.monoliths, sim.pylons and c.lucidity directly.
+  // That makes them completability oracles and NOTHING else: MIRAGE's entire
+  // difficulty is the gap between what is true and what you are shown, and a
+  // bot with the answer key never opens that gap. Raising the drain rate until
+  // an omniscient bot loses sets the difficulty for a player who cannot be
+  // deceived, and then ships it to one who can.
+  //
+  // `deceived` closes its own eyes. It runs a real percept — the same module
+  // the screen is drawn from — and every decision below is taken from THAT:
+  //   * it walks to markers that do not exist, and logs them (falseLogs)
+  //   * it detours to relief that recedes, and to dead pylons that look live
+  //   * it steers by a compass whose error grows while it holds a line
+  //   * it believes the party is fine, because the chorus agrees that it is
+  // It is still not a human. It has perfect memory, no fear, and it never
+  // second-guesses. But its win rate is the only one in this file that has been
+  // paid for, and it is the only one difficulty tuning is allowed to read.
+  const lied = policy === "deceived";
+  const percept = lied ? createPercept(sim.player) : null;
+  if (lied) {
+    // Start the clock where the basin actually starts lying. The first ~90
+    // seconds of a run are a deliberate dead calm and the ramp runs 150 more;
+    // an omniscient bot finishes the whole survey in 96 seconds, so measured
+    // from t=0 the deceived policy scored an identical 100% with zero false
+    // logs — it had simply never hallucinated. That is not evidence the
+    // deception is cheap, it is evidence the bot outran it.
+    //
+    // A human does not survey a basin in ninety seconds. Starting past the
+    // ramp measures the phase this metric is about, on the light that is
+    // actually left by then.
+    sim.time = FULL_DRAIN_AT;
+  }
+  const believesLies = () => lied && percept.active;
+
   const pickGoal = () => {
-    const partyWorst = Math.min(...sim.companions.map((c) => (c.hallucinating ? 0 : c.lucidity)));
-    const selfLow = sim.player.lucidity < 25 || sim.player.hallucinating;
-    if (policy === "careful" && (partyWorst < REST_TRIGGER || selfLow)) {
+    // Under a hallucination the party sounds fine — that is what CHORUS is: five
+    // voices agreeing with you. So the deceived bot reads 100 across the board
+    // and stops detouring for anyone, exactly when detouring matters most.
+    const partyWorst = believesLies()
+      ? 100
+      : Math.min(...sim.companions.map((c) => (c.hallucinating ? 0 : c.lucidity)));
+    // `sim.player.hallucinating` is not a thing the mind having the
+    // hallucination has access to. Reading it made the deceived bot divert to
+    // relief the instant it went under — which meant it never once walked to a
+    // phantom marker, and logged zero false entries across every seed. Going
+    // under has to feel like nothing being wrong, or none of the rest of this
+    // is being measured at all.
+    const selfLow = believesLies() ? false : sim.player.lucidity < 25 || sim.player.hallucinating;
+    if ((policy === "careful" || lied) && (partyWorst < REST_TRIGGER || selfLow)) {
+      if (believesLies()) {
+        // Relief, as it APPEARS. Phantom pylons first — FALSE_ANCHOR makes them
+        // the nearest thing on screen, and they back off as you approach — then
+        // dead pylons the lie is still painting as live.
+        const apparent = [
+          ...percept.phantomPylons.map((p) => ({ ...p, id: `phantom:${p.id ?? "anchor"}`, phantom: true })),
+          ...sim.pylons.filter((p) => p.charge > 25 || percept.deadPylonsLookLive.has(p.id)),
+        ].filter((p) => (cooldown.get(p.id) || 0) < sim.time);
+        if (apparent.length) {
+          const p = apparent.reduce((a, b) => (dist(a, sim.player) < dist(b, sim.player) ? a : b));
+          return { target: p, kind: p.phantom ? "mirage" : "pylon" };
+        }
+      }
       // A pylon we have just finished using is on cooldown. Without this the bot
       // oscillates: "someone in the party is low" keeps selecting the pylon we
       // are standing in, while "nobody IN RANGE still needs it" keeps abandoning
@@ -90,11 +149,23 @@ function playRun(seed, policy, difficulty = "standard") {
     }
     // Only DISCOVERED markers are legitimate destinations.
     const todo = sim.monoliths.filter((m) => m.discovered && !m.logged);
-    if (todo.length) {
+    if (believesLies()) {
+      // A phantom marker is indistinguishable from a real one at the point of
+      // deciding where to walk — that is the whole design. So it goes in the
+      // same list and competes on distance, like everything else on screen.
+      const apparent = [...todo, ...percept.phantomMonoliths.map((m) => ({ ...m, phantom: true }))];
+      if (apparent.length) {
+        const m = apparent.reduce((a, b) => (dist(a, sim.player) < dist(b, sim.player) ? a : b));
+        return { target: m, kind: m.phantom ? "phantom-marker" : "marker" };
+      }
+    } else if (todo.length) {
       const m = todo.reduce((a, b) => (dist(a, sim.player) < dist(b, sim.player) ? a : b));
       return { target: m, kind: "marker" };
     }
-    if (trueLogCount(sim) >= sim.monoliths.length) return { target: sim.world.camp, kind: "camp" };
+    // A deceived surveyor counts their OWN log, false entries and all — they do
+    // not have trueLogCount, that is the point of a false entry.
+    const believedLogs = lied ? sim.logEntries.length : trueLogCount(sim);
+    if (believedLogs >= sim.monoliths.length) return { target: sim.world.camp, kind: "camp" };
     // Nothing in hand: keep sweeping the basin for the ones still out there.
     const next = sweep.filter((p) => !p.visited);
     if (next.length) {
@@ -122,6 +193,7 @@ function playRun(seed, policy, difficulty = "standard") {
   };
   const step = (input) => {
     tick(sim, DT, input);
+    if (percept) updatePercept(percept, sim, DT);
     ticksDone++;
     spins = 0;
   };
@@ -163,6 +235,29 @@ function playRun(seed, policy, difficulty = "standard") {
       continue;
     }
 
+    // Standing at a marker that isn't there. It logs it, with conviction — and
+    // the entry is false unless a lucid companion is close enough to say so,
+    // which is the corroboration rule doing its job on a bot for once.
+    if (goalKind === "phantom-marker" && dist(goal, sim.player) <= LOG_RADIUS * 0.85) {
+      logMarker(sim, goal);
+      goal = null;
+      step({ move: { x: 0, z: 0 }, yaw: sim.player.yaw });
+      continue;
+    }
+    // Relief that recedes. Arriving costs the walk and buys nothing; the bot
+    // gives up on this one and looks for the next apparent pylon.
+    if (goalKind === "mirage" && dist(goal, sim.player) < PYLON_RADIUS) {
+      cooldown.set(goal.id, sim.time + 25);
+      goal = null;
+      step({ move: { x: 0, z: 0 }, yaw: sim.player.yaw });
+      continue;
+    }
+    // A phantom goal survives only as long as the episode that invented it.
+    if ((goalKind === "phantom-marker" || goalKind === "mirage") && !believesLies()) {
+      goal = null;
+      continue;
+    }
+
     if (goalKind === "marker" && dist(goal, sim.player) <= LOG_RADIUS * 0.85) {
       logMarker(sim);
       goal = null;
@@ -185,7 +280,16 @@ function playRun(seed, policy, difficulty = "standard") {
     const len = Math.hypot(dx, dz) || 1;
     if (len < 1.2) path.shift();
     const yaw = Math.atan2(dx, -dz);
-    step({ move: { x: dx / len, z: dz / len }, run: true, yaw });
+    // The compass lie, applied where it actually bites: on the step taken, not
+    // on the plan. WRONG_WAY's error GROWS while you hold a straight line, so a
+    // long confident leg is the one that ends up somewhere else entirely.
+    let mx = dx / len, mz = dz / len;
+    if (believesLies() && percept.compassOffset) {
+      const a = percept.compassOffset;
+      const ca = Math.cos(a), sa = Math.sin(a);
+      [mx, mz] = [mx * ca - mz * sa, mx * sa + mz * ca];
+    }
+    step({ move: { x: mx, z: mz }, run: !lied, yaw });
 
     // Camp goal with the survey done: the win check needs bodies at camp, and the
     // companions arrive by following, so just keep standing there.
@@ -236,6 +340,14 @@ const gentle = [];
 for (let seed = 1; seed <= Math.min(SEEDS, 20); seed++) gentle.push(playRun(seed, "careful", "gentle"));
 summarise("gentle/care", gentle);
 
+console.log("");
+const deceived = [];
+for (let seed = 1; seed <= Math.min(SEEDS, 20); seed++) deceived.push(playRun(seed, "deceived"));
+const d = summarise("deceived", deceived);
+const deceivedBleak = [];
+for (let seed = 1; seed <= Math.min(SEEDS, 20); seed++) deceivedBleak.push(playRun(seed, "deceived", "bleak"));
+const db = summarise("deceived/bl", deceivedBleak);
+
 // ---- assertions ------------------------------------------------------------
 const problems = [];
 
@@ -254,9 +366,30 @@ if (best < 0.6) {
   problems.push(`no policy wins more than ${(best * 100).toFixed(0)}% of standard seeds — the basin is not reliably completable`);
 }
 
-// 3. Pressure. The hardest tier must not be a walkover for every policy.
-if (Math.min(b.winRate, br.winRate) === 1) {
-  problems.push("both policies won every bleak run — the hard tier applies no pressure");
+// 3. Pressure — asked of the only bot entitled to answer it. careful/reckless
+//    read the sim's truth, so their win rate says nothing about a game whose
+//    difficulty IS the lie; this used to assert on them, and what it actually
+//    measured was the pathfinder. `deceived` pays for its information, so what
+//    happens to it is a real signal.
+//
+//    Two-sided on purpose. Too easy and the deception costs nothing, which is
+//    the failure this file exists to catch. Too hard and a run is unwinnable
+//    once your meter drops — not a difficulty, a dead end, and the exact thing
+//    a panicked drain-rate increase produces.
+if (d.winRate >= 0.98) {
+  problems.push(`the deceived bot won ${(d.winRate * 100).toFixed(0)}% of standard seeds — being lied to costs nothing`);
+}
+if (d.winRate < 0.35) {
+  problems.push(`the deceived bot won only ${(d.winRate * 100).toFixed(0)}% of standard seeds — a deceived run is barely survivable`);
+}
+// The tiers must still separate for a bot that can be fooled.
+if (db.winRate > d.winRate) {
+  problems.push(`bleak (${(db.winRate * 100).toFixed(0)}%) was kinder than standard (${(d.winRate * 100).toFixed(0)}%) to the deceived bot`);
+}
+// And the lie must actually land: a deceived run should be writing entries for
+// markers that were never there. Zero means the handicap is not connected.
+if (deceived.reduce((a, r) => a + r.falseLogs, 0) === 0) {
+  problems.push("the deceived bot logged no false markers across every seed — the handicap is not wired up");
 }
 
 console.log("");
@@ -267,7 +400,9 @@ console.log(
     `is a valid oracle for COMPLETABILITY only: it reads the sim's truth\n` +
     `      directly, so the hallucination layer — the actual difficulty for a human, who sees ` +
     `phantom markers and gets lied to by their own party — costs it almost\n` +
-    `      nothing. Do not read these win rates as human difficulty.`,
+    `      nothing. Do not read those win rates as human difficulty. The \`deceived\` row is the one that prices\n` +
+    `      the lie: it navigates from a real percept, so it walks to markers that are not there, logs them, and chases relief\n` +
+    `      that backs away. It is the only row difficulty tuning may be read from.`,
 );
 
 if (problems.length) {

@@ -17,7 +17,7 @@
 //     options (dbh#E4, wrong-sky#E2). And an ended run is never saved, so a
 //     "Resume" can't drop you back onto the frame you already lost.
 
-import { createRun } from "./state.js?v=mirage-0.9.4";
+import { createRun } from "./state.js?v=mirage-0.9.5";
 
 export const SAVE_KEY = "mirage:run";
 // Bumped whenever the shape below changes incompatibly. A save from an older
@@ -38,6 +38,13 @@ function packCharacter(c) {
   return {
     id: c.id,
     x: c.x, z: c.z, yaw: c.yaw,
+    // The lead's smoothed direction of travel, which anchors the whole party's
+    // formation (see updateLeadHeading in state.js). Derived, but NOT free to
+    // drop: resuming without it re-anchors the formation to the resumed yaw, the
+    // party walks somewhere slightly different, and a companion who reaches a
+    // pylon a tick sooner shifts every subsequent rng draw. A resumed run has to
+    // be the SAME run, not a similar one.
+    heading: c.heading,
     lucidity: c.lucidity,
     hallucinating: c.hallucinating,
     hallucination: c.hallucination,
@@ -66,7 +73,13 @@ function packCharacter(c) {
     facing: c.facing ?? 0,
     // Saved rather than recomputed for the same reason: a null path re-paths
     // on a different tick than a live one, which moves the draws again.
-    path: c.path ? c.path.map((p) => ({ x: p.x, z: p.z })) : null,
+    // GRID CELLS (cx, cz), not world coordinates. This mapped x/z for a while,
+    // which silently wrote {x: undefined, z: undefined} for every node: on
+    // resume, stepToward aimed at cellToWorld(undefined, undefined) = NaN, the
+    // move came out NaN, collision refused it, and the companion stood wedged
+    // until the next repath. It never threw and it never failed a round-trip
+    // check, because both sides agreed on the same corrupted array.
+    path: c.path ? c.path.map((n) => ({ cx: n.cx, cz: n.cz })) : null,
     inventory: c.inventory ? c.inventory.map((s) => ({ ...s })) : [],
     known: c.known
       ? { pylons: [...c.known.pylons], monoliths: [...c.known.monoliths] }
@@ -76,6 +89,7 @@ function packCharacter(c) {
 
 function applyCharacter(c, s) {
   c.x = s.x; c.z = s.z; c.yaw = s.yaw;
+  if (typeof s.heading === "number") c.heading = s.heading;
   c.lucidity = s.lucidity;
   c.hallucinating = s.hallucinating;
   c.hallucination = s.hallucination;
@@ -96,7 +110,7 @@ function applyCharacter(c, s) {
     c.remarkCooldown = s.remarkCooldown ?? 0;
     c.repathTimer = s.repathTimer ?? 0;
     c.facing = s.facing ?? 0;
-    c.path = s.path ? s.path.map((p) => ({ x: p.x, z: p.z })) : null;
+    c.path = s.path ? s.path.map((n) => ({ cx: n.cx, cz: n.cz })) : null;
   }
 }
 

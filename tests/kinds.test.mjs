@@ -76,6 +76,21 @@ const REACTIVE_FOUR = [
 ];
 
 /** Past the orientation window, so nothing under test is masked by grace. */
+/**
+ * Guard for the measurement loops below, all of which are `while (sim.time -
+ * start < seconds)`. `tick` is a no-op once a run reaches a terminal state, so
+ * a party that dissolves mid-measurement does not end the loop — it FREEZES
+ * sim.time and spins forever. (Raising BASE_DRAIN is what surfaced this: the
+ * loops had simply never outlived their party before.) These rigs are about the
+ * LEAD's hallucination, so the party's fate is noise; every one of them holds
+ * the companions up deliberately, and this asserts that it worked.
+ */
+function stillRunning(sim, where) {
+  if (sim.status !== "playing") {
+    throw new Error(`${where}: the run ended (${sim.status}) mid-measurement — sim.time can no longer advance`);
+  }
+}
+
 function liveRun(seed) {
   const sim = createRun({ seed });
   sim.time = 400;
@@ -147,6 +162,7 @@ function compassRun(seed, seconds) {
     const yawBefore = p.yaw;
     const snapsBefore = percept.compassSnaps;
     tick(sim, SLICE, { move, yaw });
+    stillRunning(sim, "compassRun");
     pinUnder(sim, HALLUCINATION.WRONG_WAY);
     updatePercept(percept, sim, SLICE);
 
@@ -588,7 +604,9 @@ function chorusRun(seed, seconds, { verbEvery = 4, scatter = 0 } = {}) {
     const t = sim.time - start;
     const { move, yaw } = drive(t, baseYaw);
     if (t % 9 >= 9 - SLICE) baseYaw += 0.7;
+    for (const c of sim.companions) c.lucidity = 80; // this rig measures the LEAD
     tick(sim, SLICE, { move, yaw });
+    stillRunning(sim, "chorusRun");
     pinUnder(sim, HALLUCINATION.CHORUS);
     if (scatter) {
       sim.companions.forEach((c, k) => {
@@ -853,6 +871,7 @@ function doubledRun(seed, seconds) {
     for (const c of sim.companions) if (c !== victim) c.lucidity = 80;
     if (t >= 5 && !broke) { victim.lucidity = 0; beginHallucinating(sim, victim); broke = true; }
     tick(sim, SLICE, { move, yaw });
+    stillRunning(sim, "doubledRun");
     pinUnder(sim, HALLUCINATION.DOUBLED_PARTY);
     updatePercept(percept, sim, SLICE);
     ticks++;

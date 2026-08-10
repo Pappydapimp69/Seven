@@ -408,7 +408,14 @@ function assert(cond, msg) {
     return { inventory: s.inventory.length, lucidity: s.companions[M.selected].lucidity };
   });
   assert(giveKey.inventory === 0, `KeyB should consume the offered slot, inventory still has ${giveKey.inventory}`);
-  assert(giveKey.lucidity >= 89, `KeyB-triggered offer did not restore the companion's lucidity (${giveKey.lucidity})`);
+  // A DELTA, not a floor at 89. The restore is +40 from 50, but the press has to
+  // settle through a few real frames and the meter is draining the whole time,
+  // so the exact landing point is a function of how fast this machine happens to
+  // be running — which is precisely the kind of assertion this repo does not
+  // make. Anything near +40 proves the verb fired; anything near 0 proves it did
+  // not, and no amount of frame drift closes that gap.
+  const gained = giveKey.lucidity - 50;
+  assert(gained >= 30, `KeyB-triggered offer did not restore the companion's lucidity (+${gained.toFixed(1)})`);
 
   // 2) The #btnGive touch button exists and fires the same verb — a Tether
   // this time, so the OTHER "helps" branch (steadySeconds, not restore) is

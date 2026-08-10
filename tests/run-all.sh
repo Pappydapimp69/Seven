@@ -23,6 +23,10 @@ echo "== kinds (the four that used to be static) =="
 node tests/kinds.test.mjs
 echo
 
+echo "== formation (is the party ever actually in frame?) =="
+node tests/formation.mjs "${FORMATION_SEEDS:-6}"
+echo
+
 echo "== balance (whole runs to a terminal state) =="
 node tests/balance.mjs "${BALANCE_SEEDS:-12}"
 echo

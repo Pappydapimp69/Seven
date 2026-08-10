@@ -81,6 +81,38 @@ check("a fresh run round-trips through serialise/deserialise unchanged", () => {
   eq(fingerprint(restored), fingerprint(sim), "a fresh run did not round-trip");
 });
 
+// A saved value that round-trips into the SAME wrong thing on both sides passes
+// every equality check there is. This one has to look at the contents.
+check("a saved path comes back as walkable grid cells, not undefined", () => {
+  // Formation followers walk straight lines and rarely hold a path at all, so
+  // the state this is about only appears on a LONG errand: drop everyone into
+  // the pylon-seeking band and let them route across the basin.
+  let sim = null;
+  for (let seed = 1; seed <= 12 && !sim; seed++) {
+    const s = createRun({ seed, difficulty: "standard" });
+    s.time = FULL_DRAIN_AT;
+    advance(s, 1, { move: { x: 1, z: -0.6 }, yaw: 0.2 }); // lets party.js build c.known
+    for (const c of s.companions) {
+      c.lucidity = 12; // brittle: everyone breaks for a remembered pylon
+      for (const p of s.pylons) c.known.pylons.add(p.id);
+    }
+    advance(s, 20, { move: { x: 1, z: -0.6 }, yaw: 0.2 });
+    if (s.companions.some((c) => c.path && c.path.length)) sim = s;
+  }
+  assert(sim, "no companion was ever mid-path — this test cannot see anything");
+
+  const restored = deserializeRun(serializeRun(sim));
+  for (const c of restored.companions) {
+    if (!c.path) continue;
+    for (const n of c.path) {
+      assert(
+        Number.isFinite(n.cx) && Number.isFinite(n.cz),
+        `restored path node is not a grid cell: ${JSON.stringify(n)}`,
+      );
+    }
+  }
+});
+
 check("a run mid-flight round-trips, INCLUDING the rng stream position", () => {
   const sim = createRun({ seed: 77, difficulty: "standard", level: 1, campaignLength: 3 });
   sim.time = FULL_DRAIN_AT; // past grace so drain and its rng draws are live

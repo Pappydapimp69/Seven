@@ -11,8 +11,8 @@
 // assert "a hallucinating lead is shown a marker the sim does not contain"
 // without booting a browser.
 
-import { HALLUCINATION, BAND, bandOf, ITEM_INFO, LUCIDITY_GRACE, CORROBORATE_RADIUS } from "./state.js?v=mirage-0.9.4";
-import { ITEM_KINDS } from "./world.js?v=mirage-0.9.4";
+import { HALLUCINATION, BAND, bandOf, ITEM_INFO, LUCIDITY_GRACE, CORROBORATE_RADIUS } from "./state.js?v=mirage-0.9.5";
+import { ITEM_KINDS } from "./world.js?v=mirage-0.9.5";
 
 const PHANTOM_NAMES = ["the Sixth Stone", "the Watching Slab", "the Other Cairn", "the Hollow Tooth"];
 const PHANTOM_COMPANIONS = ["ODEN", "MARIS", "THE SEVENTH"];
@@ -289,7 +289,7 @@ function shiftOneUnseenPhantom(percept, sim, p) {
 //
 // Re-measure before changing any of these. The only number that matters is how
 // often a real player actually SEES one, and it is not derivable from the rate.
-const MONSTER_CHANCE_PER_SEC = 0.45;
+const MONSTER_CHANCE_PER_SEC = 0.32;
 // Only a companion actually nearby can wear it. Widened from 20 to clear the
 // measured ~22-unit median above; 26 still sits inside the fog's legible range
 // at full distortion (density 0.032, ~40% transmittance at 26 units), so a
