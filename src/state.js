@@ -14,9 +14,9 @@
 // The sim's job is to keep an honest, testable record of what is TRUE; `percept.js`
 // is the only place allowed to lie about it.
 
-import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=mirage-0.9.2";
-import { makeRng } from "./rng.js?v=mirage-0.9.2";
-import { updateCompanions, companionRemark } from "./party.js?v=mirage-0.9.2";
+import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=mirage-0.9.3";
+import { makeRng } from "./rng.js?v=mirage-0.9.3";
+import { updateCompanions, companionRemark } from "./party.js?v=mirage-0.9.3";
 
 export const PARTY_SIZE = 6; // you + 5 companions — the spec's five NPCs, plus the player
 export const MAX_LUCIDITY = 100;
@@ -46,7 +46,13 @@ export const BASE_DRAIN = 1.05; // lucidity/second at rest, before modifiers
 // pressure arriving as a slope rather than a cliff, reaching full while a
 // normal run is still going.
 //
-// Measured at these numbers (n=40 where available):
+// Retuned after the first real play session, which reported the opening as
+// "too punishing" and asked for a longer calm. 45s/180s -> 90s/240s halves the
+// pressure a careful run actually pays (party-seconds-lost 81 -> 34) while a
+// reckless one still pays 135, so the tiers keep their order and the game
+// keeps its teeth. Full drain still lands at 4:00, inside a real run.
+//
+// Measured at the previous numbers (n=40 where available):
 //   * the pressure tiers order correctly again, by party-seconds-lost —
 //     gentle 25, careful 55, bleak/careful 99, reckless 122, bleak/reckless 234
 //   * companions break again: 4.75 episodes and ~237 gone-seconds per basin
@@ -65,8 +71,8 @@ export const BASE_DRAIN = 1.05; // lucidity/second at rest, before modifiers
 // To go back to a flat "nothing for N seconds", set LUCIDITY_RAMP to 0 and
 // LUCIDITY_GRACE to N — but re-run tests/balance.mjs and check the tiers are
 // still distinguishable, because at N=300 they were not.
-export const LUCIDITY_GRACE = 45; // dead calm: no drain at all
-export const LUCIDITY_RAMP = 135; // then ease 0 -> full drain across this long
+export const LUCIDITY_GRACE = 90; // dead calm: no drain at all
+export const LUCIDITY_RAMP = 150; // then ease 0 -> full drain across this long
 /** The moment drain reaches its full rate. Tests that want normal drain use this. */
 export const FULL_DRAIN_AT = LUCIDITY_GRACE + LUCIDITY_RAMP;
 

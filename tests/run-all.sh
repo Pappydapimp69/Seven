@@ -48,6 +48,9 @@ if [ -d /opt/pw-browsers ] && node -e 'require("/opt/node22/lib/node_modules/pla
   echo
   echo "== settings (real browser, preferences across a reload) =="
   node tests/settings.mjs
+  echo
+  echo "== field of view (real browser, aspect independence) =="
+  node tests/fov.mjs
 else
   echo "== smoke + gamepad: SKIPPED — Playwright/Chromium not available here =="
   echo "   (the 3D layer was NOT exercised in this run)"

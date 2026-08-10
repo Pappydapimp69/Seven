@@ -5,16 +5,16 @@ import {
   createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem, dropItem, craftItem, gatherTarget, offerItem,
   possess, release, possessableCompanions,
   PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=mirage-0.9.2";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=mirage-0.9.2";
-import { createRenderer } from "./render.js?v=mirage-0.9.2";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=mirage-0.9.2";
-import { createInput, ACTIONS } from "./input.js?v=mirage-0.9.2";
-import { createAudio } from "./audio.js?v=mirage-0.9.2";
-import { hashSeed } from "./rng.js?v=mirage-0.9.2";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings } from "./save.js?v=mirage-0.9.2";
+} from "./state.js?v=mirage-0.9.3";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=mirage-0.9.3";
+import { createRenderer } from "./render.js?v=mirage-0.9.3";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=mirage-0.9.3";
+import { createInput, ACTIONS } from "./input.js?v=mirage-0.9.3";
+import { createAudio } from "./audio.js?v=mirage-0.9.3";
+import { hashSeed } from "./rng.js?v=mirage-0.9.3";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings } from "./save.js?v=mirage-0.9.3";
 
-const BUILD = "mirage-0.9.2";
+const BUILD = "mirage-0.9.3";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -35,6 +35,10 @@ const lead = () => (run && run.players[0]) || { selected: 0, selectedItem: 0 };
 let whisperTimer = 0;
 // Seconds of SIM time since the last autosave (see step()).
 let saveTimer = 0;
+// Horizontal field of view in degrees, from stored preferences. Applied to
+// each renderer as it is built, since a run can start before the pause menu
+// has ever been opened.
+let fovPref = 90;
 // Sim-seconds between autosaves. Short enough that a closed tab costs little,
 // long enough that a serialise is nowhere near a per-frame cost.
 const AUTOSAVE_EVERY = 5;
@@ -214,6 +218,7 @@ function mountRun(sim, openingLine) {
   const seedValue = sim.seed;
   const percept = createPercept(sim.player);
   const renderer = createRenderer(canvas, sim);
+  renderer.setFov(fovPref);
   const hud = createHud(sim, percept, { onChorus: () => audio.play("chorus") });
   paused = false;
   whisperTimer = 0;
@@ -285,6 +290,7 @@ function advanceLevel() {
   const percept = createPercept(sim.player);
   run.renderer.dispose();
   const renderer = createRenderer(canvas, sim);
+  renderer.setFov(fovPref);
   const hud = createHud(sim, percept, { onChorus: () => audio.play("chorus") });
   hud.setHints(input.activeScheme);
   hud.say(`Basin ${nextLevel} of ${sim.campaignLength}. The party pushes on.`, "warn");
@@ -759,6 +765,16 @@ function boot() {
   // campaign (which clears the run slot) never also resets your volume.
   const prefs = loadSettings();
   let difficulty = prefs.difficulty;
+  fovPref = prefs.fov;
+  for (const b of document.querySelectorAll("[data-fov]")) {
+    b.classList.toggle("sel", Number(b.dataset.fov) === prefs.fov);
+    b.addEventListener("click", () => {
+      fovPref = Number(b.dataset.fov);
+      saveSettings({ fov: fovPref });
+      run?.renderer.setFov(fovPref);
+      for (const o of document.querySelectorAll("[data-fov]")) o.classList.toggle("sel", o === b);
+    });
+  }
   audio.setVolume(prefs.volume);
   for (const b of document.querySelectorAll("[data-vol]")) {
     b.classList.toggle("sel", Number(b.dataset.vol) === prefs.volume);

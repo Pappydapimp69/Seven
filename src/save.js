@@ -17,7 +17,7 @@
 //     options (dbh#E4, wrong-sky#E2). And an ended run is never saved, so a
 //     "Resume" can't drop you back onto the frame you already lost.
 
-import { createRun } from "./state.js?v=mirage-0.9.2";
+import { createRun } from "./state.js?v=mirage-0.9.3";
 
 export const SAVE_KEY = "mirage:run";
 // Bumped whenever the shape below changes incompatibly. A save from an older
@@ -290,7 +290,7 @@ export function describeSave(data) {
 // which are unrelated questions.
 export const SETTINGS_KEY = "mirage:settings";
 
-const DEFAULT_SETTINGS = { volume: 0.7, muted: false, difficulty: "standard", coop: "solo" };
+const DEFAULT_SETTINGS = { volume: 0.7, muted: false, difficulty: "standard", coop: "solo", fov: 90 };
 
 /** Preferences, with unknown/corrupt values replaced by defaults rather than trusted. */
 export function loadSettings() {
@@ -309,6 +309,7 @@ export function loadSettings() {
       muted: typeof d.muted === "boolean" ? d.muted : DEFAULT_SETTINGS.muted,
       difficulty: ["gentle", "standard", "bleak"].includes(d.difficulty) ? d.difficulty : DEFAULT_SETTINGS.difficulty,
       coop: ["solo", "couch"].includes(d.coop) ? d.coop : DEFAULT_SETTINGS.coop,
+      fov: typeof d.fov === "number" && d.fov >= 70 && d.fov <= 110 ? d.fov : DEFAULT_SETTINGS.fov,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

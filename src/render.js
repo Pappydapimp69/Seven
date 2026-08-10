@@ -6,9 +6,9 @@
 // list as the real ones.
 
 import * as THREE from "../lib/three.module.js";
-import { CELL, GRID, cellToWorld } from "./world.js?v=mirage-0.9.2";
-import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=mirage-0.9.2";
-import { PYLON_RADIUS } from "./state.js?v=mirage-0.9.2";
+import { CELL, GRID, cellToWorld } from "./world.js?v=mirage-0.9.3";
+import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=mirage-0.9.3";
+import { PYLON_RADIUS } from "./state.js?v=mirage-0.9.3";
 
 const PALETTE = {
   sky: 0x0a0f16,
@@ -52,6 +52,22 @@ const ITEM_COLOR = { flare: PALETTE.itemFlare, tether: PALETTE.itemTether, lens:
 
 const EYE_HEIGHT = 1.72;
 
+// Horizontal field of view, in degrees. 90 sits in the ordinary first-person
+// band (most games ship 90-100 horizontal); past ~100 the perspective starts
+// reading as a fisheye lens rather than as a room.
+const DEFAULT_HFOV = 90;
+// On a very tall/narrow window (a phone held upright) deriving vertical from a
+// fixed horizontal would balloon it, so cap it — a portrait player loses a
+// little horizontal instead of gaining a vertical fisheye.
+const MAX_VFOV = 78;
+
+/** The VERTICAL fov Three wants, for a given aspect, holding horizontal fixed. */
+function verticalFov(aspect, hfov = DEFAULT_HFOV) {
+  const h = (hfov * Math.PI) / 180;
+  const v = 2 * Math.atan(Math.tan(h / 2) / Math.max(0.2, aspect || 1));
+  return Math.min(MAX_VFOV, (v * 180) / Math.PI);
+}
+
 export function createRenderer(canvas, sim) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -63,7 +79,23 @@ export function createRenderer(canvas, sim) {
   // guessing. 0.014 keeps the basin oppressive but legible.
   scene.fog = new THREE.FogExp2(PALETTE.fog, 0.014);
 
-  const camera = new THREE.PerspectiveCamera(72, 1, 0.1, 420);
+  // FIELD OF VIEW IS HORIZONTAL-FIRST ("Hor+"), and this matters more than it
+  // looks. Three's PerspectiveCamera takes a VERTICAL fov, and this shipped at
+  // 72 — which is 105° HORIZONTAL on a 16:9 screen and 119° on an ultrawide.
+  // That is deep fisheye: wide-angle perspective bows straight lines toward the
+  // frame edges and sweeps edge geometry past you as you walk, which reads as
+  // "the world is curved and misshapen" and as a problem with the MOVEMENT,
+  // even though the movement is mathematically exact (a constant input walks a
+  // line with 0.0000 lateral deviation — measured, not assumed).
+  //
+  // So: pick the horizontal angle and derive vertical from the real aspect.
+  // A wider monitor now shows MORE WORLD instead of more distortion, which is
+  // the whole point of Hor+ — the lens stops changing shape with the window.
+  // Player-adjustable, because comfort at a given angle is genuinely personal —
+  // the same lens that reads as "a room" to one player reads as a tunnel or a
+  // fisheye to another. setFov() is the only writer.
+  let hfov = DEFAULT_HFOV;
+  const camera = new THREE.PerspectiveCamera(verticalFov(1.778, hfov), 1, 0.1, 420);
   const rig = new THREE.Group(); // yaw/position; camera holds pitch and roll
   rig.add(camera);
   scene.add(rig);
@@ -395,7 +427,11 @@ export function createRenderer(canvas, sim) {
     // in the world has visibly changed.
     camera.rotation.z = Math.sin(percept.swayPhase * 1.7) * 0.045 * dis;
     camera.position.y = Math.sin(percept.swayPhase * 2.3) * 0.06 * dis;
-    camera.fov = 72 + Math.sin(percept.swayPhase * 0.9) * 5 * dis;
+    // Derived from the CURRENT aspect every frame, so a resize or a co-op
+    // split (which halves each viewport's aspect) re-derives instead of
+    // inheriting a lens shaped for a different window. The hallucination's
+    // breathing rides on top as a delta.
+    camera.fov = verticalFov(camera.aspect, hfov) + Math.sin(percept.swayPhase * 0.9) * 5 * dis;
     camera.updateProjectionMatrix();
 
     // ---- fog / colour drift ----
@@ -503,6 +539,7 @@ export function createRenderer(canvas, sim) {
     const h = canvas.clientHeight || window.innerHeight;
     renderer.setSize(w, h, false);
     camera.aspect = w / h || 1;
+    camera.fov = verticalFov(camera.aspect, hfov);
     camera.updateProjectionMatrix();
   }
 
@@ -557,5 +594,13 @@ export function createRenderer(canvas, sim) {
     renderer.dispose();
   }
 
-  return { renderer, scene, camera, rig, update, resize, dispose, terrainHeight, worldToScreen, PALETTE };
+  /** Set the horizontal field of view in degrees; clamped to a sane band. */
+  function setFov(deg) {
+    hfov = Math.max(70, Math.min(110, Number(deg) || DEFAULT_HFOV));
+    camera.fov = verticalFov(camera.aspect, hfov);
+    camera.updateProjectionMatrix();
+    return hfov;
+  }
+
+  return { renderer, scene, camera, rig, update, resize, dispose, terrainHeight, worldToScreen, setFov, get hfov() { return hfov; }, PALETTE };
 }

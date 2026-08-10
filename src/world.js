@@ -24,7 +24,7 @@
 // reachability from scratch and is asserted in the test suite — the fixup is
 // verified, not trusted.
 
-import { makeRng } from "./rng.js?v=mirage-0.9.2";
+import { makeRng } from "./rng.js?v=mirage-0.9.3";
 
 export const CELL = 2.6; // world units per grid cell
 export const GRID = 46; // cells per side
