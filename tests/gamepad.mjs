@@ -338,7 +338,16 @@ const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, L3: 10, START:
   const debriefFocus = await page.evaluate(() => document.querySelector("#debriefLayer .gpfocus")?.id);
   assert(debriefFocus === "againBtn", `debrief screen's New-basin button was not gamepad-focused, got ${debriefFocus}`);
   await tap(BTN.A);
-  const backAtTitle = await page.evaluate(() => !document.getElementById("title").classList.contains("hidden"));
+  // Polled, not checked once — same reasoning as debriefShown above. A tap has
+  // to be SEEN by the pad poll as a rising edge, and under CPU contention the
+  // poll can be starved past the moment we look. Checking once here failed
+  // exactly once, while running beside four other suites, and passed alone
+  // every time: that is a starved observer, not a broken button.
+  let backAtTitle = false;
+  for (let i = 0; i < 100 && !backAtTitle; i++) {
+    backAtTitle = await page.evaluate(() => !document.getElementById("title").classList.contains("hidden"));
+    if (!backAtTitle) await page.waitForTimeout(100);
+  }
   assert(backAtTitle, "confirming on the debrief screen via gamepad did not return to the title screen");
 
   assert(errors.length === 0, `console errors: ${errors.slice(0, 8).join(" | ")}`);

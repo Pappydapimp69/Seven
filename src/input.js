@@ -40,6 +40,28 @@ export const ACTIONS = Object.freeze({
   PAUSE: "pause",
 });
 
+// Stick deadzone, RADIAL and rescaled — not per-axis.
+//
+// The old form was `v => Math.abs(v) < 0.18 ? 0 : v` applied to each axis
+// independently, which carves a SQUARE dead region out of a round stick. Two
+// consequences: near an axis the perpendicular component gets clipped to
+// exactly zero, so input snaps to the cardinal directions and then jumps the
+// moment it crosses the threshold; and along the diagonals you have to push
+// noticeably further before anything registers at all. Both read as "it won't
+// go where I'm pointing" and as trouble moving diagonally.
+//
+// Radial instead: take the stick's true magnitude, ignore it below the
+// threshold, and rescale what's left across the full 0..1 range. Direction is
+// carried by the unit vector and is therefore preserved EXACTLY, and there is
+// no discontinuity at the edge of the deadzone.
+const DEADZONE = 0.18;
+function stickVector(ax, ay) {
+  const mag = Math.hypot(ax, ay);
+  if (mag < DEADZONE) return { x: 0, y: 0 };
+  const scaled = Math.min(1, (mag - DEADZONE) / (1 - DEADZONE));
+  return { x: (ax / mag) * scaled, y: (ay / mag) * scaled };
+}
+
 export function createInput(canvas, opts = {}) {
   const state = {
     move: { x: 0, z: 0 }, // raw, in screen space; the loop rotates it by yaw
@@ -272,9 +294,9 @@ export function createInput(canvas, opts = {}) {
     const pad = livePads().find((p) => p.index === padIndex);
     if (!pad) return null;
 
-    const dead = (v) => (Math.abs(v) < 0.18 ? 0 : v);
-    const lx = dead(pad.axes[0] || 0), ly = dead(pad.axes[1] || 0);
-    const rx = dead(pad.axes[2] || 0), ry = dead(pad.axes[3] || 0);
+    const L = stickVector(pad.axes[0] || 0, pad.axes[1] || 0);
+    const R = stickVector(pad.axes[2] || 0, pad.axes[3] || 0);
+    const lx = L.x, ly = L.y, rx = R.x, ry = R.y;
     const now = pad.buttons.map((b) => !!(b && b.pressed));
     const prev = padPrevBySlot.get(padIndex) || [];
     const edges = now.map((p, i) => p && !prev[i]);
@@ -310,9 +332,9 @@ export function createInput(canvas, opts = {}) {
       return null;
     }
 
-    const dead = (v) => (Math.abs(v) < 0.18 ? 0 : v);
-    const lx = dead(pad.axes[0] || 0), ly = dead(pad.axes[1] || 0);
-    const rx = dead(pad.axes[2] || 0), ry = dead(pad.axes[3] || 0);
+    const L = stickVector(pad.axes[0] || 0, pad.axes[1] || 0);
+    const R = stickVector(pad.axes[2] || 0, pad.axes[3] || 0);
+    const lx = L.x, ly = L.y, rx = R.x, ry = R.y;
     const pressedNow = pad.buttons.map((b) => !!(b && b.pressed));
     if (lx || ly || rx || ry || pressedNow.some(Boolean)) setScheme("gamepad");
 

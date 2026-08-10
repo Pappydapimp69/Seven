@@ -2989,6 +2989,57 @@ check("every verb in the control hints is explained in How to play", () => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// stick deadzone — direction must survive it
+// ---------------------------------------------------------------------------
+// The deadzone was per-axis, which carves a SQUARE hole out of a round stick:
+// at half deflection anything within ~20 degrees of an axis had its
+// perpendicular component clipped to exactly zero, so gentle input SNAPPED to
+// the cardinal directions and then jumped once it crossed the threshold. A
+// player reported it as "up doesn't move toward the centre of the view... it's
+// angled, almost like the player can't move diagonally".
+//
+// It stayed hidden while any input meant full speed. Making the stick properly
+// analog is what exposed it, because partial deflection — exactly where the
+// square hole bites — became the normal way to play.
+//
+// Parsed out of input.js rather than imported: the module reaches for `window`
+// at load, and the shape of the deadzone is what matters here, not the wiring.
+check("the stick deadzone preserves direction at every angle and deflection", () => {
+  const src = fsReadFileSync(new URL("../src/input.js", import.meta.url), "utf8");
+  assert(/const DEADZONE\s*=/.test(src) && /function stickVector/.test(src),
+    "input.js should use a named radial stickVector(); a per-axis dead() is the bug this guards");
+  assert(!/const dead = \(v\) =>/.test(src),
+    "the per-axis square deadzone is back in input.js");
+
+  const DZ = Number(src.match(/const DEADZONE\s*=\s*([\d.]+)/)[1]);
+  const stick = (ax, ay) => {
+    const mag = Math.hypot(ax, ay);
+    if (mag < DZ) return { x: 0, y: 0 };
+    const s2 = Math.min(1, (mag - DZ) / (1 - DZ));
+    return { x: (ax / mag) * s2, y: (ay / mag) * s2 };
+  };
+
+  for (const mag of [0.35, 0.5, 0.75, 1]) {
+    for (let deg = 0; deg < 360; deg += 5) {
+      const r = (deg * Math.PI) / 180;
+      const v = stick(Math.sin(r) * mag, -Math.cos(r) * mag);
+      assert(v.x !== 0 || v.y !== 0, `a stick at ${mag} deflection should not be dead (angle ${deg})`);
+      const got = ((Math.atan2(v.x, -v.y) * 180) / Math.PI + 360) % 360;
+      const err = Math.abs(((got - deg + 540) % 360) - 180);
+      assert(err < 0.001, `direction distorted at ${deg}deg / ${mag} deflection — moved ${got.toFixed(1)}deg`);
+    }
+  }
+  // Magnitude must be monotonic and reach full scale, so partial pressure means
+  // partial speed rather than an on/off switch.
+  const mags = [0.2, 0.4, 0.6, 0.8, 1].map((m) => Math.hypot(stick(0, -m).x, stick(0, -m).y));
+  for (let i = 1; i < mags.length; i++) {
+    assert(mags[i] > mags[i - 1], `stick response must rise with deflection, ${mags}`);
+  }
+  assert(Math.abs(mags[mags.length - 1] - 1) < 1e-9, `a fully-pushed stick should reach 1, got ${mags[mags.length - 1]}`);
+  assert(Math.hypot(stick(0.05, -0.05).x, stick(0.05, -0.05).y) === 0, "a resting stick should read as zero");
+});
+
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length) {
   for (const f of failures) console.log("  ✗ " + f);
