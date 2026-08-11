@@ -14,9 +14,9 @@
 // The sim's job is to keep an honest, testable record of what is TRUE; `percept.js`
 // is the only place allowed to lie about it.
 
-import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=mirage-0.9.6";
-import { makeRng } from "./rng.js?v=mirage-0.9.6";
-import { updateCompanions, companionRemark } from "./party.js?v=mirage-0.9.6";
+import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=mirage-0.9.7";
+import { makeRng } from "./rng.js?v=mirage-0.9.7";
+import { updateCompanions, companionRemark } from "./party.js?v=mirage-0.9.7";
 
 export const PARTY_SIZE = 6; // you + 5 companions — the spec's five NPCs, plus the player
 export const MAX_LUCIDITY = 100;
@@ -114,6 +114,22 @@ export const RECOVER_TIME = 2.5; // seconds inside a pylon needed to pull someon
 export const SIGHT_RANGE = 38; // how far into the fog a marker can be picked out
 export const LOG_RADIUS = 5.0; // how close you must stand to log a monolith
 export const CORROBORATE_RADIUS = 11; // a companion this close can confirm what you see
+// How long a companion will stand behind what you showed them, after you ASK.
+//
+// Corroboration used to be ambient: any lucid body inside the radius silently
+// vouched for every entry you wrote. Measured, a lucid companion was at the
+// lead's shoulder for 75% of all hallucinating seconds, so the party was
+// blocking three quarters of every false entry the game could produce — and
+// dropping the radius to 0 raised false logs from 23.8 to 260.1 per run without
+// moving the win rate by a single seed. Holding formation had become a
+// permanent, invisible, unspendable shield against the deception the game is
+// about.
+//
+// Now it is a VERB. You have to turn to someone and ask, and their answer only
+// covers you for a little while — long enough to ask and then walk to the
+// marker together, nowhere near long enough to ask once at camp and be covered
+// all day. Standing near people is not the same as checking with them.
+export const VOUCH_WINDOW = 18;
 export const DISSOLVE_TIME = 10; // seconds with all six gone before the party dissolves
 
 // --- items -------------------------------------------------------------------
@@ -345,6 +361,7 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
     goneTime: 0,
     steadyUntil: 0,
     lensUntil: 0, // sim.time until which the lead's OWN screen is forced honest
+    vouchUntil: 0, // sim.time until which this mind will vouch for what you showed them
   };
 
   // Open facing the middle of the basin: camp sits off-centre near the rim, and
@@ -661,6 +678,10 @@ export function checkIn(sim, id) {
     // Fraying minds shade optimistic — more so the more stoic they are.
     claim = sim.rng() < 0.35 + ch.stoic * 0.5 ? BAND.UNSETTLED : truth;
   }
+  // Asking IS the corroboration verb. There is no separate "show them the
+  // marker" key: checking on someone is already the act of getting their eyes
+  // on you, and the record follows from it. See VOUCH_WINDOW.
+  ch.vouchUntil = sim.time + VOUCH_WINDOW;
   const report = {
     who: ch.id,
     name: ch.name,
@@ -787,8 +808,19 @@ export function logMarker(sim, phantom = null, actor = sim.player) {
   // what lets a second human vouch for the lead (and the lead for them); in
   // single player the actor IS the lead, so party-minus-actor is exactly the
   // companion list this used to search.
+  // A witness is someone you ASKED, who is standing with you, and who is in a
+  // state to answer honestly. The last of those three is the one you cannot
+  // check: a companion who is themselves gone will agree with anything you put
+  // in front of them, and nothing on screen tells you which kind you just
+  // asked. That is the party as a tool you use, rather than armour you wear.
   const lucidWitness = sim.party.find(
     (c) => c !== actor && !c.hallucinating && bandOf(c.lucidity) !== BAND.BRITTLE
+      // A second HUMAN at your shoulder vouches by being there: they are a
+      // person looking at the same thing who can simply say so out loud, and
+      // there is no verb to route that through. An AI companion has to be
+      // asked — checkIn is that ask — because otherwise the party's mere
+      // presence is a shield, which is the thing this rule exists to stop.
+      && (c.humanSlot !== null || (c.vouchUntil || 0) > sim.time)
       && dist2D(c, actor) <= CORROBORATE_RADIUS,
   );
 
@@ -852,7 +884,10 @@ export function logMarker(sim, phantom = null, actor = sim.player) {
     corroborated: !!lucidWitness,
     by: lucidWitness ? lucidWitness.name : null,
   });
-  emit(sim, "log", `${near.name} surveyed.${lucidWitness ? ` ${lucidWitness.name} confirms.` : " Uncorroborated."}`, {
+  // "Uncorroborated" is the whole teaching signal for the check-in verb: it is
+  // the moment a player finds out that walking with people is not the same as
+  // asking them, and it fires on every entry they write alone.
+  emit(sim, "log", `${near.name} surveyed.${lucidWitness ? ` ${lucidWitness.name} confirms.` : " Nobody vouched for it."}`, {
     id: near.id,
   });
   return { ok: true, real: true, corroborated: !!lucidWitness };

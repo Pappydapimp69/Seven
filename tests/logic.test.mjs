@@ -14,7 +14,7 @@ import {
   possess, release, possessableCompanions,
   PARTY_SIZE, MAX_LUCIDITY, DOSE_COUNT, RECOVER_AT, RECOVER_TIME, DISSOLVE_TIME,
   TIME_LIMIT, PYLON_RADIUS, LOG_RADIUS, ISOLATION_DIST,
-  ITEM_CAP, ITEM_PICKUP_RADIUS, ITEM_INFO, PHANTOM_ITEM_COST, CRAFT_RECIPES, CAMPAIGN_LENGTH, LUCIDITY_GRACE, FULL_DRAIN_AT, graceMultiplier,
+  ITEM_CAP, ITEM_PICKUP_RADIUS, ITEM_INFO, VOUCH_WINDOW, PHANTOM_ITEM_COST, CRAFT_RECIPES, CAMPAIGN_LENGTH, LUCIDITY_GRACE, FULL_DRAIN_AT, graceMultiplier,
   GATHER_RADIUS, GATHER_HOLD_TIME, GATHER_YIELD, STAKE_COST, PYLON_MAX_CHARGE, TRAIT_VARIANCE, COMPANION_TEMPLATES,
   COMPANION_ITEM_CAP, OFFER_RADIUS,
 } from "../src/state.js";
@@ -721,20 +721,44 @@ check("you must stand at a marker to log it", () => {
   eq(logMarker(sim).ok, false, "logged the same marker twice");
 });
 
-check("a lucid companion nearby corroborates the entry", () => {
+check("corroboration is a verb: standing near someone is not checking with them", () => {
   const sim = createRun({ seed: 33 });
   const m = sim.monoliths[0];
   sim.player.x = m.x;
   sim.player.z = m.z;
   for (const c of sim.companions) { c.x = m.x + 200; c.z = m.z + 200; }
   eq(logMarker(sim).corroborated, false, "corroborated with nobody in range");
-  sim.monoliths[1].logged = false;
+
+  // A body at your shoulder, unasked. This used to be enough, and that made
+  // holding formation a permanent invisible shield against the whole deception
+  // layer — a lucid companion was beside the lead for 75% of every
+  // hallucinating second.
   const m2 = sim.monoliths[1];
   sim.player.x = m2.x;
   sim.player.z = m2.z;
   sim.companions[0].x = m2.x + 2;
   sim.companions[0].z = m2.z;
-  eq(logMarker(sim).corroborated, true, "a lucid companion at your shoulder should confirm");
+  eq(logMarker(sim).corroborated, false, "an unasked bystander vouched for the entry");
+
+  // Ask them, and the same body is now a witness.
+  const m3 = sim.monoliths[2];
+  sim.player.x = m3.x;
+  sim.player.z = m3.z;
+  sim.companions[0].x = m3.x + 2;
+  sim.companions[0].z = m3.z;
+  checkIn(sim, sim.companions[0].id);
+  eq(logMarker(sim).corroborated, true, "a companion you actually asked should confirm");
+});
+
+check("a vouch expires — you cannot ask once at camp and be covered all day", () => {
+  const sim = createRun({ seed: 36 });
+  const c = sim.companions[0];
+  const m = sim.monoliths[0];
+  sim.player.x = m.x; sim.player.z = m.z;
+  c.x = m.x + 2; c.z = m.z;
+  checkIn(sim, c.id);
+  sim.time += VOUCH_WINDOW + 1;
+  eq(logMarker(sim).corroborated, false, "a stale vouch still counted");
 });
 
 check("a hallucinating lead with nobody lucid nearby can write down nothing", () => {
@@ -765,9 +789,29 @@ check("a lucid witness prevents a counterfeit entry", () => {
   sim.companions[0].x = spot.x + 1;
   sim.companions[0].z = spot.z + 1;
   sim.companions[0].lucidity = 90;
-  const res = logMarker(sim, { name: "the Sixth Stone" });
-  eq(res.ok, false, "a lucid companion should refuse the phantom");
-  eq(sim.stats.falseLogs, 0, "false log recorded despite a witness");
+
+  // Unasked, they say nothing, and the counterfeit goes in.
+  const unasked = logMarker(sim, { name: "the Sixth Stone" });
+  assert(unasked.ok && unasked.real === false, "a bystander blocked a phantom without being asked");
+  eq(sim.stats.falseLogs, 1, "the unasked case should have produced a false entry");
+
+  // Asked, they refuse it. Fresh sim: the entry the unasked case just wrote is
+  // sitting under the lead's feet, and the strike branch would claim the verb
+  // before the counterfeit branch ever ran.
+  const sim2 = createRun({ seed: 35 });
+  sim2.player.hallucinating = true;
+  sim2.player.hallucination = HALLUCINATION.PHANTOM_MARKER;
+  const spot2 = farFromPylons(sim2);
+  sim2.player.x = spot2.x;
+  sim2.player.z = spot2.z;
+  for (const m of sim2.monoliths) { m.x += 1000; m.z += 1000; }
+  sim2.companions[0].x = spot2.x + 1;
+  sim2.companions[0].z = spot2.z + 1;
+  sim2.companions[0].lucidity = 90;
+  checkIn(sim2, sim2.companions[0].id);
+  const res = logMarker(sim2, { name: "the Sixth Stone" });
+  eq(res.ok, false, "a companion you asked should refuse the phantom");
+  eq(sim2.stats.falseLogs, 0, "a false log was recorded despite an asked witness");
 });
 
 // ---------------------------------------------------------------------------
@@ -2548,6 +2592,8 @@ check("two humans can corroborate each other's surveys, but never their own", ()
   sim.player.x = m.x + 2; sim.player.z = m.z; // the lead is at player two's shoulder
   const res = logMarker(sim, null, c);
   assert(res.ok && res.real, "player two should log the marker");
+  // A second HUMAN vouches by presence — they can just say it out loud, and
+  // there is no verb to route that through. AI companions must be asked.
   assert(res.corroborated, "the lead standing alongside should corroborate it");
   // Now the reverse: nobody but the surveyor in range at all.
   const m2 = sim.monoliths[1];
@@ -3166,6 +3212,28 @@ check("standing at a false claim while lucid offers the strike", () => {
   logMarker(clean);
   const realEv = clean.events.find((e) => e.kind === "logStrike");
   eq(realEv.text, ev.text, "a real strike and a believed one do not read the same");
+});
+
+
+// The corroboration rule is now a VERB, so the game has to say so somewhere a
+// player reads — otherwise "nobody vouched for it" is a scold for failing to do
+// a thing nothing ever mentioned. Brain:
+// assert-every-bound-verb-is-explained. Parsed out of the help panel, with the
+// key-summary line stripped first: that line lists "1-5 check in" verbatim and
+// would make this assertion tautological (confirming the key exists while the
+// panel never says what it BUYS).
+check("the help panel explains what checking in actually buys you", () => {
+  const html = fsReadFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const panel = html.slice(html.indexOf('id="howto"'), html.indexOf('id="howto"') + 4000);
+  const prose = panel.replace(/<p class="keys"[\s\S]*?<\/p>/g, "").replace(/<[^>]+>/g, " ");
+  for (const claim of [/check\s*in/i, /record/i, /thrown out|discredit/i, /strike/i]) {
+    assert(claim.test(prose), `the help panel never mentions ${claim} — a bound verb with no explanation`);
+  }
+  // And it must not still describe the OLD ambient rule.
+  assert(
+    !/lucid\s+beside you/i.test(prose),
+    "the help still says a lucid companion BESIDE you keeps the record honest — that rule is gone",
+  );
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
