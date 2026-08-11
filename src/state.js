@@ -108,34 +108,26 @@ export const CONTAGION_DIST = 9; // seeing someone come apart costs you
 export const CONTAGION_MULT = 0.28; // per hallucinating neighbour in range
 export const SCAR_MULT = 0.16; // per prior recovery — coming back costs something
 export const PYLON_RADIUS = 7.5;
-// A pylon is not a tap you stand under. You DRAW from it: one draw puts a
-// chunk of light back and holds the decay off for PYLON_PAUSE seconds, and it
-// costs the pylon a fixed slice of its charge. Standing there does nothing
-// further until that pause runs out, and a pylon only has so many draws in it.
+// A pylon fires ONCE. Standing in one puts a chunk of light back into every
+// mind inside it and holds their decay off for PYLON_PAUSE seconds — and then
+// that pylon is dead for the rest of the basin. It does not recharge. There is
+// no second visit.
 //
-// The old model restored 15/second for as long as you stood inside, which made
-// a charged pylon an off switch: park the party, wait, walk out full. The clock
-// was the only thing the player was really fighting. Now relief is a resource
-// with a bottom — you can always buy ten more seconds, until you cannot.
-export const PYLON_DRAW = 34; // lucidity returned by a single draw
-export const PYLON_PAUSE = 10; // seconds of held-off decay a draw buys
-// Charge one draw takes out of the pylon, PER MIND. Six people topping up
-// together is expensive, which is the intended shape: relief is scarce and you
-// are a party, not a person.
+// Two earlier models are worth not going back to. Continuous restore while you
+// stood inside made a pylon an off switch: park the party, wait, walk out full.
+// A charge pool you could draw from repeatedly made it a slow off switch, and
+// put the whole balance on a cliff edge between "camp forever" and "unwinnable"
+// (measured: a four-point change in draw cost took the deceived bot from 92% to
+// 25%). One shot removes the knob entirely — the basin holds exactly as much
+// relief as it has pylons, and the only question left is WHEN you spend each
+// one and WHO is standing close enough to catch it.
 //
-// This number is on a CLIFF and should not be nudged casually. Measured against
-// the deceived bot, 12 seeds per tier: cost 8 -> 92%/92% (tiers do not
-// separate), 12 -> 83%/92% (bleak came out EASIER than standard), 16 ->
-// 75%/67% (ordered, which no other sample achieved), 20 -> 25%/8%, 24 ->
-// 25%/0%. The collapse between 16 and 20 is a break-even threshold: below it a
-// rotating party can out-draw its own decay across five pylons, above it the
-// travel between them costs more than the draws return. Re-run
-// tests/balance.mjs if you touch this, PYLON_DRAW, PYLON_PAUSE, PYLON_RECHARGE,
-// BASE_DRAIN or the party size — they all price against each other.
-export const PYLON_DRAW_COST = 16;
-export const PYLON_DRAIN = 9; // pylon charge/second while it is doing work
-export const PYLON_RECHARGE = 2.0; // charge/second while nobody is drawing on it
-export const PYLON_MAX_CHARGE = 100;
+// That last part is the point. Because the pulse takes everyone inside the
+// radius at once, a pylon rewards having the party gathered when you trigger it
+// — which is a real decision rather than a resource to grind.
+export const PYLON_DRAW = 55; // lucidity returned to each mind in the pulse
+export const PYLON_PAUSE = 10; // seconds of held-off decay the pulse buys
+export const PYLON_MAX_CHARGE = 100; // retained so old saves deserialise cleanly
 export const DOSE_COUNT = 3; // "lumen" ampoules — the whole supply, for six people
 export const DOSE_RESTORE = 70;
 export const RECOVER_AT = 45; // lucidity a mind comes back to after hallucinating
@@ -482,7 +474,7 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
     // scoring all stay exactly as balanced, and dropping out is a handoff back
     // to the AI that is already driving that character.
     humans: [player, ...rejoined],
-    pylons: world.pylons.map((p) => ({ ...p, charge: PYLON_MAX_CHARGE, live: true })),
+    pylons: world.pylons.map((p) => ({ ...p, charge: PYLON_MAX_CHARGE, spent: false, live: true })),
     // `discovered` is what makes this a game about EXPLORING rather than about
     // walking a known route: a marker's position is not knowledge the party
     // starts with. It is set when somebody in the party actually picks it out of
@@ -562,12 +554,44 @@ export function partyCentroid(sim) {
   };
 }
 
-/** The pylon a character is currently standing in, if it has charge left. */
+/** The pylon a character is standing in, if it has not already been spent. */
 export function pylonAt(sim, ch) {
   for (const p of sim.pylons) {
-    if (p.charge > 0 && dist2D(p, ch) <= PYLON_RADIUS) return p;
+    if (!p.spent && dist2D(p, ch) <= PYLON_RADIUS) return p;
   }
   return null;
+}
+
+/**
+ * Spend the pylon `actor` is standing in. ONE pulse, taking everyone inside the
+ * radius together — including pulling back anyone hallucinating, which used to
+ * need sustained contact and now simply happens, because there is no second
+ * chance to stand there longer.
+ *
+ * ACTIVATED, not triggered by contact. That distinction is the whole mechanic
+ * once a pylon only works once: firing on proximity meant a companion wandering
+ * through on their way somewhere else burned the basin's scarcest resource for
+ * a single body, and the lead never got a say. Now somebody has to choose to
+ * spend it, and the choice is worth making well — the pulse takes everyone in
+ * the radius, so the question is who you brought.
+ */
+export function activatePylon(sim, actor = sim.player) {
+  const p = pylonAt(sim, actor);
+  if (!p) return { ok: false, reason: "no-pylon" };
+  const inside = sim.party.filter((c) => dist2D(p, c) <= PYLON_RADIUS);
+  p.spent = true;
+  p.live = false;
+  p.charge = 0;
+  for (const ch of inside) {
+    if (ch.hallucinating) recover(sim, ch, "pylon");
+    ch.lucidity = Math.min(MAX_LUCIDITY, ch.lucidity + PYLON_DRAW);
+    ch.decayPausedUntil = sim.time + PYLON_PAUSE;
+  }
+  sim.stats.draws = (sim.stats.draws || 0) + 1;
+  emit(sim, "draw", `The pylon gives out — ${inside.length} of you caught it. It will not light again.`, {
+    count: inside.length,
+  });
+  return { ok: true, caught: inside.length };
 }
 
 /**
@@ -575,33 +599,12 @@ export function pylonAt(sim, ch) {
  * which the balance harness reports on.
  */
 export function tickLucidity(sim, ch, dt) {
-  const inPylon = pylonAt(sim, ch);
-  if (inPylon) {
-    sim.stats.pylonSeconds += dt;
-    if (ch.hallucinating) {
-      // Pulling someone back takes sustained contact, not a drive-by. This is
-      // the one thing a pylon still does continuously, and it still costs the
-      // pylon by the second.
-      inPylon.charge = Math.max(0, inPylon.charge - PYLON_DRAIN * dt);
-      ch.recoverProgress += dt;
-      if (ch.recoverProgress >= RECOVER_TIME) recover(sim, ch, "pylon");
-      return 0;
-    }
-    // A DRAW, not a tap. One chunk of light, one pause, one slice of the
-    // pylon's charge — and nothing more until the pause runs out, however long
-    // you stand there. See PYLON_DRAW.
-    if ((ch.decayPausedUntil || 0) <= sim.time && inPylon.charge >= PYLON_DRAW_COST) {
-      inPylon.charge = Math.max(0, inPylon.charge - PYLON_DRAW_COST);
-      ch.lucidity = Math.min(MAX_LUCIDITY, ch.lucidity + PYLON_DRAW);
-      ch.decayPausedUntil = sim.time + PYLON_PAUSE;
-      sim.stats.draws = (sim.stats.draws || 0) + 1;
-      emit(sim, "draw", `${ch.name} draws from the pylon.`, { who: ch.id });
-    }
-  }
-  ch.recoverProgress = inPylon ? ch.recoverProgress : 0;
-  // The pause travels with the MIND, not the pylon: draw, then walk, and you
-  // carry ten seconds of held-off decay out with you. That is what makes a
-  // pylon a staging post rather than a place to sit.
+  if (pylonAt(sim, ch)) sim.stats.pylonSeconds += dt;
+  ch.recoverProgress = 0;
+  // The pause travels with the MIND, not the pylon: catch a pulse, then walk,
+  // and you carry ten seconds of held-off decay out with you. That is what
+  // makes a pylon a staging post rather than a place to sit — and since it only
+  // ever fires once, sitting was never going to work anyway.
   if ((ch.decayPausedUntil || 0) > sim.time && !ch.hallucinating) return 0;
   if (ch.hallucinating) {
     ch.goneTime += dt;
@@ -1841,11 +1844,6 @@ export function tick(sim, dt, input = {}) {
   }
 
   // Pylons recharge only while nobody is drawing on them.
-  for (const p of sim.pylons) {
-    const inUse = sim.party.some((c) => Math.hypot(p.x - c.x, p.z - c.z) <= PYLON_RADIUS);
-    if (!inUse) p.charge = Math.min(PYLON_MAX_CHARGE, p.charge + PYLON_RECHARGE * step);
-    p.live = p.charge > 0;
-  }
 
   updateCompanions(sim, step);
   // Sightings are throttled: six markers × six pairs of eyes is a lot of

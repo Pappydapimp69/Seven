@@ -20,6 +20,7 @@ import {
   recipeKey,
   companionPickup,
   handoffToPlayer,
+  activatePylon,
 } from "./state.js?v=mirage-0.9.8";
 
 // Higher band = worse. Lets a per-companion trait move the pylon-seeking
@@ -445,19 +446,32 @@ export function updateCompanions(sim, dt) {
           c.path = null;
           emit(sim, "break", `${c.name} breaks off toward a pylon.`, { who: c.id });
         }
+        // ARRIVED: spend it. This has to happen inside the seek branch, not
+        // after it — a companion already standing on their target pylon
+        // re-enters this branch every tick and `continue`s, so an activation
+        // placed below could never be reached and companions would walk to
+        // pylons forever without ever using one.
+        if (dist(c, p) <= PYLON_RADIUS) {
+          activatePylon(sim, c);
+          c.goalKind = "resting";
+          continue;
+        }
         c.goal = { x: p.x, z: p.z };
         stepToward(sim, c, c.goal, WALK_SPEED, dt);
         continue;
       }
     }
 
-    // A companion standing in a pylon stays put until they are topped up — you
-    // will have to wait for them, and waiting costs the others their own margin.
-    const standing = sim.pylons.find((p) => p.charge > 0 && dist(p, c) <= PYLON_RADIUS);
-    if (standing && c.lucidity < 78) {
-      c.goalKind = "resting";
-      continue;
-    }
+    // A companion who walked all the way to a pylon spends it. They will not
+    // burn one they merely happen to be standing in — a pylon only works once,
+    // and a companion wasting the basin's scarcest resource in passing is the
+    // failure that made contact-firing untenable. Reaching one on purpose, in
+    // trouble, is a different thing, and it is also the moment the lead can
+    // choose to be standing close enough to catch the same pulse.
+    // Deliberately NOT "standing in one is enough". A companion crossing a
+    // pylon on an errand must not burn the basin's scarcest resource for one
+    // body with the lead nowhere near it — spending one is something you walk
+    // to on purpose, handled in the seek branch above.
 
     // Errand, part one: already chasing something for the lead. Keyed on
     // `fetchItemId` alone, NOT on `goalKind` still reading "fetch" — a pylon

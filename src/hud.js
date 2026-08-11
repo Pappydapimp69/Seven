@@ -7,7 +7,7 @@
 // debrief, after the run is over.
 
 import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds } from "./percept.js?v=mirage-0.9.8";
-import { LOG_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, gatherTarget, GATHER_HOLD_TIME, previewCraft, claimedEntryAt } from "./state.js?v=mirage-0.9.8";
+import { LOG_RADIUS, PYLON_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, gatherTarget, GATHER_HOLD_TIME, previewCraft, claimedEntryAt, pylonAt } from "./state.js?v=mirage-0.9.8";
 
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 
@@ -269,7 +269,17 @@ export function createHud(sim, percept, opts = {}) {
     // An entry this mind believes it already crossed out stops being offered,
     // exactly as a genuinely struck one does.
     const strikeable = claim && !viewer.believedStruck?.has(claim.id) ? claim : null;
-    if (pickup && sim.status === "playing") {
+    // Top of the chain: a pylon you are standing in is the one thing here that
+    // can be permanently lost by walking away from it, and it only works once.
+    const pylon = pylonAt(sim, actor);
+    if (pylon && sim.status === "playing") {
+      const together = sim.party.filter(
+        (c) => Math.hypot(c.x - pylon.x, c.z - pylon.z) <= PYLON_RADIUS,
+      ).length;
+      els.text.textContent = `Draw the pylon — ${together} of you in range, one use only`;
+      els.prompt.classList.add("show");
+      els.fill.style.width = "0%";
+    } else if (pickup && sim.status === "playing") {
       els.text.textContent = `Pick up ${ITEM_INFO[pickup.shownKind].label}`;
       els.prompt.classList.add("show");
       els.fill.style.width = "0%";

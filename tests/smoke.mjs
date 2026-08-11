@@ -260,13 +260,19 @@ function assert(cond, msg) {
   const recovered = await page.evaluate(() => {
     const M = window.__mirage;
     const s = M.sim;
-    const p = s.pylons.find((x) => x.charge > 50) || s.pylons[0];
-    p.charge = 100;
+    // A pylon no longer works by standing in it. It fires ONCE, when someone
+    // activates it — same key as survey — and is then dead for the run. So
+    // this drives the real verb rather than waiting, which is also the only
+    // remaining way back from a hallucination besides a dose.
+    const p = s.pylons.find((x) => !x.spent) || s.pylons[0];
+    p.spent = false;
     M.teleport(p.x, p.z);
-    M.advance(5);
-    return { hallucinating: s.player.hallucinating, lucidity: s.player.lucidity, perceptActive: M.percept.active };
+    M.act(M.ACTIONS.SURVEY);
+    M.advance(0.2);
+    return { hallucinating: s.player.hallucinating, lucidity: s.player.lucidity, perceptActive: M.percept.active, spent: p.spent };
   });
-  assert(!recovered.hallucinating, "sustained pylon contact did not bring the lead back");
+  assert(recovered.spent, "activating a pylon did not spend it");
+  assert(!recovered.hallucinating, "the pylon pulse did not bring the lead back");
   assert(!recovered.perceptActive, "the perception layer stayed active after recovery");
   assert(recovered.lucidity > 20, `recovered to a suspicious level: ${recovered.lucidity}`);
 

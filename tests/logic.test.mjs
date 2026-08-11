@@ -14,7 +14,7 @@ import {
   possess, release, possessableCompanions,
   PARTY_SIZE, MAX_LUCIDITY, DOSE_COUNT, RECOVER_AT, RECOVER_TIME, DISSOLVE_TIME,
   TIME_LIMIT, PYLON_RADIUS, LOG_RADIUS, ISOLATION_DIST,
-  ITEM_CAP, ITEM_PICKUP_RADIUS, ITEM_INFO, VOUCH_WINDOW, PYLON_PAUSE, PYLON_DRAW_COST, PHANTOM_ITEM_COST, CRAFT_RECIPES, CAMPAIGN_LENGTH, LUCIDITY_GRACE, FULL_DRAIN_AT, graceMultiplier,
+  ITEM_CAP, ITEM_PICKUP_RADIUS, ITEM_INFO, VOUCH_WINDOW, PYLON_PAUSE, PYLON_DRAW, activatePylon, pylonAt, PHANTOM_ITEM_COST, CRAFT_RECIPES, CAMPAIGN_LENGTH, LUCIDITY_GRACE, FULL_DRAIN_AT, graceMultiplier,
   GATHER_RADIUS, GATHER_HOLD_TIME, GATHER_YIELD, STAKE_COST, PYLON_MAX_CHARGE, TRAIT_VARIANCE, COMPANION_TEMPLATES,
   COMPANION_ITEM_CAP, OFFER_RADIUS,
 } from "../src/state.js";
@@ -255,53 +255,66 @@ check("nothing drains for the whole calm window, then it drains", () => {
   }
 });
 
-// The pylon is a resource with a bottom, not an off switch. This is the whole
-// point of the brief: "you can't stop the decay forever."
-check("a pylon buys a pause, and runs out", () => {
+// A pylon fires ONCE, takes everyone standing in it, and is then dead for the
+// rest of the basin. "You can't stop the decay forever" is not a tuning claim
+// here, it is structural: the basin holds exactly as much relief as it has
+// pylons.
+check("a pylon fires once, catches everyone in it, and never lights again", () => {
   const sim = createRun({ seed: 71 });
+  sim.time = FULL_DRAIN_AT;
+  const p = sim.pylons[0];
+  const [a, b] = [sim.player, sim.companions[0]];
+  const far = sim.companions[1];
+  a.x = p.x; a.z = p.z;
+  b.x = p.x + 1; b.z = p.z;
+  far.x = p.x + 500; far.z = p.z + 500;
+  a.lucidity = 20; b.lucidity = 20; far.lucidity = 20;
+
+  const res = activatePylon(sim, a);
+  assert(res.ok, "activating a live pylon failed");
+  assert(a.lucidity > 20 && b.lucidity > 20, "the pulse missed somebody standing in it");
+  eq(far.lucidity, 20, "the pulse reached someone outside the radius");
+  assert(a.decayPausedUntil > sim.time, "the pulse did not hold the decay off");
+  assert(p.spent, "the pylon was not spent");
+
+  // Dead forever: a second attempt gives nothing, however long you stand there.
+  a.lucidity = 20;
+  eq(activatePylon(sim, a).ok, false, "a spent pylon fired a second time");
+  eq(a.lucidity, 20, "a spent pylon still put light back");
+  eq(pylonAt(sim, a), null, "a spent pylon still counts as somewhere to stand");
+});
+
+// The pause is on the MIND, not the pylon — catch a pulse and walk out with it.
+check("the pause travels with you, then expires", () => {
+  const sim = createRun({ seed: 72 });
   sim.time = FULL_DRAIN_AT;
   const p = sim.pylons[0];
   const ch = sim.player;
   ch.x = p.x; ch.z = p.z;
-  ch.lucidity = 20;
+  activatePylon(sim, ch);
 
-  tickLucidity(sim, ch, 0.05);
-  assert(ch.lucidity > 20, "standing in a charged pylon did not put anything back");
-  assert(ch.decayPausedUntil > sim.time, "a draw did not hold the decay off");
-  const afterFirst = ch.lucidity;
-  const chargeAfterFirst = p.charge;
-
-  // Standing there does NOTHING more until the pause runs out.
-  tickLucidity(sim, ch, 0.05);
-  eq(ch.lucidity, afterFirst, "a second draw landed inside the pause");
-  eq(p.charge, chargeAfterFirst, "the pylon was billed twice for one draw");
-
-  // The pause protects you even away from the pylon...
   ch.x = p.x + 500; ch.z = p.z + 500;
   ch.lucidity = 50;
   tickLucidity(sim, ch, 0.05);
   eq(ch.lucidity, 50, "decay ran during a paid-for pause");
 
-  // ...and stops when it stops.
   sim.time += PYLON_PAUSE + 0.1;
   tickLucidity(sim, ch, 0.05);
   assert(ch.lucidity < 50, "decay did not resume after the pause expired");
+});
 
-  // And the pylon empties: you cannot stand there forever.
+// Contact must NOT be enough. A companion crossing a pylon on an errand would
+// otherwise burn the basin's scarcest resource for one body, with the lead
+// nowhere near it and no say in the matter.
+check("walking through a pylon does not spend it", () => {
+  const sim = createRun({ seed: 73 });
+  sim.time = FULL_DRAIN_AT;
+  const p = sim.pylons[0];
+  const ch = sim.player;
   ch.x = p.x; ch.z = p.z;
-  let draws = 0;
-  for (let i = 0; i < 200; i++) {
-    sim.time += PYLON_PAUSE + 0.1;
-    const before = ch.lucidity;
-    ch.lucidity = 10;
-    tickLucidity(sim, ch, 0.05);
-    if (ch.lucidity > 10) draws++;
-    else break;
-    void before;
-  }
-  assert(draws >= 2, `a full pylon should be good for more than one draw, got ${draws}`);
-  assert(draws < 200, "the pylon never ran dry — decay can be stopped forever");
-  assert(p.charge < PYLON_DRAW_COST, `pylon still holds ${p.charge} charge but stopped giving draws`);
+  ch.lucidity = 30;
+  advance(sim, 3);
+  assert(!p.spent, "standing in a pylon spent it without anyone activating it");
 });
 
 check("the difficulty tiers are still distinguishable through the ramp", () => {
@@ -513,48 +526,50 @@ check("a pylon restores everyone standing in it, and spends itself doing so", ()
   c.lucidity = 20;
   c.x = p.x;
   c.z = p.z;
-  const charge0 = p.charge;
-  tickLucidity(sim, c, 1);
+  activatePylon(sim, c);
   assert(c.lucidity > 20, "pylon did not restore");
-  assert(p.charge < charge0, "pylon did not spend charge");
+  assert(p.spent, "pylon did not spend itself");
 });
 
 check("a spent pylon does nothing", () => {
   const sim = createRun({ seed: 14 });
   sim.time = FULL_DRAIN_AT;
   const p = sim.pylons[0];
-  p.charge = 0;
+  p.spent = true;
   const c = sim.companions[0];
   c.lucidity = 20;
   c.x = p.x;
   c.z = p.z;
+  eq(activatePylon(sim, c).ok, false, "a dead pylon activated");
   tickLucidity(sim, c, 1);
   assert(c.lucidity < 20, "a dead pylon still restored");
 });
 
-check("a pylon recharges only while nobody draws on it", () => {
+// Recharging is GONE, and its absence is the mechanic: the basin holds exactly
+// as much relief as it has pylons, so "you can't stop the decay forever" is
+// structural rather than a tuned rate.
+check("a spent pylon never comes back", () => {
   const sim = createRun({ seed: 15 });
   const p = sim.pylons[0];
-  p.charge = 50;
-  // Park the whole party far away so nothing is in range.
   const spot = farFromPylons(sim);
   for (const c of sim.party) { c.x = spot.x; c.z = spot.z; }
-  advance(sim, 4);
-  assert(p.charge > 50, `no recharge while idle: ${p.charge}`);
+  p.spent = true;
+  advance(sim, 60);
+  assert(p.spent, "a spent pylon recharged — relief is supposed to be finite");
 });
 
-check("pulling a hallucinating companion back needs sustained pylon contact", () => {
+// Recovery used to need RECOVER_TIME of sustained contact. With one shot there
+// is no "longer": the pulse either catches you or it doesn't.
+check("the pulse pulls back anyone hallucinating inside it", () => {
   const sim = createRun({ seed: 16 });
   const p = sim.pylons[0];
   const c = sim.companions[1];
   beginHallucinating(sim, c);
   c.x = p.x;
   c.z = p.z;
-  tickLucidity(sim, c, RECOVER_TIME * 0.5);
-  assert(c.hallucinating, "recovered too early — contact must be sustained");
-  tickLucidity(sim, c, RECOVER_TIME * 0.6);
-  assert(!c.hallucinating, "did not recover after sustained contact");
-  eq(c.lucidity, RECOVER_AT, "recovery level");
+  activatePylon(sim, sim.player.x === p.x ? sim.player : c);
+  assert(!c.hallucinating, "the pulse did not pull back a mind standing in it");
+  assert(c.lucidity >= RECOVER_AT, "recovered below the recovery floor");
 });
 
 check("stepping out of the pylon resets recovery progress", () => {
@@ -1425,16 +1440,18 @@ check("using a stake plants a real, functioning pylon at the player's position",
   const planted = sim.pylons[sim.pylons.length - 1];
   eq(planted.x, 12.5);
   eq(planted.z, -7.5);
-  assert(planted.charge > 0 && planted.charge <= PYLON_MAX_CHARGE, "planted charge out of range");
+  assert(!planted.spent, "a planted pylon should start unspent");
 
-  // And it works exactly like a real pylon — tickLucidity doesn't know or
-  // care that this one didn't come from world generation.
+  // And it works exactly like a real pylon — activatePylon doesn't know or
+  // care that this one didn't come from world generation, including the part
+  // where it only ever fires once.
   const c = sim.companions[0];
   c.lucidity = 20;
   c.x = planted.x;
   c.z = planted.z;
-  tickLucidity(sim, c, 1);
+  activatePylon(sim, c);
   assert(c.lucidity > 20, "a planted stake should restore lucidity like any pylon");
+  assert(planted.spent, "a planted pylon should be spent by its one use");
 });
 
 // ---------------------------------------------------------------------------
@@ -1699,13 +1716,18 @@ check("a fetch errand survives being preempted by a pylon-break instead of perma
   // Preempt it with a pylon crisis: a known, charged pylon right where the
   // courier already is, and a lucidity low enough to trigger the uniform
   // BRITTLE tell regardless of this companion's own selfCare roll.
-  sim.pylons.push({ id: "regr-pylon", x: courier.x, z: courier.z, charge: 100, live: true });
+  sim.pylons.push({ id: "regr-pylon", x: courier.x, z: courier.z, charge: 100, live: true, spent: false });
   courier.lucidity = 1;
 
+  // The courier is standing ON the planted pylon, so the break and the
+  // activation land on the same tick and goalKind goes straight to "resting" —
+  // a pylon is spent the moment somebody who walked to it arrives, not after a
+  // stay. Either state means the errand was preempted, which is what this
+  // regression is about.
   let brokeOff = false;
   for (let i = 0; i < 5; i++) {
     tick(sim, 1 / 30);
-    if (courier.goalKind === "pylon") { brokeOff = true; break; }
+    if (courier.goalKind === "pylon" || courier.goalKind === "resting") { brokeOff = true; break; }
   }
   assert(brokeOff, "test setup: the pylon-break never actually preempted the fetch errand");
   eq(courier.fetchItemId, it.id, "the fetch errand must still be remembered underneath the pylon-break, not cleared just because goalKind moved on");

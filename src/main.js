@@ -3,7 +3,7 @@
 
 import {
   createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem, dropItem, craftItem, gatherTarget, offerItem,
-  possess, release, possessableCompanions,
+  possess, release, possessableCompanions, activatePylon, pylonAt,
   PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
 } from "./state.js?v=mirage-0.9.8";
 import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=mirage-0.9.8";
@@ -358,6 +358,24 @@ function handleAction(action, arg, player = run.players[0]) {
       // tick()'s updateGatherHold), not a tap — a bare press here just needs
       // to not fall through to a confusing "nothing to survey" message.
       if (gatherTarget(sim, actor)) break;
+      // Standing in an unspent pylon, the verb spends it. Same key, because a
+      // pylon is not something you carry or aim — it is a thing you are
+      // standing in, and "act on what is here" already means exactly that. It
+      // takes priority over surveying: nobody walks into the light of a pylon
+      // to write in a notebook.
+      if (pylonAt(sim, actor)) {
+        const ares = activatePylon(sim, actor);
+        if (ares.ok) {
+          audio.play("recover");
+          hud.say(
+            ares.caught > 1
+              ? `The pylon gives out. ${ares.caught} of you caught it — it will not light again.`
+              : "The pylon gives out. You caught it alone — it will not light again.",
+            ares.caught > 1 ? "good" : "warn",
+          );
+        }
+        break;
+      }
       const res = logMarker(sim, nearestPhantom(sim, percept, actor), actor);
       if (!res.ok) {
         // A failed survey used to be silent-but-for-a-sound-cue — indistinguishable

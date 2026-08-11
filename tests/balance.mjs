@@ -16,7 +16,7 @@
 // difficulty for a human who is shown markers that do not exist and told by their
 // own party that everything is fine — costs it almost nothing.
 
-import { createRun, tick, logMarker, trueLogCount, debrief, LOG_RADIUS, PYLON_RADIUS, PYLON_DRAW_COST, FULL_DRAIN_AT } from "../src/state.js";
+import { createRun, tick, logMarker, trueLogCount, debrief, activatePylon, LOG_RADIUS, PYLON_RADIUS, FULL_DRAIN_AT } from "../src/state.js";
 import { createPercept, updatePercept } from "../src/percept.js";
 import { findPath, worldToCell, cellToWorld, floodFill, GRID } from "../src/world.js";
 
@@ -134,7 +134,7 @@ function playRun(seed, policy, difficulty = "standard") {
         // dead pylons the lie is still painting as live.
         const apparent = [
           ...percept.phantomPylons.map((p) => ({ ...p, id: `phantom:${p.id ?? "anchor"}`, phantom: true })),
-          ...sim.pylons.filter((p) => p.charge > 25 || percept.deadPylonsLookLive.has(p.id)),
+          ...sim.pylons.filter((p) => !p.spent || percept.deadPylonsLookLive.has(p.id)),
         ].filter((p) => (cooldown.get(p.id) || 0) < sim.time);
         if (apparent.length) {
           const p = apparent.reduce((a, b) => (dist(a, sim.player) < dist(b, sim.player) ? a : b));
@@ -145,7 +145,7 @@ function playRun(seed, policy, difficulty = "standard") {
       // oscillates: "someone in the party is low" keeps selecting the pylon we
       // are standing in, while "nobody IN RANGE still needs it" keeps abandoning
       // it — a companion who is low but far away satisfies both forever.
-      const live = sim.pylons.filter((p) => p.charge > 25 && (cooldown.get(p.id) || 0) < sim.time);
+      const live = sim.pylons.filter((p) => !p.spent && (cooldown.get(p.id) || 0) < sim.time);
       if (live.length) {
         const p = live.reduce((a, b) => (dist(a, sim.player) < dist(b, sim.player) ? a : b));
         return { target: p, kind: "pylon" };
@@ -228,45 +228,14 @@ function playRun(seed, policy, difficulty = "standard") {
       continue;
     }
 
-    // Sitting in a pylon: hold position until the party is topped up (or the
-    // pylon gives out), which is the whole cost of the careful policy. Bounded,
-    // because "rest forever" is otherwise the bot's dominant move and it turns
-    // every run into a light-limit loss that says nothing about the design.
+    // A pylon fires the moment somebody is standing in it, once, and is then
+    // dead. There is nothing to wait for and nothing to ration — the only
+    // decision is when to spend it and who is close enough to catch it, and the
+    // bot's version of that is simply "walk in".
     if (goalKind === "pylon" && dist(goal, sim.player) < PYLON_RADIUS * 0.6) {
-      const inRange = sim.party.filter((c) => dist(goal, c) <= PYLON_RADIUS);
-      const worst = Math.min(...inRange.map((c) => (c.hallucinating ? 0 : c.lucidity)), 100);
-      if (!restUntil) restUntil = sim.time + REST_CAP;
-      // Leave when the pylon can no longer pay for a draw, not when it hits
-      // zero: charge below one draw's cost buys nothing but standing time.
-      if ((worst < REST_TARGET || inRange.some((c) => c.hallucinating)) && goal.charge >= PYLON_DRAW_COST && sim.time < restUntil) {
-        step({ move: { x: 0, z: 0 }, yaw: sim.player.yaw });
-        continue;
-      }
-      restUntil = 0;
-      cooldown.set(goal.id, sim.time + 25);
-      goal = null;
-      continue;
-    }
-
-    // Standing at a marker that isn't there. It logs it, with conviction — and
-    // the entry is false unless a lucid companion is close enough to say so,
-    // which is the corroboration rule doing its job on a bot for once.
-    if (goalKind === "phantom-marker" && dist(goal, sim.player) <= LOG_RADIUS * 0.85) {
-      logMarker(sim, goal);
-      goal = null;
+      activatePylon(sim);
       step({ move: { x: 0, z: 0 }, yaw: sim.player.yaw });
-      continue;
-    }
-    // Relief that recedes. Arriving costs the walk and buys nothing; the bot
-    // gives up on this one and looks for the next apparent pylon.
-    if (goalKind === "mirage" && dist(goal, sim.player) < PYLON_RADIUS) {
       cooldown.set(goal.id, sim.time + 25);
-      goal = null;
-      step({ move: { x: 0, z: 0 }, yaw: sim.player.yaw });
-      continue;
-    }
-    // A phantom goal survives only as long as the episode that invented it.
-    if ((goalKind === "phantom-marker" || goalKind === "mirage") && !believesLies()) {
       goal = null;
       continue;
     }
