@@ -500,6 +500,10 @@ function assert(cond, msg) {
     // Force the lie deterministically rather than trusting the roll: the
     // player believes slot 0 is a Lens, it is really a Flare.
     M.percept.itemLabels.set("reveal-flare", "lens");
+    // Leave room for the restore to be visible. The calm window is now five
+    // minutes, so the lead is still pinned at full this early in a smoke run
+    // and "did the Flare put light back" could not be answered either way.
+    s.player.lucidity = 40;
     const lucidityBefore = s.player.lucidity;
     M.act(M.ACTIONS.USE_ITEM);
     M.advance(0.2);

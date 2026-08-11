@@ -14,9 +14,9 @@
 // The sim's job is to keep an honest, testable record of what is TRUE; `percept.js`
 // is the only place allowed to lie about it.
 
-import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=mirage-0.9.7";
-import { makeRng } from "./rng.js?v=mirage-0.9.7";
-import { updateCompanions, companionRemark } from "./party.js?v=mirage-0.9.7";
+import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=mirage-0.9.8";
+import { makeRng } from "./rng.js?v=mirage-0.9.8";
+import { updateCompanions, companionRemark } from "./party.js?v=mirage-0.9.8";
 
 export const PARTY_SIZE = 6; // you + 5 companions — the spec's five NPCs, plus the player
 export const MAX_LUCIDITY = 100;
@@ -82,8 +82,12 @@ export const BASE_DRAIN = 1.05; // lucidity/second at rest, before modifiers
 // To go back to a flat "nothing for N seconds", set LUCIDITY_RAMP to 0 and
 // LUCIDITY_GRACE to N — but re-run tests/balance.mjs and check the tiers are
 // still distinguishable, because at N=300 they were not.
-export const LUCIDITY_GRACE = 90; // dead calm: no drain at all
-export const LUCIDITY_RAMP = 150; // then ease 0 -> full drain across this long
+export const LUCIDITY_GRACE = 300; // five dead-calm minutes: no drain at all
+// Then it just goes down. No ramp: the earlier easing existed to soften a start
+// that is now a flat five minutes of nothing, and a slope you cannot feel is
+// not a mechanic. After the calm, the meter falls at a constant rate for the
+// rest of the basin and the only thing that interrupts it is a pylon.
+export const LUCIDITY_RAMP = 0;
 /** The moment drain reaches its full rate. Tests that want normal drain use this. */
 export const FULL_DRAIN_AT = LUCIDITY_GRACE + LUCIDITY_RAMP;
 
@@ -94,6 +98,7 @@ export const FULL_DRAIN_AT = LUCIDITY_GRACE + LUCIDITY_RAMP;
  */
 export function graceMultiplier(t) {
   if (t < LUCIDITY_GRACE) return 0;
+  if (LUCIDITY_RAMP <= 0) return 1; // no easing: the calm ends and the fall begins
   const into = t - LUCIDITY_GRACE;
   return into >= LUCIDITY_RAMP ? 1 : into / LUCIDITY_RAMP;
 }
@@ -103,7 +108,31 @@ export const CONTAGION_DIST = 9; // seeing someone come apart costs you
 export const CONTAGION_MULT = 0.28; // per hallucinating neighbour in range
 export const SCAR_MULT = 0.16; // per prior recovery — coming back costs something
 export const PYLON_RADIUS = 7.5;
-export const PYLON_RESTORE = 15; // lucidity/second inside a charged pylon
+// A pylon is not a tap you stand under. You DRAW from it: one draw puts a
+// chunk of light back and holds the decay off for PYLON_PAUSE seconds, and it
+// costs the pylon a fixed slice of its charge. Standing there does nothing
+// further until that pause runs out, and a pylon only has so many draws in it.
+//
+// The old model restored 15/second for as long as you stood inside, which made
+// a charged pylon an off switch: park the party, wait, walk out full. The clock
+// was the only thing the player was really fighting. Now relief is a resource
+// with a bottom — you can always buy ten more seconds, until you cannot.
+export const PYLON_DRAW = 34; // lucidity returned by a single draw
+export const PYLON_PAUSE = 10; // seconds of held-off decay a draw buys
+// Charge one draw takes out of the pylon, PER MIND. Six people topping up
+// together is expensive, which is the intended shape: relief is scarce and you
+// are a party, not a person.
+//
+// This number is on a CLIFF and should not be nudged casually. Measured against
+// the deceived bot, 12 seeds per tier: cost 8 -> 92%/92% (tiers do not
+// separate), 12 -> 83%/92% (bleak came out EASIER than standard), 16 ->
+// 75%/67% (ordered, which no other sample achieved), 20 -> 25%/8%, 24 ->
+// 25%/0%. The collapse between 16 and 20 is a break-even threshold: below it a
+// rotating party can out-draw its own decay across five pylons, above it the
+// travel between them costs more than the draws return. Re-run
+// tests/balance.mjs if you touch this, PYLON_DRAW, PYLON_PAUSE, PYLON_RECHARGE,
+// BASE_DRAIN or the party size — they all price against each other.
+export const PYLON_DRAW_COST = 16;
 export const PYLON_DRAIN = 9; // pylon charge/second while it is doing work
 export const PYLON_RECHARGE = 2.0; // charge/second while nobody is drawing on it
 export const PYLON_MAX_CHARGE = 100;
@@ -361,6 +390,7 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
     goneTime: 0,
     steadyUntil: 0,
     lensUntil: 0, // sim.time until which the lead's OWN screen is forced honest
+    decayPausedUntil: 0, // sim.time until which a pylon draw holds the decay off
     vouchUntil: 0, // sim.time until which this mind will vouch for what you showed them
   };
 
@@ -548,17 +578,31 @@ export function tickLucidity(sim, ch, dt) {
   const inPylon = pylonAt(sim, ch);
   if (inPylon) {
     sim.stats.pylonSeconds += dt;
-    inPylon.charge = Math.max(0, inPylon.charge - PYLON_DRAIN * dt);
     if (ch.hallucinating) {
-      // Pulling someone back takes sustained contact, not a drive-by.
+      // Pulling someone back takes sustained contact, not a drive-by. This is
+      // the one thing a pylon still does continuously, and it still costs the
+      // pylon by the second.
+      inPylon.charge = Math.max(0, inPylon.charge - PYLON_DRAIN * dt);
       ch.recoverProgress += dt;
       if (ch.recoverProgress >= RECOVER_TIME) recover(sim, ch, "pylon");
       return 0;
     }
-    ch.lucidity = Math.min(MAX_LUCIDITY, ch.lucidity + PYLON_RESTORE * dt);
-    return -PYLON_RESTORE;
+    // A DRAW, not a tap. One chunk of light, one pause, one slice of the
+    // pylon's charge — and nothing more until the pause runs out, however long
+    // you stand there. See PYLON_DRAW.
+    if ((ch.decayPausedUntil || 0) <= sim.time && inPylon.charge >= PYLON_DRAW_COST) {
+      inPylon.charge = Math.max(0, inPylon.charge - PYLON_DRAW_COST);
+      ch.lucidity = Math.min(MAX_LUCIDITY, ch.lucidity + PYLON_DRAW);
+      ch.decayPausedUntil = sim.time + PYLON_PAUSE;
+      sim.stats.draws = (sim.stats.draws || 0) + 1;
+      emit(sim, "draw", `${ch.name} draws from the pylon.`, { who: ch.id });
+    }
   }
-  ch.recoverProgress = 0;
+  ch.recoverProgress = inPylon ? ch.recoverProgress : 0;
+  // The pause travels with the MIND, not the pylon: draw, then walk, and you
+  // carry ten seconds of held-off decay out with you. That is what makes a
+  // pylon a staging post rather than a place to sit.
+  if ((ch.decayPausedUntil || 0) > sim.time && !ch.hallucinating) return 0;
   if (ch.hallucinating) {
     ch.goneTime += dt;
     return 0; // already at the floor; nothing left to take

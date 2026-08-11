@@ -14,7 +14,7 @@ import {
   possess, release, possessableCompanions,
   PARTY_SIZE, MAX_LUCIDITY, DOSE_COUNT, RECOVER_AT, RECOVER_TIME, DISSOLVE_TIME,
   TIME_LIMIT, PYLON_RADIUS, LOG_RADIUS, ISOLATION_DIST,
-  ITEM_CAP, ITEM_PICKUP_RADIUS, ITEM_INFO, VOUCH_WINDOW, PHANTOM_ITEM_COST, CRAFT_RECIPES, CAMPAIGN_LENGTH, LUCIDITY_GRACE, FULL_DRAIN_AT, graceMultiplier,
+  ITEM_CAP, ITEM_PICKUP_RADIUS, ITEM_INFO, VOUCH_WINDOW, PYLON_PAUSE, PYLON_DRAW_COST, PHANTOM_ITEM_COST, CRAFT_RECIPES, CAMPAIGN_LENGTH, LUCIDITY_GRACE, FULL_DRAIN_AT, graceMultiplier,
   GATHER_RADIUS, GATHER_HOLD_TIME, GATHER_YIELD, STAKE_COST, PYLON_MAX_CHARGE, TRAIT_VARIANCE, COMPANION_TEMPLATES,
   COMPANION_ITEM_CAP, OFFER_RADIUS,
 } from "../src/state.js";
@@ -235,14 +235,17 @@ check("nobody's lucidity moves during the dead-calm window, then drain eases in"
   sim.companions.forEach((c, i) => assert(c.lucidity < before[i], `${c.name} did not drain at full rate`));
 });
 
-check("the grace ramp is a slope, not a cliff — partial drain in the middle", () => {
+// Five dead-calm minutes, then it just goes down. The ramp is gone: an easing
+// slope existed to soften the transition out of a SHORT calm, and once the calm
+// is five minutes long a gradient nobody can feel is not a mechanic. This still
+// asserts the shape rather than the constants, so restoring a ramp by setting
+// LUCIDITY_RAMP > 0 keeps passing.
+check("nothing drains for the whole calm window, then it drains", () => {
   eq(graceMultiplier(0), 0, "drain at t=0");
   eq(graceMultiplier(LUCIDITY_GRACE - 0.01), 0, "drain just before the calm window ends");
-  eq(graceMultiplier(LUCIDITY_GRACE), 0, "the ramp starts at zero");
-  eq(graceMultiplier(FULL_DRAIN_AT), 1, "full drain at the end of the ramp");
+  eq(graceMultiplier(FULL_DRAIN_AT), 1, "full drain once the window is over");
   eq(graceMultiplier(FULL_DRAIN_AT + 999), 1, "drain never exceeds full");
-  const mid = graceMultiplier((LUCIDITY_GRACE + FULL_DRAIN_AT) / 2);
-  assert(mid > 0.4 && mid < 0.6, `halfway through the ramp should be about half drain, got ${mid}`);
+  assert(LUCIDITY_GRACE >= 300, `the calm window is ${LUCIDITY_GRACE}s — the brief is five minutes`);
   // Monotonic: pressure may never DROP as the basin goes on.
   let prev = -1;
   for (let t = 0; t <= FULL_DRAIN_AT + 30; t += 5) {
@@ -250,6 +253,55 @@ check("the grace ramp is a slope, not a cliff — partial drain in the middle", 
     assert(g >= prev, `grace multiplier went backwards at t=${t}`);
     prev = g;
   }
+});
+
+// The pylon is a resource with a bottom, not an off switch. This is the whole
+// point of the brief: "you can't stop the decay forever."
+check("a pylon buys a pause, and runs out", () => {
+  const sim = createRun({ seed: 71 });
+  sim.time = FULL_DRAIN_AT;
+  const p = sim.pylons[0];
+  const ch = sim.player;
+  ch.x = p.x; ch.z = p.z;
+  ch.lucidity = 20;
+
+  tickLucidity(sim, ch, 0.05);
+  assert(ch.lucidity > 20, "standing in a charged pylon did not put anything back");
+  assert(ch.decayPausedUntil > sim.time, "a draw did not hold the decay off");
+  const afterFirst = ch.lucidity;
+  const chargeAfterFirst = p.charge;
+
+  // Standing there does NOTHING more until the pause runs out.
+  tickLucidity(sim, ch, 0.05);
+  eq(ch.lucidity, afterFirst, "a second draw landed inside the pause");
+  eq(p.charge, chargeAfterFirst, "the pylon was billed twice for one draw");
+
+  // The pause protects you even away from the pylon...
+  ch.x = p.x + 500; ch.z = p.z + 500;
+  ch.lucidity = 50;
+  tickLucidity(sim, ch, 0.05);
+  eq(ch.lucidity, 50, "decay ran during a paid-for pause");
+
+  // ...and stops when it stops.
+  sim.time += PYLON_PAUSE + 0.1;
+  tickLucidity(sim, ch, 0.05);
+  assert(ch.lucidity < 50, "decay did not resume after the pause expired");
+
+  // And the pylon empties: you cannot stand there forever.
+  ch.x = p.x; ch.z = p.z;
+  let draws = 0;
+  for (let i = 0; i < 200; i++) {
+    sim.time += PYLON_PAUSE + 0.1;
+    const before = ch.lucidity;
+    ch.lucidity = 10;
+    tickLucidity(sim, ch, 0.05);
+    if (ch.lucidity > 10) draws++;
+    else break;
+    void before;
+  }
+  assert(draws >= 2, `a full pylon should be good for more than one draw, got ${draws}`);
+  assert(draws < 200, "the pylon never ran dry — decay can be stopped forever");
+  assert(p.charge < PYLON_DRAW_COST, `pylon still holds ${p.charge} charge but stopped giving draws`);
 });
 
 check("the difficulty tiers are still distinguishable through the ramp", () => {

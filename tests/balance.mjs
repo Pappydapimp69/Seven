@@ -16,7 +16,7 @@
 // difficulty for a human who is shown markers that do not exist and told by their
 // own party that everything is fine — costs it almost nothing.
 
-import { createRun, tick, logMarker, trueLogCount, debrief, LOG_RADIUS, PYLON_RADIUS, FULL_DRAIN_AT } from "../src/state.js";
+import { createRun, tick, logMarker, trueLogCount, debrief, LOG_RADIUS, PYLON_RADIUS, PYLON_DRAW_COST, FULL_DRAIN_AT } from "../src/state.js";
 import { createPercept, updatePercept } from "../src/percept.js";
 import { findPath, worldToCell, cellToWorld, floodFill, GRID } from "../src/world.js";
 
@@ -73,7 +73,11 @@ function playRun(seed, policy, difficulty = "standard") {
   // below that line. It is recorded here as a negative result, not kept.
   const REST_TRIGGER = 16; // brittle
   const REST_TARGET = 60;
-  const REST_CAP = 20; // seconds per visit
+  // Long enough to actually take several DRAWS. A pylon no longer restores
+  // continuously — one draw, then PYLON_PAUSE seconds of nothing however long
+  // you stand there — so a 20-second visit was only ever worth two draws, and
+  // the policy was measuring the old tap model rather than the game.
+  const REST_CAP = 45; // seconds per visit
 
   // --- the handicap ---------------------------------------------------------
   // careful/reckless read sim.monoliths, sim.pylons and c.lucidity directly.
@@ -232,7 +236,9 @@ function playRun(seed, policy, difficulty = "standard") {
       const inRange = sim.party.filter((c) => dist(goal, c) <= PYLON_RADIUS);
       const worst = Math.min(...inRange.map((c) => (c.hallucinating ? 0 : c.lucidity)), 100);
       if (!restUntil) restUntil = sim.time + REST_CAP;
-      if ((worst < REST_TARGET || inRange.some((c) => c.hallucinating)) && goal.charge > 1 && sim.time < restUntil) {
+      // Leave when the pylon can no longer pay for a draw, not when it hits
+      // zero: charge below one draw's cost buys nothing but standing time.
+      if ((worst < REST_TARGET || inRange.some((c) => c.hallucinating)) && goal.charge >= PYLON_DRAW_COST && sim.time < restUntil) {
         step({ move: { x: 0, z: 0 }, yaw: sim.player.yaw });
         continue;
       }
