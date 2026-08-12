@@ -142,7 +142,6 @@ export const PYLON_PAUSE = 10; // seconds of held-off decay the pulse buys
 // a passive shield against the lie; this is the same party, spending the same
 // closeness, on something they have to actually do.
 export const PRIME_WINDOW = 14;
-export const PYLON_MAX_CHARGE = 100; // retained so old saves deserialise cleanly
 export const DOSE_COUNT = 3; // "lumen" ampoules — the whole supply, for six people
 export const DOSE_RESTORE = 70;
 export const RECOVER_AT = 45; // lucidity a mind comes back to after hallucinating
@@ -489,7 +488,12 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
     // scoring all stay exactly as balanced, and dropping out is a handoff back
     // to the AI that is already driving that character.
     humans: [player, ...rejoined],
-    pylons: world.pylons.map((p) => ({ ...p, charge: PYLON_MAX_CHARGE, spent: false, live: true, primedBy: [], primedAt: -1e9 })),
+    // `spent` is the ONE fact about a pylon. It used to be shadowed by
+    // `charge` and `live`, which percept and render each read instead — so any
+    // path that set spent without zeroing the other two (a save from before the
+    // change, a test fixture, the next person's code) left a dead pylon looking
+    // and behaving alive. Three names for one truth is three chances to drift.
+    pylons: world.pylons.map((p) => ({ ...p, spent: false, primedBy: [], primedAt: -1e9 })),
     // `discovered` is what makes this a game about EXPLORING rather than about
     // walking a known route: a marker's position is not knowledge the party
     // starts with. It is set when somebody in the party actually picks it out of
@@ -622,8 +626,6 @@ export function activatePylon(sim, actor = sim.player) {
 
   const inside = sim.party.filter((c) => dist2D(p, c) <= PYLON_RADIUS);
   p.spent = true;
-  p.live = false;
-  p.charge = 0;
   for (const ch of inside) {
     if (ch.hallucinating) recover(sim, ch, "pylon");
     ch.lucidity = Math.min(MAX_LUCIDITY, ch.lucidity + PYLON_DRAW);

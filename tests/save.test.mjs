@@ -38,7 +38,7 @@ function fingerprint(sim) {
       c.id, c.x.toFixed(4), c.z.toFixed(4), c.lucidity.toFixed(4),
       c.hallucinating, c.hallucination, c.goalKind, c.scars,
     ]),
-    pylons: sim.pylons.map((p) => [p.id, p.charge.toFixed(4)]),
+    pylons: sim.pylons.map((p) => [p.id, !!p.spent, (p.primedBy || []).join("|"), p.primedAt ?? -1e9]),
     monoliths: sim.monoliths.map((m) => [m.id, m.logged, m.discovered]),
     items: sim.items.map((i) => [i.id, i.discovered, i.taken]),
     wood: sim.wood, stone: sim.stone, doses: sim.doses,
@@ -168,7 +168,7 @@ check("carried progress survives: logs, gathers, pickups, doses, scars, planted 
   sim.doses = 1;
   sim.companions[2].scars = 2;
   // A planted Stake: a pylon that exists in no seed-generated world.
-  sim.pylons.push({ id: "stake-test", x: 5, z: 5, charge: 60, live: true });
+  sim.pylons.push({ id: "stake-test", x: 5, z: 5, spent: false, primedBy: [], primedAt: -1e9 });
 
   const restored = deserializeRun(serializeRun(sim));
   eq(restored.logEntries.length, 1, "log entry lost");

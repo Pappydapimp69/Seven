@@ -190,7 +190,7 @@ function seedHallucination(percept, sim) {
         phantom: true,
         charge: 100,
       });
-      for (const p of sim.pylons) if (p.charge <= 0) percept.deadPylonsLookLive.add(p.id);
+      for (const p of sim.pylons) if (p.spent) percept.deadPylonsLookLive.add(p.id);
       break;
     }
     case HALLUCINATION.WRONG_WAY:
@@ -549,7 +549,7 @@ function updateCompassDrift(percept, sim, p, dt, lying, turned) {
  */
 function updateFalseAnchor(percept, sim, p, lying) {
   if (!lying || percept.kind !== HALLUCINATION.FALSE_ANCHOR) return;
-  for (const pl of sim.pylons) if (pl.charge <= 0) percept.deadPylonsLookLive.add(pl.id);
+  for (const pl of sim.pylons) if (pl.spent) percept.deadPylonsLookLive.add(pl.id);
 
   const ph = percept.phantomPylons[0];
   if (!ph) return;
@@ -866,7 +866,7 @@ export function perceivedPylons(percept, sim) {
   const real = sim.pylons.map((p) => ({
     ...p,
     phantom: false,
-    looksLive: p.charge > 0 || (lying && percept.deadPylonsLookLive.has(p.id)),
+    looksLive: !p.spent || (lying && percept.deadPylonsLookLive.has(p.id)),
   }));
   return lying ? [...real, ...percept.phantomPylons.map((p) => ({ ...p, looksLive: true }))] : real;
 }

@@ -32,7 +32,7 @@
 
 import {
   createRun, tick, beginHallucinating, recover, HALLUCINATION, checkIn, BAND,
-  CORROBORATE_RADIUS, PYLON_MAX_CHARGE,
+  CORROBORATE_RADIUS,
 } from "../src/state.js";
 import {
   createPercept, updatePercept, perceivedYaw, perceivedPylons, perceivedCompanions,
@@ -556,22 +556,22 @@ check("a pylon that dies during the episode keeps reading as live", () => {
   const p = pinUnder(sim, HALLUCINATION.FALSE_ANCHOR);
   const percept = createPercept(p);
   const target = sim.pylons[0];
-  eq(target.charge, PYLON_MAX_CHARGE, "sanity: pylons start charged");
+  eq(target.spent, false, "sanity: pylons start unspent");
   updatePercept(percept, sim, SLICE); // onset, while it is still live
   assert(!percept.deadPylonsLookLive.has(target.id), "a live pylon should not be in the set yet");
 
-  target.charge = 0; // as if the party had camped it flat
+  target.spent = true; // as if the party had already spent it
   sim.time += SLICE;
   updatePercept(percept, sim, SLICE);
   const seen = perceivedPylons(percept, sim).find((x) => x.id === target.id);
   assert(seen.looksLive, "a pylon that died mid-episode stopped lying");
-  eq(sim.pylons[0].charge, 0, "perception altered the sim's own charge");
+  eq(sim.pylons[0].spent, true, "perception altered the sim's own pylon");
 });
 
 check("a lucid lead is told the truth about a spent pylon, mid-episode or not", () => {
   const sim = liveRun(712);
   const percept = createPercept(sim.player);
-  sim.pylons[0].charge = 0;
+  sim.pylons[0].spent = true;
   updatePercept(percept, sim, SLICE);
   const seen = perceivedPylons(percept, sim).find((x) => x.id === sim.pylons[0].id);
   assert(!seen.looksLive, "a spent pylon lied to a perfectly lucid lead");
@@ -1078,7 +1078,7 @@ check("none of the four touches the sim's own truth", () => {
     const p = pinUnder(sim, kind);
     const percept = createPercept(p);
     const before = JSON.stringify({
-      pylons: sim.pylons.map((x) => ({ id: x.id, x: x.x, z: x.z, charge: x.charge, live: x.live })),
+      pylons: sim.pylons.map((x) => ({ id: x.id, x: x.x, z: x.z, spent: !!x.spent })),
       companions: sim.companions.map((c) => ({ id: c.id, name: c.name, x: c.x, z: c.z, lucidity: c.lucidity, hallucinating: c.hallucinating })),
       monoliths: sim.monoliths.map((m) => ({ id: m.id, x: m.x, z: m.z, logged: m.logged })),
       self: { lucidity: p.lucidity, hallucinating: p.hallucinating, hallucination: p.hallucination, lensUntil: p.lensUntil },
@@ -1094,7 +1094,7 @@ check("none of the four touches the sim's own truth", () => {
       for (const c of sim.companions) rosterRead(percept, sim, c);
     }
     const after = JSON.stringify({
-      pylons: sim.pylons.map((x) => ({ id: x.id, x: x.x, z: x.z, charge: x.charge, live: x.live })),
+      pylons: sim.pylons.map((x) => ({ id: x.id, x: x.x, z: x.z, spent: !!x.spent })),
       companions: sim.companions.map((c) => ({ id: c.id, name: c.name, x: c.x, z: c.z, lucidity: c.lucidity, hallucinating: c.hallucinating })),
       monoliths: sim.monoliths.map((m) => ({ id: m.id, x: m.x, z: m.z, logged: m.logged })),
       self: { lucidity: p.lucidity, hallucinating: p.hallucinating, hallucination: p.hallucination, lensUntil: p.lensUntil },
@@ -1125,7 +1125,7 @@ check("all four are reproducible from the seed alone", () => {
 check("a lucid lead is never shown any of it", () => {
   const sim = liveRun(753);
   const percept = createPercept(sim.player);
-  sim.pylons[0].charge = 0;
+  sim.pylons[0].spent = true;
   for (let i = 0; i < 300; i++) {
     sim.player.z -= WALK * SLICE;
     sim.time += SLICE;

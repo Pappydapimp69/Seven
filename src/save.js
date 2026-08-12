@@ -164,7 +164,7 @@ export function serializeRun(sim) {
     // PRIME_WINDOW, so a resume that forgot who had already set hands on what
     // would silently cancel a confirmation the players had already made.
     pylons: sim.pylons.map((p) => ({
-      id: p.id, x: p.x, z: p.z, charge: p.charge, live: p.live,
+      id: p.id, x: p.x, z: p.z,
       spent: !!p.spent, primedBy: p.primedBy || [], primedAt: p.primedAt ?? -1e9,
     })),
     monoliths: packFlags(sim.monoliths, ["logged", "discovered", "foundBy"]),
@@ -211,7 +211,11 @@ export function deserializeRun(data) {
 
   // Replace wholesale (a Stake may have added one that no seed produces).
   sim.pylons.length = 0;
-  for (const p of data.pylons) sim.pylons.push({ ...p });
+  // Tolerate saves written before `spent` existed, where a flat pylon was one
+  // with no charge left.
+  for (const p of data.pylons) {
+    sim.pylons.push({ ...p, spent: p.spent ?? (p.charge !== undefined ? p.charge <= 0 : false) });
+  }
 
   applyFlags(sim.monoliths, data.monoliths, ["logged", "discovered", "foundBy"]);
   applyFlags(sim.items, data.items, ["discovered", "taken"]);

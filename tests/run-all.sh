@@ -23,6 +23,10 @@ echo "== kinds (the four that used to be static) =="
 node tests/kinds.test.mjs
 echo
 
+echo "== stress (invariants, hostile input, save/restore lockstep) =="
+node tests/stress.mjs "${STRESS_SEEDS:-16}"
+echo
+
 echo "== formation (is the party ever actually in frame?) =="
 node tests/formation.mjs "${FORMATION_SEEDS:-6}"
 echo

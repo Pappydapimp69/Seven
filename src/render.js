@@ -460,7 +460,7 @@ export function createRenderer(canvas, sim) {
       // NOTE: `looksLive` — not `charge > 0`. A spent pylon can read as full to a
       // hallucinating lead, and that lie has to survive all the way to the pixel.
       const live = p.looksLive;
-      const frac = Math.max(0, Math.min(1, (p.charge ?? 0) / 100));
+      const frac = p.spent ? 0 : 1; // one-shot: a pylon is lit or it is out
       const shown = live ? Math.max(0.25, frac) : 0;
       obj.userData.core.material.color.set(live ? PALETTE.pylonLive : PALETTE.pylonDead);
       obj.userData.core.scale.setScalar(0.7 + shown * 0.5 + Math.sin(elapsed * 2 + p.x) * 0.04);

@@ -719,7 +719,7 @@ function step(dt, intent) {
 
   let prox = 0;
   for (const p of sim.pylons) {
-    if (p.charge <= 0) continue;
+    if (p.spent) continue;
     const d = Math.hypot(p.x - sim.player.x, p.z - sim.player.z);
     prox = Math.max(prox, Math.max(0, 1 - d / PYLON_RADIUS));
   }

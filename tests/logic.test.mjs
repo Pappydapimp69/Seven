@@ -15,7 +15,7 @@ import {
   PARTY_SIZE, MAX_LUCIDITY, DOSE_COUNT, RECOVER_AT, RECOVER_TIME, DISSOLVE_TIME,
   TIME_LIMIT, PYLON_RADIUS, LOG_RADIUS, ISOLATION_DIST,
   ITEM_CAP, ITEM_PICKUP_RADIUS, ITEM_INFO, VOUCH_WINDOW, PYLON_PAUSE, PYLON_DRAW, PRIME_WINDOW, activatePylon, pylonAt, PHANTOM_ITEM_COST, CRAFT_RECIPES, CAMPAIGN_LENGTH, LUCIDITY_GRACE, FULL_DRAIN_AT, graceMultiplier,
-  GATHER_RADIUS, GATHER_HOLD_TIME, GATHER_YIELD, STAKE_COST, PYLON_MAX_CHARGE, TRAIT_VARIANCE, COMPANION_TEMPLATES,
+  GATHER_RADIUS, GATHER_HOLD_TIME, GATHER_YIELD, STAKE_COST, TRAIT_VARIANCE, COMPANION_TEMPLATES,
   COMPANION_ITEM_CAP, OFFER_RADIUS,
 } from "../src/state.js";
 import { generateWorld, validate, findPath, isBlockedAt, GRID, ITEM_COUNT, ITEM_KINDS, TREE_COUNT, STONE_COUNT } from "../src/world.js";
@@ -707,7 +707,7 @@ check("a phantom companion joins the formation", () => {
 
 check("spent pylons read as live to a hallucinating lead", () => {
   const sim = createRun({ seed: 25 });
-  sim.pylons[0].charge = 0;
+  sim.pylons[0].spent = true;
   sim.player.hallucinating = true;
   sim.player.hallucination = HALLUCINATION.FALSE_ANCHOR;
   const percept = createPercept();
@@ -717,7 +717,7 @@ check("spent pylons read as live to a hallucinating lead", () => {
   assert(dead.looksLive, "a spent pylon should look live under FALSE_ANCHOR");
   assert(seen.some((p) => p.phantom), "no phantom pylon");
   // The sim still knows the truth.
-  eq(sim.pylons[0].charge, 0, "sim charge was altered by perception");
+  eq(sim.pylons[0].spent, true, "sim pylon was altered by perception");
 });
 
 check("the compass moves under WRONG_WAY but the body does not", () => {
