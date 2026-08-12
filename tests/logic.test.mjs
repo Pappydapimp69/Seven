@@ -480,7 +480,12 @@ check("high selfCare breaks off for a known pylon before BRITTLE", () => {
   const c = sim.companions[0];
   const away = { x: p.x + 30, z: p.z + 4 };
   for (const m of sim.party) { m.x = away.x; m.z = away.z; }
-  for (const other of sim.pylons) if (other !== p) other.charge = 0;
+  // `spent`, not `charge` — charge is vestigial since pylons became one-shot,
+  // so this guard had quietly stopped working. It matters more now: at the
+  // larger PYLON_RADIUS the party's away-spot lands inside a neighbouring
+  // pylon, which primes, gets confirmed, and heals the companion out of the
+  // very band this test is about.
+  for (const other of sim.pylons) if (other !== p) other.spent = true;
   c.known = { pylons: new Set([p.id]), monoliths: new Set() };
   c.selfCare = 0.9; // well above the UNSETTLED threshold
   c.lucidity = 60; // UNSETTLED band, nowhere near BRITTLE
@@ -494,7 +499,12 @@ check("low selfCare only breaks off at BRITTLE, same as before this feature exis
   const c = sim.companions[0];
   const away = { x: p.x + 30, z: p.z + 4 };
   for (const m of sim.party) { m.x = away.x; m.z = away.z; }
-  for (const other of sim.pylons) if (other !== p) other.charge = 0;
+  // `spent`, not `charge` — charge is vestigial since pylons became one-shot,
+  // so this guard had quietly stopped working. It matters more now: at the
+  // larger PYLON_RADIUS the party's away-spot lands inside a neighbouring
+  // pylon, which primes, gets confirmed, and heals the companion out of the
+  // very band this test is about.
+  for (const other of sim.pylons) if (other !== p) other.spent = true;
   c.known = { pylons: new Set([p.id]), monoliths: new Set() };
   c.selfCare = 0.1;
   c.lucidity = 20; // FRAYING, not yet BRITTLE
@@ -1460,9 +1470,13 @@ check("using a stake plants a real, functioning pylon at the player's position",
   c.lucidity = 20;
   c.x = planted.x;
   c.z = planted.z;
+  // Two pairs of hands, both IN the planted light — and at the current
+  // PYLON_RADIUS the lead is standing there too, which is fine: what matters is
+  // that two distinct minds set hands on it.
   const witness = sim.companions[1];
   witness.x = planted.x; witness.z = planted.z;
-  activatePylon(sim, c);
+  c.x = planted.x; c.z = planted.z;
+  eq(activatePylon(sim, c).confirmed, false, "one pair of hands fired a planted pylon");
   activatePylon(sim, witness);
   assert(c.lucidity > 20, "a planted stake should restore lucidity like any pylon");
   assert(planted.spent, "a planted pylon should be spent by its one use");
@@ -2302,7 +2316,12 @@ check("a brittle companion breaks formation for a pylon they remember", () => {
   for (const m of sim.party) { m.x = away.x; m.z = away.z; }
   // Spend every other pylon, so the only relief in the world is `p` — otherwise
   // the party's resting spot may happen to fall inside a different one.
-  for (const other of sim.pylons) if (other !== p) other.charge = 0;
+  // `spent`, not `charge` — charge is vestigial since pylons became one-shot,
+  // so this guard had quietly stopped working. It matters more now: at the
+  // larger PYLON_RADIUS the party's away-spot lands inside a neighbouring
+  // pylon, which primes, gets confirmed, and heals the companion out of the
+  // very band this test is about.
+  for (const other of sim.pylons) if (other !== p) other.spent = true;
   c.known = { pylons: new Set([p.id]), monoliths: new Set() };
   c.lucidity = 9; // BRITTLE — the loud tell
   const before = Math.hypot(c.x - p.x, c.z - p.z);

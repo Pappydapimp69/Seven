@@ -14,9 +14,9 @@
 // The sim's job is to keep an honest, testable record of what is TRUE; `percept.js`
 // is the only place allowed to lie about it.
 
-import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=mirage-0.9.9";
-import { makeRng } from "./rng.js?v=mirage-0.9.9";
-import { updateCompanions, companionRemark } from "./party.js?v=mirage-0.9.9";
+import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=mirage-0.9.10";
+import { makeRng } from "./rng.js?v=mirage-0.9.10";
+import { updateCompanions, companionRemark } from "./party.js?v=mirage-0.9.10";
 
 export const PARTY_SIZE = 6; // you + 5 companions — the spec's five NPCs, plus the player
 export const MAX_LUCIDITY = 100;
@@ -107,7 +107,7 @@ export const ISOLATION_MULT = 1.9; // walking off alone burns you down fastest
 export const CONTAGION_DIST = 9; // seeing someone come apart costs you
 export const CONTAGION_MULT = 0.28; // per hallucinating neighbour in range
 export const SCAR_MULT = 0.16; // per prior recovery — coming back costs something
-export const PYLON_RADIUS = 7.5;
+export const PYLON_RADIUS = 12;
 // A pylon fires ONCE. Standing in one puts a chunk of light back into every
 // mind inside it and holds their decay off for PYLON_PAUSE seconds — and then
 // that pylon is dead for the rest of the basin. It does not recharge. There is
@@ -571,10 +571,17 @@ export function partyCentroid(sim) {
 
 /** The pylon a character is standing in, if it has not already been spent. */
 export function pylonAt(sim, ch) {
+  // NEAREST, not first-found. Two pylons can overlap — a planted stake next to
+  // a world pylon, or two world pylons at the larger radius — and returning
+  // whichever happened to come first in the array meant two people standing in
+  // the same light could prime DIFFERENT pylons and never confirm either.
+  let best = null, bestD = Infinity;
   for (const p of sim.pylons) {
-    if (!p.spent && dist2D(p, ch) <= PYLON_RADIUS) return p;
+    if (p.spent) continue;
+    const d = dist2D(p, ch);
+    if (d <= PYLON_RADIUS && d < bestD) { bestD = d; best = p; }
   }
-  return null;
+  return best;
 }
 
 /**
