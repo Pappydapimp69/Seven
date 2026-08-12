@@ -15,7 +15,7 @@
 import {
   createRun, tick, debrief, activatePylon, logMarker, checkIn, useDose, pickupItem,
   useItem, dropItem, craftItem, possess, release, badLogCount, trueLogCount,
-  PARTY_SIZE, MAX_LUCIDITY, TIME_LIMIT, PYLON_RADIUS, PRIME_WINDOW, CAMPAIGN_LENGTH,
+  PARTY_SIZE, MAX_LUCIDITY, TIME_LIMIT, PYLON_RADIUS, PRIME_WINDOW, CAMPAIGN_LENGTH, MICRO_MAX_DUR,
 } from "../src/state.js";
 import { createPercept, updatePercept } from "../src/percept.js";
 import { serializeRun, deserializeRun } from "../src/save.js";
@@ -42,7 +42,19 @@ function checkInvariants(sim, where) {
     // be at zero. These are two halves of one fact and drifted apart once
     // already when grace was added.
     if (c.lucidity <= 0 && !c.hallucinating) return fail(`${where}: ${c.id} sits at zero lucidity without hallucinating`);
-    if (c.hallucinating && c.lucidity > 0) return fail(`${where}: ${c.id} hallucinating at ${c.lucidity} lucidity`);
+    // Micro-episodes deliberately broke the old form of this ("hallucinating
+    // implies lucidity zero"). The rule is now: you are under either because
+    // you bottomed out, or because you are mid-slip — and a slip must carry an
+    // end time, or it is a permanent hallucination wearing a slip's clothes.
+    if (c.hallucinating && c.lucidity > 0 && !((c.microUntil || 0) > 0)) {
+      return fail(`${where}: ${c.id} hallucinating at ${c.lucidity} lucidity with no slip window`);
+    }
+    if ((c.microUntil || 0) > 0 && !c.hallucinating) {
+      return fail(`${where}: ${c.id} carries a slip window while lucid`);
+    }
+    if ((c.microUntil || 0) > 0 && c.microUntil > sim.time + MICRO_MAX_DUR + 1) {
+      return fail(`${where}: ${c.id} slip runs ${(c.microUntil - sim.time).toFixed(1)}s — longer than a slip can be`);
+    }
     if (c.path && c.path.some((n) => !Number.isFinite(n.cx) || !Number.isFinite(n.cz))) {
       return fail(`${where}: ${c.id} holds a path node that is not a grid cell`);
     }

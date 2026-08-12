@@ -23,7 +23,8 @@
 // so every advance below is a loop of small slices, never one big dt.
 
 import {
-  createRun, tick, beginHallucinating, recover, bandOf, BAND,
+  createRun, tick, beginHallucinating, beginMicroEpisode, recover, bandOf, BAND,
+  FULL_DRAIN_AT, MICRO_REFRACTORY,
 } from "../src/state.js";
 import {
   createPercept, updatePercept, perceivedCompanions, MONSTER_TUNING,
@@ -461,9 +462,107 @@ check("the party's own meters are untouched by any of this", () => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Micro-episodes. Rated by OBSERVED behaviour over whole runs, two-sided —
+// brain: rate-a-perceptual-tell-by-its-observed-rate (a floor alone lets you
+// "fix" a quiet mechanic by making it a strobe) and brain-builder#E6 (a channel
+// that fires on every event stops carrying information).
+// ---------------------------------------------------------------------------
+function advance(sim, seconds) {
+  for (let t = 0; t < seconds; t += 1 / 20) tick(sim, 1 / 20, {});
+}
+
+function slipRun(seed, seconds) {
+  const sim = createRun({ seed, difficulty: "standard" });
+  sim.time = FULL_DRAIN_AT;
+  const lead = sim.player;
+  let ticks = 0, underTicks = 0, episodes = 0, wasUnder = false, longest = 0, cur = 0;
+  const DTS = 1 / 20;
+  for (let t = 0; t < seconds; t += DTS) {
+    tick(sim, DTS, { move: { x: 0.3, z: -0.9 }, yaw: 0.2 });
+    if (sim.status !== "playing") break;
+    ticks++;
+    const under = !!lead.hallucinating;
+    if (under) {
+      underTicks++;
+      cur += DTS;
+      if (!wasUnder) episodes++;
+    } else {
+      longest = Math.max(longest, cur);
+      cur = 0;
+    }
+    wasUnder = under;
+  }
+  return { ticks, underTicks, episodes, longest: Math.max(longest, cur), duty: ticks ? underTicks / ticks : 0 };
+}
+
+check("a mind under pressure slips, often enough to be met", () => {
+  let withSlip = 0, totalEpisodes = 0;
+  for (let seed = 1; seed <= SEEDS; seed++) {
+    const r = slipRun(seed, 240);
+    if (r.episodes > 0) withSlip++;
+    totalEpisodes += r.episodes;
+  }
+  atLeast(withSlip / SEEDS, 0.5, "most runs past the calm window should contain at least one lapse");
+  atLeast(totalEpisodes / SEEDS, 0.8, "too few lapses per run for a player to ever meet the deception");
+});
+
+check("...and it never becomes a strobe", () => {
+  let duty = 0, worstEpisodes = 0;
+  for (let seed = 1; seed <= SEEDS; seed++) {
+    const r = slipRun(seed, 240);
+    duty += r.duty;
+    worstEpisodes = Math.max(worstEpisodes, r.episodes);
+  }
+  atMost(duty / SEEDS, 0.45, "the lead spends too much of a run under for 'under' to mean anything");
+  atMost(worstEpisodes, 12, "too many separate lapses in one run — a channel that fires constantly carries nothing");
+});
+
+// The refractory gap is the ceiling's mechanism, so it gets its own check
+// rather than being inferred from the duty cycle.
+check("a slip is followed by a stretch of being reliably yourself", () => {
+  const sim = createRun({ seed: 3, difficulty: "standard" });
+  sim.time = FULL_DRAIN_AT;
+  const ch = sim.player;
+  ch.lucidity = 10; // brittle: the highest slip rate there is
+  beginMicroEpisode(sim, ch, 1);
+  advance(sim, 2);
+  assert(!ch.hallucinating, "a slip did not end on its own");
+  assert(ch.microCooldownUntil > sim.time, "no refractory gap was set");
+
+  // Count SLIPS, not `hallucinating`. Held at brittle the lead drains to zero
+  // and goes under for good partway through the gap, which is the long kind
+  // doing its job — asserting on the flag conflated the two and failed here.
+  const slipsBefore = sim.stats.slips;
+  for (let t = 0; t < MICRO_REFRACTORY - 3; t += 1 / 20) {
+    ch.lucidity = 10; // hold the band so the rate stays at its maximum
+    tick(sim, 1 / 20, {});
+  }
+  eq(sim.stats.slips, slipsBefore, "a second slip fired inside the refractory gap");
+});
+
+// From the inside, a lapse and the beginning of the end must be the same thing.
+check("a slip announces itself exactly as the long kind does", () => {
+  const a = createRun({ seed: 11 });
+  a.time = FULL_DRAIN_AT;
+  beginMicroEpisode(a, a.player, 5);
+  const slipEv = a.events.find((e) => e.kind === "hallucinate");
+
+  const b = createRun({ seed: 11 });
+  b.time = FULL_DRAIN_AT;
+  beginHallucinating(b, b.player);
+  const goneEv = b.events.find((e) => e.kind === "hallucinate");
+
+  assert(slipEv && goneEv, "one of the two onsets emitted nothing");
+  eq(slipEv.text, goneEv.text, "a lapse reads differently from going under for good");
+  eq(slipEv.kind, goneEv.kind, "a lapse is a different event kind — that is a tell");
+});
+
+console.log("mirage hallucination: OK");
+
+
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length) {
   for (const f of failures) console.log("  ✗ " + f);
   process.exit(1);
 }
-console.log("mirage hallucination: OK");

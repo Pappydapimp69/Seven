@@ -14,9 +14,9 @@
 // The sim's job is to keep an honest, testable record of what is TRUE; `percept.js`
 // is the only place allowed to lie about it.
 
-import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=mirage-0.9.10";
-import { makeRng } from "./rng.js?v=mirage-0.9.10";
-import { updateCompanions, companionRemark } from "./party.js?v=mirage-0.9.10";
+import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=mirage-0.10.0";
+import { makeRng } from "./rng.js?v=mirage-0.10.0";
+import { updateCompanions, companionRemark } from "./party.js?v=mirage-0.10.0";
 
 export const PARTY_SIZE = 6; // you + 5 companions — the spec's five NPCs, plus the player
 export const MAX_LUCIDITY = 100;
@@ -397,6 +397,8 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
     steadyUntil: 0,
     lensUntil: 0, // sim.time until which the lead's OWN screen is forced honest
     decayPausedUntil: 0, // sim.time until which a pylon draw holds the decay off
+    microUntil: 0, // sim.time a brief slip ends; 0 means this is not a slip
+    microCooldownUntil: 0, // no second slip before this
     vouchUntil: 0, // sim.time until which this mind will vouch for what you showed them
   };
 
@@ -540,7 +542,7 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
     // how many items were built that were never there, and how many times
     // another mind's reach called one of those out (either direction — see
     // handoffToPlayer/offerItem). Both stay hidden until the debrief.
-    stats: carryOver ? carryOver.stats : { doseUses: 0, pylonSeconds: 0, recoveries: 0, falseLogs: 0, strikes: 0, itemsUsed: 0, phantomItemsUsed: 0, itemsCrafted: 0, falseCrafts: 0, phantomsRevealed: 0 },
+    stats: carryOver ? carryOver.stats : { doseUses: 0, pylonSeconds: 0, recoveries: 0, falseLogs: 0, strikes: 0, slips: 0, itemsUsed: 0, phantomItemsUsed: 0, itemsCrafted: 0, falseCrafts: 0, phantomsRevealed: 0 },
     level,
     campaignLength,
   };
@@ -643,6 +645,22 @@ export function activatePylon(sim, actor = sim.player) {
  * which the balance harness reports on.
  */
 export function tickLucidity(sim, ch, dt) {
+  // ONE DRAW PER MIND PER TICK, ALWAYS — before any branch, whatever the state.
+  // brain: waiting-city#E9 (constant roll count) and #E17, which names the
+  // "no need to roll, it's forced" boundary as a third way this discipline gets
+  // broken. A roll skipped on an obviously-nothing-to-decide branch silently
+  // re-perturbs every other mind sharing the tick, and shows up much later as a
+  // resumed run diverging from the original.
+  const slipRoll = sim.rng();
+  // TWO draws, both unconditional. The duration roll used to sit inside the
+  // success branch, which is the same violation one level down: a mind that
+  // slips would have burned one more draw than a mind that did not, and every
+  // other mind in that tick would shift. If a value is only USED on one branch,
+  // it still has to be DRAWN on all of them.
+  const slipDur = MICRO_MIN_DUR + sim.rng() * (MICRO_MAX_DUR - MICRO_MIN_DUR);
+
+  if (inMicroEpisode(ch) && sim.time >= ch.microUntil) endMicroEpisode(sim, ch);
+
   if (pylonAt(sim, ch)) sim.stats.pylonSeconds += dt;
   ch.recoverProgress = 0;
   // The pause travels with the MIND, not the pylon: catch a pulse, then walk,
@@ -674,6 +692,17 @@ export function tickLucidity(sim, ch, dt) {
   // into the meter, never restores lucidity directly, so it can't substitute
   // for a pylon — just buy time to reach one.
   if (ch.steadyUntil > sim.time) mult *= ITEM_INFO.tether.steadyMult;
+
+  // Slip check, using the draw taken at the top. Gated on the same grace window
+  // as the drain — the opening calm means calm, not "calm unless unlucky".
+  if (
+    !ch.hallucinating &&
+    sim.time >= (ch.microCooldownUntil || 0) &&
+    slipRoll < (MICRO_RATE[bandOf(ch.lucidity)] || 0) * dt
+  ) {
+    beginMicroEpisode(sim, ch, slipDur);
+    return 0;
+  }
 
   const rate = BASE_DRAIN * ch.drain * sim.diffMult * mult * grace;
   ch.lucidity = Math.max(0, ch.lucidity - rate * dt);
@@ -708,8 +737,61 @@ export function pickHallucinationKind(sim, ch) {
   return HALLUCINATION_LIST[HALLUCINATION_LIST.length - 1]; // float-rounding fallback, never reached in practice
 }
 
+// --- micro-episodes: the lie, at a rate a player actually meets ------------
+// A mind used to hallucinate only at lucidity ZERO, which is close to terminal.
+// The whole deception layer was therefore gated behind the worst moment of a
+// run: measured against the deceived policy at the shipped constants, a
+// standard run wrote 0.2 false entries and ended `discredited` once in twenty.
+// A game named after being lied to touched the player's record every fifth run.
+//
+// A slip is the short kind. Seconds, not the rest of the basin; it ends on its
+// own with no pylon and no dose; and it uses the same HALLUCINATION kinds and
+// the same percept machinery, because a lapse you can tell apart from the real
+// thing teaches you to ignore it.
+export const MICRO_MIN_DUR = 4;
+export const MICRO_MAX_DUR = 9;
+// A channel that fires on every event stops carrying information (brain:
+// brain-builder#E6). The refractory gap is the ceiling: whatever the band, a
+// mind gets one slip and then a stretch of being reliably itself.
+export const MICRO_REFRACTORY = 30;
+// Per second, by band. STEADY is deliberately zero — a mind with nothing wrong
+// with it is the control the player reads everyone else against.
+export const MICRO_RATE = Object.freeze({ steady: 0, unsettled: 0.007, fraying: 0.02, brittle: 0.05 });
+
+/** Is this mind in a brief slip rather than gone for good? */
+export const inMicroEpisode = (ch) => !!ch.hallucinating && (ch.microUntil || 0) > 0;
+
+export function beginMicroEpisode(sim, ch, dur) {
+  ch.hallucinating = true;
+  ch.microUntil = sim.time + dur;
+  ch.recoverProgress = 0;
+  ch.hallucination = pickHallucinationKind(sim, ch);
+  ch.goal = null;
+  ch.goalKind = "hallucinating";
+  sim.stats.slips = (sim.stats.slips || 0) + 1;
+  // The SAME line the long kind emits. From the inside there is no difference
+  // between a lapse and the beginning of the end, and being told which one this
+  // is would hand the player the single fact the game withholds.
+  emit(sim, "hallucinate", ch.isPlayer ? "Something is wrong with the light." : `${ch.name} stops making sense.`, {
+    who: ch.id,
+  });
+}
+
+/** End a slip. Not `recover` — no pylon, no dose, no scar; it just passes. */
+function endMicroEpisode(sim, ch) {
+  ch.hallucinating = false;
+  ch.hallucination = null;
+  ch.microUntil = 0;
+  ch.microCooldownUntil = sim.time + MICRO_REFRACTORY;
+  ch.goalKind = null;
+  ch.goal = null;
+  emit(sim, "recover", ch.isPlayer ? "The light settles." : `${ch.name} comes back to themselves.`, { who: ch.id });
+}
+
 export function beginHallucinating(sim, ch) {
-  if (ch.hallucinating) return;
+  if (ch.hallucinating && !inMicroEpisode(ch)) return;
+  // A slip that runs into the floor stops being a slip.
+  ch.microUntil = 0;
   ch.hallucinating = true;
   ch.lucidity = 0;
   ch.recoverProgress = 0;
@@ -1735,7 +1817,11 @@ export function partyAtCamp(sim) {
 export function checkEndings(sim) {
   if (sim.status !== "playing") return;
 
-  const gone = sim.party.filter((c) => c.hallucinating).length;
+  // Minds gone for GOOD. A slip is not a dissolution: at the brittle slip rate
+  // six people lapse briefly all the time, and counting those collapsed 17 of
+  // 20 bleak runs into "the party dissolved" when what actually happened was a
+  // few seconds of overlap. The ending means nobody is coming back.
+  const gone = sim.party.filter((c) => c.hallucinating && !inMicroEpisode(c)).length;
   if (gone === PARTY_SIZE) {
     sim.dissolveTimer += sim.lastDt || 0;
     if (sim.dissolveTimer >= DISSOLVE_TIME) {
@@ -1932,6 +2018,7 @@ export function debrief(sim) {
     total: sim.monoliths.length,
     falseLogs: sim.stats.falseLogs,
     strikes: sim.stats.strikes || 0,
+    slips: sim.stats.slips || 0,
     badLogs: badLogCount(sim),
     doseUses: sim.stats.doseUses,
     recoveries: sim.stats.recoveries,

@@ -303,7 +303,7 @@ function summarise(label, reports) {
     `${label.padEnd(11)} n=${n}  won ${String(wins).padStart(3)} (${String(((wins / n) * 100).toFixed(0)).padStart(3)}%)` +
       `  dissolved ${dissolved}  dark ${dark}  discredited ${discredited}` +
       `  found ${avg((r) => r.found)}/6  logged ${avg((r) => r.logged)}/6  false ${avg((r) => r.falseLogs)}` +
-      `  struck ${avg((r) => r.strikes)}  left-in ${avg((r) => r.badLogs)}` +
+      `  slips ${avg((r) => r.slips)}  struck ${avg((r) => r.strikes)}  left-in ${avg((r) => r.badLogs)}` +
       `  time ${avg((r) => r.time)}s  party-seconds-lost ${(goneSecs.reduce((a, b) => a + b, 0) / n).toFixed(0)}`,
   );
   return { n, wins, dissolved, dark, winRate: wins / n };

@@ -2324,6 +2324,9 @@ check("a brittle companion breaks formation for a pylon they remember", () => {
   for (const other of sim.pylons) if (other !== p) other.spent = true;
   c.known = { pylons: new Set([p.id]), monoliths: new Set() };
   c.lucidity = 9; // BRITTLE — the loud tell
+  // Hold the slip off: a brittle mind can now lapse briefly on its own, which
+  // is a different mechanic and would preempt the break this test is about.
+  c.microCooldownUntil = 1e9;
   const before = Math.hypot(c.x - p.x, c.z - p.z);
   advance(sim, 3);
   eq(c.goalKind, "pylon", "brittle companion kept walking in formation");
@@ -2342,14 +2345,23 @@ check("a companion who has never seen a pylon cannot head for it", () => {
 });
 
 check("a gone companion stops following and goes its own way", () => {
-  const sim = createRun({ seed: 45 });
-  const c = sim.companions[0];
-  beginHallucinating(sim, c);
-  const startDist = Math.hypot(c.x - sim.player.x, c.z - sim.player.z);
-  advance(sim, 30);
-  const endDist = Math.hypot(c.x - sim.player.x, c.z - sim.player.z);
-  assert(endDist > startDist + 4, `a gone companion should wander off (${startDist.toFixed(1)} -> ${endDist.toFixed(1)})`);
-  eq(c.goalKind, "hallucinating", "goal kind");
+  // Across seeds, not one. A phantom errand picks a destination from the
+  // neighbourhood, so any single seed can legitimately draw one that happens to
+  // sit near the lead — asserting on one seed measures that draw, not the
+  // behaviour. (Adding a per-tick roll elsewhere re-perturbed exactly this.)
+  let wandered = 0;
+  const SEEDS = 12;
+  for (let seed = 40; seed < 40 + SEEDS; seed++) {
+    const sim = createRun({ seed });
+    const c = sim.companions[0];
+    beginHallucinating(sim, c);
+    const startDist = Math.hypot(c.x - sim.player.x, c.z - sim.player.z);
+    advance(sim, 30);
+    const endDist = Math.hypot(c.x - sim.player.x, c.z - sim.player.z);
+    eq(c.goalKind, "hallucinating", `seed ${seed}: goal kind`);
+    if (endDist > startDist + 4) wandered++;
+  }
+  assert(wandered >= SEEDS * 0.6, `a gone companion should usually wander off — only ${wandered}/${SEEDS} did`);
 });
 
 check("companions volunteer remarks, and a gone one says gone things", () => {

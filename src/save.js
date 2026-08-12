@@ -17,7 +17,7 @@
 //     options (dbh#E4, wrong-sky#E2). And an ended run is never saved, so a
 //     "Resume" can't drop you back onto the frame you already lost.
 
-import { createRun } from "./state.js?v=mirage-0.9.10";
+import { createRun } from "./state.js?v=mirage-0.10.0";
 
 export const SAVE_KEY = "mirage:run";
 // Bumped whenever the shape below changes incompatibly. A save from an older
@@ -57,6 +57,8 @@ function packCharacter(c) {
     pylonWaitFor: c.pylonWaitFor,
     pylonWaitUntil: c.pylonWaitUntil,
     decayPausedUntil: c.decayPausedUntil,
+    microUntil: c.microUntil,
+    microCooldownUntil: c.microCooldownUntil,
     vouchUntil: c.vouchUntil,
     // Rolled once per campaign — must survive or a resumed party reshuffles
     // its personalities, and every behavioural tell the player has learned to
@@ -107,6 +109,8 @@ function applyCharacter(c, s) {
   c.pylonWaitFor = s.pylonWaitFor ?? null;
   c.pylonWaitUntil = s.pylonWaitUntil ?? 0;
   c.decayPausedUntil = s.decayPausedUntil || 0;
+  c.microUntil = s.microUntil || 0;
+  c.microCooldownUntil = s.microCooldownUntil || 0;
   c.vouchUntil = s.vouchUntil || 0;
   if (!c.isPlayer) {
     c.drain = s.drain; c.stoic = s.stoic; c.chatty = s.chatty;
