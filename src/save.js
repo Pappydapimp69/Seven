@@ -17,7 +17,7 @@
 //     options (dbh#E4, wrong-sky#E2). And an ended run is never saved, so a
 //     "Resume" can't drop you back onto the frame you already lost.
 
-import { createRun } from "./state.js?v=mirage-0.9.8";
+import { createRun } from "./state.js?v=mirage-0.9.9";
 
 export const SAVE_KEY = "mirage:run";
 // Bumped whenever the shape below changes incompatibly. A save from an older
@@ -53,6 +53,9 @@ function packCharacter(c) {
     goneTime: c.goneTime,
     steadyUntil: c.steadyUntil,
     lensUntil: c.lensUntil,
+    givenUpPylons: c.givenUpPylons,
+    pylonWaitFor: c.pylonWaitFor,
+    pylonWaitUntil: c.pylonWaitUntil,
     decayPausedUntil: c.decayPausedUntil,
     vouchUntil: c.vouchUntil,
     // Rolled once per campaign — must survive or a resumed party reshuffles
@@ -100,6 +103,9 @@ function applyCharacter(c, s) {
   c.goneTime = s.goneTime;
   c.steadyUntil = s.steadyUntil;
   c.lensUntil = s.lensUntil;
+  c.givenUpPylons = s.givenUpPylons || {};
+  c.pylonWaitFor = s.pylonWaitFor ?? null;
+  c.pylonWaitUntil = s.pylonWaitUntil ?? 0;
   c.decayPausedUntil = s.decayPausedUntil || 0;
   c.vouchUntil = s.vouchUntil || 0;
   if (!c.isPlayer) {
@@ -153,7 +159,14 @@ export function serializeRun(sim) {
     // Saved WHOLE, not as flags: a planted Stake appends a pylon that exists
     // in no seed-generated world, so rebuilding from world.pylons alone would
     // silently un-plant it.
-    pylons: sim.pylons.map((p) => ({ id: p.id, x: p.x, z: p.z, charge: p.charge, live: p.live })),
+    // `spent` is the pylon's whole state now — charge is vestigial — and the
+    // prime is live coordination in flight: two people have to act inside
+    // PRIME_WINDOW, so a resume that forgot who had already set hands on what
+    // would silently cancel a confirmation the players had already made.
+    pylons: sim.pylons.map((p) => ({
+      id: p.id, x: p.x, z: p.z, charge: p.charge, live: p.live,
+      spent: !!p.spent, primedBy: p.primedBy || [], primedAt: p.primedAt ?? -1e9,
+    })),
     monoliths: packFlags(sim.monoliths, ["logged", "discovered", "foundBy"]),
     items: packFlags(sim.items, ["discovered", "taken"]),
     trees: packFlags(sim.trees, ["discovered", "chopped"]),

@@ -5,16 +5,16 @@ import {
   createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem, dropItem, craftItem, gatherTarget, offerItem,
   possess, release, possessableCompanions, activatePylon, pylonAt,
   PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=mirage-0.9.8";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=mirage-0.9.8";
-import { createRenderer } from "./render.js?v=mirage-0.9.8";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=mirage-0.9.8";
-import { createInput, ACTIONS } from "./input.js?v=mirage-0.9.8";
-import { createAudio } from "./audio.js?v=mirage-0.9.8";
-import { hashSeed } from "./rng.js?v=mirage-0.9.8";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings } from "./save.js?v=mirage-0.9.8";
+} from "./state.js?v=mirage-0.9.9";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=mirage-0.9.9";
+import { createRenderer } from "./render.js?v=mirage-0.9.9";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=mirage-0.9.9";
+import { createInput, ACTIONS } from "./input.js?v=mirage-0.9.9";
+import { createAudio } from "./audio.js?v=mirage-0.9.9";
+import { hashSeed } from "./rng.js?v=mirage-0.9.9";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings } from "./save.js?v=mirage-0.9.9";
 
-const BUILD = "mirage-0.9.8";
+const BUILD = "mirage-0.9.9";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -303,6 +303,23 @@ function advanceLevel() {
   lastFrame = 0;
 }
 
+/**
+ * The pylon this mind BELIEVES it is standing in — real, phantom, or a spent
+ * one the hallucination is still painting as full. Truth is never consulted;
+ * that is the point.
+ */
+function nearestBelievedPylon(sim, percept, actor) {
+  if (!percept?.active) return null;
+  for (const ph of percept.phantomPylons || []) {
+    if (Math.hypot(ph.x - actor.x, ph.z - actor.z) <= PYLON_RADIUS) return ph;
+  }
+  for (const p of sim.pylons) {
+    if (!percept.deadPylonsLookLive?.has(p.id)) continue;
+    if (Math.hypot(p.x - actor.x, p.z - actor.z) <= PYLON_RADIUS) return p;
+  }
+  return null;
+}
+
 function nearestPhantom(sim, percept, actor = sim.player) {
   if (!percept.active) return null;
   let best = null, bestD = Infinity;
@@ -363,16 +380,23 @@ function handleAction(action, arg, player = run.players[0]) {
       // standing in, and "act on what is here" already means exactly that. It
       // takes priority over surveying: nobody walks into the light of a pylon
       // to write in a notebook.
-      if (pylonAt(sim, actor)) {
+      // Believed pylons, not real ones. A hallucinating lead is shown pylons
+      // that are not there and spent ones that look full; if the verb only
+      // responded to real ones, pressing it on a phantom would do nothing
+      // visible and that silence would be a perfect lucidity readout. So the
+      // press always LANDS — same line, same sound — and the difference shows
+      // up as nobody ever joining you.
+      const believedPylon = pylonAt(sim, actor) || nearestBelievedPylon(sim, percept, actor);
+      if (believedPylon) {
         const ares = activatePylon(sim, actor);
-        if (ares.ok) {
-          audio.play("recover");
+        audio.play(ares.confirmed ? "recover" : "log");
+        if (ares.confirmed) {
           hud.say(
-            ares.caught > 1
-              ? `The pylon gives out. ${ares.caught} of you caught it — it will not light again.`
-              : "The pylon gives out. You caught it alone — it will not light again.",
-            ares.caught > 1 ? "good" : "warn",
+            `The pylon gives out. ${ares.caught} of you caught it — it will not light again.`,
+            "good",
           );
+        } else {
+          hud.say("Hands on the pylon. It needs a second pair before it will give.", "warn");
         }
         break;
       }

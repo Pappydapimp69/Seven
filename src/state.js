@@ -14,9 +14,9 @@
 // The sim's job is to keep an honest, testable record of what is TRUE; `percept.js`
 // is the only place allowed to lie about it.
 
-import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=mirage-0.9.8";
-import { makeRng } from "./rng.js?v=mirage-0.9.8";
-import { updateCompanions, companionRemark } from "./party.js?v=mirage-0.9.8";
+import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=mirage-0.9.9";
+import { makeRng } from "./rng.js?v=mirage-0.9.9";
+import { updateCompanions, companionRemark } from "./party.js?v=mirage-0.9.9";
 
 export const PARTY_SIZE = 6; // you + 5 companions — the spec's five NPCs, plus the player
 export const MAX_LUCIDITY = 100;
@@ -127,6 +127,21 @@ export const PYLON_RADIUS = 7.5;
 // — which is a real decision rather than a resource to grind.
 export const PYLON_DRAW = 55; // lucidity returned to each mind in the pulse
 export const PYLON_PAUSE = 10; // seconds of held-off decay the pulse buys
+// How long a primed pylon waits for a second pair of hands.
+//
+// TWO minds have to set hands on the same pylon, in range, inside this window,
+// or nothing happens. That second person is not a difficulty tax — they are the
+// SANITY CHECK. A hallucinating lead is shown pylons that do not exist and
+// spent ones that look full, and until now those fired exactly like real ones:
+// the deception simply did not reach the game's most important object. It does
+// now, and the way you find out is that nobody joins you. A companion cannot
+// confirm a pylon that is not there, because companions act on the basin rather
+// than on your picture of it.
+//
+// It also gives cohesion a job that ISN'T armour. Corroboration was removed as
+// a passive shield against the lie; this is the same party, spending the same
+// closeness, on something they have to actually do.
+export const PRIME_WINDOW = 14;
 export const PYLON_MAX_CHARGE = 100; // retained so old saves deserialise cleanly
 export const DOSE_COUNT = 3; // "lumen" ampoules — the whole supply, for six people
 export const DOSE_RESTORE = 70;
@@ -474,7 +489,7 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
     // scoring all stay exactly as balanced, and dropping out is a handoff back
     // to the AI that is already driving that character.
     humans: [player, ...rejoined],
-    pylons: world.pylons.map((p) => ({ ...p, charge: PYLON_MAX_CHARGE, spent: false, live: true })),
+    pylons: world.pylons.map((p) => ({ ...p, charge: PYLON_MAX_CHARGE, spent: false, live: true, primedBy: [], primedAt: -1e9 })),
     // `discovered` is what makes this a game about EXPLORING rather than about
     // walking a known route: a marker's position is not knowledge the party
     // starts with. It is set when somebody in the party actually picks it out of
@@ -577,7 +592,27 @@ export function pylonAt(sim, ch) {
  */
 export function activatePylon(sim, actor = sim.player) {
   const p = pylonAt(sim, actor);
+  // No real pylon here. The caller must NOT treat this as a visible failure —
+  // a mind standing at a pylon that does not exist has to be allowed to think
+  // it just primed one. See main.js.
   if (!p) return { ok: false, reason: "no-pylon" };
+
+  if (!p.primedBy || p.primedAt === undefined || sim.time - p.primedAt > PRIME_WINDOW) {
+    p.primedBy = [];
+    p.primedAt = sim.time;
+  }
+  if (!p.primedBy.includes(actor.id)) p.primedBy.push(actor.id);
+
+  // One pair of hands is a claim; two is a fact. Until a SECOND mind standing
+  // in the same light does the same thing, nothing happens.
+  const confirmers = sim.party.filter(
+    (c) => p.primedBy.includes(c.id) && dist2D(p, c) <= PYLON_RADIUS,
+  );
+  if (confirmers.length < 2) {
+    emit(sim, "prime", `${actor.name} sets hands on the pylon. It needs a second.`, { who: actor.id });
+    return { ok: true, primed: true, confirmed: false, waitingFor: 2 - confirmers.length };
+  }
+
   const inside = sim.party.filter((c) => dist2D(p, c) <= PYLON_RADIUS);
   p.spent = true;
   p.live = false;
@@ -591,7 +626,7 @@ export function activatePylon(sim, actor = sim.player) {
   emit(sim, "draw", `The pylon gives out — ${inside.length} of you caught it. It will not light again.`, {
     count: inside.length,
   });
-  return { ok: true, caught: inside.length };
+  return { ok: true, primed: true, confirmed: true, caught: inside.length };
 }
 
 /**

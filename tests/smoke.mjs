@@ -266,9 +266,19 @@ function assert(cond, msg) {
     // remaining way back from a hallucination besides a dose.
     const p = s.pylons.find((x) => !x.spent) || s.pylons[0];
     p.spent = false;
+    p.primedBy = [];
+    p.primedAt = -1e9;
+    // A pylon takes TWO. Put a lucid companion in the light so they can be the
+    // second pair of hands — party.js confirms a primed pylon they are already
+    // standing in. Without them the press only primes, which is exactly the
+    // mechanic and exactly why this step had to change.
+    const mate = s.companions[0];
+    mate.hallucinating = false;
+    mate.lucidity = 90;
     M.teleport(p.x, p.z);
+    mate.x = p.x; mate.z = p.z;
     M.act(M.ACTIONS.SURVEY);
-    M.advance(0.2);
+    M.advance(0.5);
     return { hallucinating: s.player.hallucinating, lucidity: s.player.lucidity, perceptActive: M.percept.active, spent: p.spent };
   });
   assert(recovered.spent, "activating a pylon did not spend it");

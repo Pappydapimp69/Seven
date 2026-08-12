@@ -14,7 +14,7 @@ import {
   possess, release, possessableCompanions,
   PARTY_SIZE, MAX_LUCIDITY, DOSE_COUNT, RECOVER_AT, RECOVER_TIME, DISSOLVE_TIME,
   TIME_LIMIT, PYLON_RADIUS, LOG_RADIUS, ISOLATION_DIST,
-  ITEM_CAP, ITEM_PICKUP_RADIUS, ITEM_INFO, VOUCH_WINDOW, PYLON_PAUSE, PYLON_DRAW, activatePylon, pylonAt, PHANTOM_ITEM_COST, CRAFT_RECIPES, CAMPAIGN_LENGTH, LUCIDITY_GRACE, FULL_DRAIN_AT, graceMultiplier,
+  ITEM_CAP, ITEM_PICKUP_RADIUS, ITEM_INFO, VOUCH_WINDOW, PYLON_PAUSE, PYLON_DRAW, PRIME_WINDOW, activatePylon, pylonAt, PHANTOM_ITEM_COST, CRAFT_RECIPES, CAMPAIGN_LENGTH, LUCIDITY_GRACE, FULL_DRAIN_AT, graceMultiplier,
   GATHER_RADIUS, GATHER_HOLD_TIME, GATHER_YIELD, STAKE_COST, PYLON_MAX_CHARGE, TRAIT_VARIANCE, COMPANION_TEMPLATES,
   COMPANION_ITEM_CAP, OFFER_RADIUS,
 } from "../src/state.js";
@@ -270,8 +270,9 @@ check("a pylon fires once, catches everyone in it, and never lights again", () =
   far.x = p.x + 500; far.z = p.z + 500;
   a.lucidity = 20; b.lucidity = 20; far.lucidity = 20;
 
-  const res = activatePylon(sim, a);
-  assert(res.ok, "activating a live pylon failed");
+  eq(activatePylon(sim, a).confirmed, false, "one person alone fired a pylon");
+  const res = activatePylon(sim, b);
+  assert(res.ok && res.confirmed, "a second pair of hands did not fire the pylon");
   assert(a.lucidity > 20 && b.lucidity > 20, "the pulse missed somebody standing in it");
   eq(far.lucidity, 20, "the pulse reached someone outside the radius");
   assert(a.decayPausedUntil > sim.time, "the pulse did not hold the decay off");
@@ -291,7 +292,10 @@ check("the pause travels with you, then expires", () => {
   const p = sim.pylons[0];
   const ch = sim.player;
   ch.x = p.x; ch.z = p.z;
+  const second = sim.companions[0];
+  second.x = p.x; second.z = p.z;
   activatePylon(sim, ch);
+  activatePylon(sim, second);
 
   ch.x = p.x + 500; ch.z = p.z + 500;
   ch.lucidity = 50;
@@ -526,7 +530,11 @@ check("a pylon restores everyone standing in it, and spends itself doing so", ()
   c.lucidity = 20;
   c.x = p.x;
   c.z = p.z;
-  activatePylon(sim, c);
+  const mate = sim.companions[1];
+  mate.x = p.x; mate.z = p.z;
+  eq(activatePylon(sim, c).confirmed, false, "one pair of hands should only PRIME a pylon");
+  assert(!p.spent, "a single primer spent the pylon");
+  activatePylon(sim, mate);
   assert(c.lucidity > 20, "pylon did not restore");
   assert(p.spent, "pylon did not spend itself");
 });
@@ -567,7 +575,10 @@ check("the pulse pulls back anyone hallucinating inside it", () => {
   beginHallucinating(sim, c);
   c.x = p.x;
   c.z = p.z;
-  activatePylon(sim, sim.player.x === p.x ? sim.player : c);
+  const helper = sim.companions[2];
+  helper.x = p.x; helper.z = p.z;
+  activatePylon(sim, helper);
+  activatePylon(sim, sim.companions[3] && ((sim.companions[3].x = p.x), (sim.companions[3].z = p.z), sim.companions[3]));
   assert(!c.hallucinating, "the pulse did not pull back a mind standing in it");
   assert(c.lucidity >= RECOVER_AT, "recovered below the recovery floor");
 });
@@ -1449,7 +1460,10 @@ check("using a stake plants a real, functioning pylon at the player's position",
   c.lucidity = 20;
   c.x = planted.x;
   c.z = planted.z;
+  const witness = sim.companions[1];
+  witness.x = planted.x; witness.z = planted.z;
   activatePylon(sim, c);
+  activatePylon(sim, witness);
   assert(c.lucidity > 20, "a planted stake should restore lucidity like any pylon");
   assert(planted.spent, "a planted pylon should be spent by its one use");
 });
@@ -1736,8 +1750,11 @@ check("a fetch errand survives being preempted by a pylon-break instead of perma
   // resume on its own instead of leaving goalKind stuck on "follow" forever
   // with the item permanently unclaimable by any OTHER companion either
   // (see findFetchableItem's claimed-item exclusion).
+  // Longer than it used to need: a pylon now takes two pairs of hands, so a
+  // courier alone at one waits for a second that is not coming, gives up, and
+  // only then resumes. "Not permanently stranded" is the claim, not "prompt".
   let delivered = false;
-  for (let i = 0; i < 900 && sim.status === "playing"; i++) {
+  for (let i = 0; i < 4000 && sim.status === "playing"; i++) {
     tick(sim, 1 / 30);
     if (sim.inventory.length >= 2) { delivered = true; break; }
   }
@@ -3308,6 +3325,65 @@ check("the help panel explains what checking in actually buys you", () => {
     !/lucid\s+beside you/i.test(prose),
     "the help still says a lucid companion BESIDE you keeps the record honest — that rule is gone",
   );
+});
+
+
+// The sanity check, stated as the player would state it: a pylon that isn't
+// there cannot be confirmed, because nobody else can put hands on it. Before
+// this, a hallucinated pylon fired exactly like a real one — the deception
+// reached the markers, the party, the items and the compass, but not the one
+// object the run actually depends on.
+check("one pair of hands only primes a pylon; a second fires it", () => {
+  const sim = createRun({ seed: 74 });
+  sim.time = FULL_DRAIN_AT;
+  const p = sim.pylons[0];
+  const a = sim.player, b = sim.companions[0];
+  a.x = p.x; a.z = p.z;
+  b.x = p.x + 600; b.z = p.z + 600; // out of the light
+  a.lucidity = 30;
+
+  const first = activatePylon(sim, a);
+  assert(first.ok && first.primed && !first.confirmed, "a lone activation should prime, not fire");
+  eq(a.lucidity, 30, "a primed-but-unconfirmed pylon gave light anyway");
+  assert(!p.spent, "a primed-but-unconfirmed pylon spent itself");
+
+  // Somebody out of range cannot confirm it either — they have to be IN it.
+  activatePylon(sim, b);
+  assert(!p.spent, "a confirmation from outside the radius fired the pylon");
+
+  b.x = p.x; b.z = p.z;
+  const second = activatePylon(sim, b);
+  assert(second.confirmed, "a second pair of hands in the light did not fire it");
+  assert(a.lucidity > 30 && p.spent, "the pulse did not land");
+});
+
+check("a prime goes stale — two people have to act together, not eventually", () => {
+  const sim = createRun({ seed: 75 });
+  sim.time = FULL_DRAIN_AT;
+  const p = sim.pylons[0];
+  const a = sim.player, b = sim.companions[0];
+  a.x = p.x; a.z = p.z; b.x = p.x; b.z = p.z;
+  activatePylon(sim, a);
+  sim.time += PRIME_WINDOW + 1;
+  const late = activatePylon(sim, b);
+  assert(!late.confirmed, "a stale prime was still confirmable");
+  assert(!p.spent, "a stale prime fired the pylon");
+});
+
+// And the one that makes it a sanity check rather than a chore: a phantom
+// pylon can be primed forever and never confirmed, because there is nothing
+// there for anyone else to put hands on.
+check("a pylon that isn't there can never be confirmed", () => {
+  const sim = createRun({ seed: 76 });
+  sim.time = FULL_DRAIN_AT;
+  const spot = farFromPylons(sim);
+  for (const c of sim.party) { c.x = spot.x; c.z = spot.z; }
+  sim.player.lucidity = 30;
+  for (let i = 0; i < 5; i++) {
+    for (const c of sim.party) activatePylon(sim, c);
+  }
+  eq(sim.player.lucidity, 30, "standing at nothing and pressing the verb put light back");
+  eq(sim.pylons.filter((p) => p.spent).length, 0, "a pylon somewhere else was spent");
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed`);

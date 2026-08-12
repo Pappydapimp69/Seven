@@ -6,8 +6,8 @@
 // the one hallucinating. The only place a real number is ever printed is the
 // debrief, after the run is over.
 
-import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds } from "./percept.js?v=mirage-0.9.8";
-import { LOG_RADIUS, PYLON_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, gatherTarget, GATHER_HOLD_TIME, previewCraft, claimedEntryAt, pylonAt } from "./state.js?v=mirage-0.9.8";
+import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds } from "./percept.js?v=mirage-0.9.9";
+import { LOG_RADIUS, PYLON_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, gatherTarget, GATHER_HOLD_TIME, previewCraft, claimedEntryAt, pylonAt } from "./state.js?v=mirage-0.9.9";
 
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 
@@ -257,6 +257,19 @@ export function createHud(sim, percept, opts = {}) {
    * every prompt honest as verbs are added), and the same priority order
    * handleAction uses: pickup, then gather, then survey.
    */
+  /** What this viewer believes is a live pylon underfoot. Truth not consulted. */
+  function believedPylonAt(viewer, s2, actor) {
+    if (!viewer?.active) return null;
+    for (const ph of viewer.phantomPylons || []) {
+      if (Math.hypot(ph.x - actor.x, ph.z - actor.z) <= PYLON_RADIUS) return ph;
+    }
+    for (const p of s2.pylons) {
+      if (!viewer.deadPylonsLookLive?.has(p.id)) continue;
+      if (Math.hypot(p.x - actor.x, p.z - actor.z) <= PYLON_RADIUS) return p;
+    }
+    return null;
+  }
+
   function paintPrompt(els, viewer, actor, hold) {
     if (!els.prompt) return;
     const pickup = nearestPickupItem(viewer, actor);
@@ -271,12 +284,16 @@ export function createHud(sim, percept, opts = {}) {
     const strikeable = claim && !viewer.believedStruck?.has(claim.id) ? claim : null;
     // Top of the chain: a pylon you are standing in is the one thing here that
     // can be permanently lost by walking away from it, and it only works once.
-    const pylon = pylonAt(sim, actor);
+    // Believed, not real: the prompt must appear over a phantom pylon too, or
+    // its absence tells the lead they are hallucinating.
+    const pylon = pylonAt(sim, actor) || believedPylonAt(viewer, sim, actor);
     if (pylon && sim.status === "playing") {
       const together = sim.party.filter(
         (c) => Math.hypot(c.x - pylon.x, c.z - pylon.z) <= PYLON_RADIUS,
       ).length;
-      els.text.textContent = `Draw the pylon — ${together} of you in range, one use only`;
+      els.text.textContent = pylon.primedBy?.length
+        ? `Pylon primed — needs a second pair of hands`
+        : `Set hands on the pylon — ${together} of you in range, one use only`;
       els.prompt.classList.add("show");
       els.fill.style.width = "0%";
     } else if (pickup && sim.status === "playing") {

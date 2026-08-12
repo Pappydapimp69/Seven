@@ -8,7 +8,7 @@
 // who lags, who starts narrating things that aren't there. Each rule below exists
 // to make an internal number legible from the outside without printing it.
 
-import { findPath, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, GRID } from "./world.js?v=mirage-0.9.8";
+import { findPath, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, GRID } from "./world.js?v=mirage-0.9.9";
 import {
   BAND,
   bandOf,
@@ -21,7 +21,7 @@ import {
   companionPickup,
   handoffToPlayer,
   activatePylon,
-} from "./state.js?v=mirage-0.9.8";
+} from "./state.js?v=mirage-0.9.9";
 
 // Higher band = worse. Lets a per-companion trait move the pylon-seeking
 // trigger EARLIER than the uniform BRITTLE tell everyone else gets, without
@@ -94,6 +94,7 @@ const KNOWN_PYLON_DIST = 24; // how close they must have been to remember a pylo
 const SEEK_PYLON_DIST = 70; // and how far they will then travel back to one
 const REPATH_INTERVAL = 0.9; // seconds between path recomputes
 const SEEK_ITEM_DIST = 55; // how far an idle companion will travel on a fetch errand
+const PYLON_RETRY = 90; // seconds before a companion will try an abandoned pylon again
 
 // --- what "gone" looks like from the outside ---------------------------------
 // A companion's hallucination is only a tell if the lead can SEE it. The
@@ -262,7 +263,8 @@ function updateMemory(sim, c) {
 function nearestKnownPylon(sim, c) {
   let best = null, bestD = Infinity;
   for (const p of sim.pylons) {
-    if (!c.known.pylons.has(p.id) || p.charge <= 0) continue;
+    if (!c.known.pylons.has(p.id) || p.spent) continue;
+    if ((c.givenUpPylons?.[p.id] || 0) > sim.time) continue; // waited for a second, nobody came
     const d = dist(c, p);
     if (d < bestD) { bestD = d; best = p; }
   }
@@ -452,9 +454,28 @@ export function updateCompanions(sim, dt) {
         // placed below could never be reached and companions would walk to
         // pylons forever without ever using one.
         if (dist(c, p) <= PYLON_RADIUS) {
-          activatePylon(sim, c);
-          c.goalKind = "resting";
-          continue;
+          // Prime it, and then find out whether anyone joined. Checking for
+          // another BODY in range is not the same as being confirmed by one —
+          // the lead standing beside you has not touched the pylon — and
+          // treating presence as confirmation looped this branch forever on
+          // "resting" with the meter untouched.
+          const res = activatePylon(sim, c);
+          if (res.confirmed) {
+            c.goalKind = "resting";
+            c.pylonWaitFor = null;
+            continue;
+          }
+          if (c.pylonWaitFor !== p.id) { c.pylonWaitFor = p.id; c.pylonWaitUntil = sim.time + 12; }
+          if (sim.time < c.pylonWaitUntil) {
+            c.goalKind = "pylon";
+            continue; // hands on it, waiting for a second — the lead may still come
+          }
+          // Nobody came. A MAP, not a single id: with one slot a companion who
+          // gave up on pylon B stopped excluding A, walked back to A, gave up
+          // on A, un-excluded B, and ping-ponged for the rest of the run.
+          if (!c.givenUpPylons) c.givenUpPylons = {};
+          c.givenUpPylons[p.id] = sim.time + PYLON_RETRY;
+          c.pylonWaitFor = null;
         }
         c.goal = { x: p.x, z: p.z };
         stepToward(sim, c, c.goal, WALK_SPEED, dt);
@@ -530,6 +551,26 @@ export function updateCompanions(sim, dt) {
     if (c.goalKind && c.goalKind !== "follow" && c.goalKind !== "resting") {
       c.wasAway = c.goalKind;
     }
+    // Somebody in the party has set hands on a pylon and is waiting for a
+    // second. A lucid companion standing in the same light joins in — that is
+    // what the confirmation IS, and without it the lead could never spend a
+    // pylon without a human second player. They will not walk across the basin
+    // for it; they have to already be there, which is what makes bringing the
+    // party close to a pylon before you touch it the actual decision.
+    const waiting = sim.pylons.find(
+      (p) =>
+        !p.spent &&
+        p.primedBy?.length &&
+        !p.primedBy.includes(c.id) &&
+        sim.time - p.primedAt <= 14 &&
+        dist(p, c) <= PYLON_RADIUS,
+    );
+    if (waiting) {
+      activatePylon(sim, c);
+      c.goalKind = "resting";
+      continue;
+    }
+
     c.goalKind = "follow";
     const slot = formationSlot(sim, c);
     const d = dist(c, slot);
