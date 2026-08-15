@@ -170,9 +170,38 @@ export function createInput(canvas, opts = {}) {
   // ---- mouse look (in-run only) ---------------------------------------------
   function onMouseMove(e) {
     if (!state.pointerLocked) return;
-    state.look.dx += e.movementX;
-    state.look.dy += e.movementY;
+    // movementX/Y arrive in CSS PIXELS, and a CSS pixel is not a fixed physical
+    // size — Windows display scaling at 125% makes one device pixel 0.8 CSS
+    // pixels, so the identical physical mouse movement reports 20% fewer units
+    // and the camera turns 20% slower. Nothing in the game changed; the unit
+    // did. Multiplying by devicePixelRatio converts back to device pixels, so a
+    // given physical sweep of the mouse produces the same rotation at 100%,
+    // 125% and 150% scaling, on a HiDPI laptop, and after the user drags the
+    // window to a second monitor mid-run.
+    const toDevice = window.devicePixelRatio || 1;
+    state.look.dx += e.movementX * toDevice;
+    state.look.dy += e.movementY * toDevice;
   }
+  /**
+   * Test seam: the same path a real pointer-lock event takes, deltas in CSS px.
+   * Returns the YAW IT PRODUCED — the accumulated delta is only converted to
+   * rotation inside `poll`, so a seam that stops at the accumulator reports
+   * nothing and any assertion built on it is vacuous.
+   */
+  function debugLook(dx, dy) {
+    const wasLocked = state.pointerLocked;
+    const wasMode = mode;
+    state.pointerLocked = true;
+    mode = "run";
+    const before = state.yaw;
+    onMouseMove({ movementX: dx, movementY: dy });
+    poll(1 / 60);
+    const after = state.yaw;
+    state.pointerLocked = wasLocked;
+    mode = wasMode;
+    return after - before;
+  }
+
   function onPointerLockChange() {
     state.pointerLocked = document.pointerLockElement === canvas;
     if (state.pointerLocked) setScheme("keyboard");
@@ -440,6 +469,7 @@ export function createInput(canvas, opts = {}) {
 
   return {
     setMode,
+    debugLook,
     setMenuHandlers,
     setTouchInteractHeld,
     poll,

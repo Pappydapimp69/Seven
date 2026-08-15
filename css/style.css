@@ -17,6 +17,26 @@
 
 * { box-sizing: border-box; }
 
+/* --- one screen, whatever the OS thinks a pixel is -------------------------
+   Every size below is in rem, and the root size is derived from the VIEWPORT
+   rather than fixed in CSS pixels. That is what makes the HUD occupy a constant
+   FRACTION of the screen instead of a constant number of CSS pixels.
+
+   The bug this fixes was reported as "the zoom is wrong and the controls feel
+   off" and blamed on aspect ratio, which was innocent: Windows display scaling
+   at 125% shrinks the CSS viewport from 1920x1080 to 1536x864 while the screen
+   stays the same size, so an 11px label becomes 25% physically larger and eats
+   25% more of a smaller viewport. The 3D projection never changed — aspect is
+   identical — but the furniture around it grew, which reads exactly like being
+   zoomed in. The same thing happens on browser zoom and on any HiDPI display.
+
+   Calibrated so 1rem lands on ~16px at 1920x1080, which is what the previous
+   fixed sizes were authored against; clamped so a very small window stays
+   legible and a very large one does not turn into billboards. */
+html {
+  font-size: clamp(10px, calc(0.55vw + 0.55vh), 20px);
+}
+
 html, body {
   margin: 0;
   height: 100%;
@@ -80,58 +100,58 @@ html, body {
   z-index: 20;
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: 1.5rem;
   background: radial-gradient(ellipse at 50% 30%, rgba(14, 22, 32, 0.9), rgba(4, 7, 11, 0.97));
   overflow-y: auto;
 }
 
 .title-card {
-  width: min(680px, 100%);
+  width: min(42.5rem, 100%);
   background: var(--panel);
   border: 1px solid var(--edge);
-  border-radius: 14px;
-  padding: 28px;
-  backdrop-filter: blur(6px);
+  border-radius: 0.875rem;
+  padding: 1.75rem;
+  backdrop-filter: blur(0.375rem);
 }
-.title-card.narrow { width: min(420px, 100%); }
+.title-card.narrow { width: min(26.25rem, 100%); }
 
 .logo {
-  margin: 0 0 6px;
-  font-size: clamp(38px, 9vw, 68px);
+  margin: 0 0 0.375rem;
+  font-size: clamp(2.375rem, 9vw, 4.25rem);
   letter-spacing: 0.22em;
   font-weight: 300;
 }
-.tagline { color: var(--dim); line-height: 1.55; margin: 0 0 22px; }
-.tagline.small { font-size: 13px; }
+.tagline { color: var(--dim); line-height: 1.55; margin: 0 0 1.375rem; }
+.tagline.small { font-size: 0.8125rem; }
 
-.row { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 20px; }
-.field { flex: 1 1 200px; }
+.row { display: flex; gap: 1.125rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+.field { flex: 1 1 12.5rem; }
 .field-label {
   display: block;
-  font-size: 11px;
+  font-size: 0.6875rem;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--dim);
-  margin-bottom: 8px;
+  margin-bottom: 0.5rem;
 }
 #seedInput {
   width: 100%;
-  padding: 10px 12px;
+  padding: 0.625rem 0.75rem;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--edge);
-  border-radius: 8px;
+  border-radius: 0.5rem;
   color: var(--ink);
   font: inherit;
 }
-input[type="range"] { width: 100%; margin-bottom: 18px; accent-color: var(--cyan); }
+input[type="range"] { width: 100%; margin-bottom: 1.125rem; accent-color: var(--cyan); }
 
-.diff-row { display: flex; gap: 8px; }
+.diff-row { display: flex; gap: 0.5rem; }
 .diff {
   flex: 1;
-  padding: 10px 6px;
+  padding: 0.625rem 0.375rem;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--edge);
-  border-radius: 8px;
+  border-radius: 0.5rem;
   color: var(--dim);
   font: inherit;
   cursor: pointer;
@@ -142,13 +162,13 @@ input[type="range"] { width: 100%; margin-bottom: 18px; accent-color: var(--cyan
    main.js). Applied to whichever element currently has grid focus, on top of
    any .sel styling — a controller user needs to SEE where they are before
    pressing confirm, the same way a mouse user sees a hover state. */
-.gpfocus { outline: 2px solid var(--cyan); outline-offset: 3px; }
+.gpfocus { outline: 2px solid var(--cyan); outline-offset: 0.1875rem; }
 
 .menu-hints {
-  margin: 14px 0 0;
-  padding-top: 12px;
+  margin: 0.875rem 0 0;
+  padding-top: 0.75rem;
   border-top: 1px solid var(--edge);
-  font-size: 12px;
+  font-size: 0.75rem;
   color: #5b6675;
   text-align: center;
   min-height: 1.4em;
@@ -163,22 +183,22 @@ input[type="range"] { width: 100%; margin-bottom: 18px; accent-color: var(--cyan
   justify-content: center;
   min-width: 1.5em;
   height: 1.5em;
-  padding: 0 4px;
+  padding: 0 0.25rem;
   border-radius: 50%;
   font-size: 0.82em;
   font-weight: 700;
   color: #08131c;
-  margin: 0 2px;
-  vertical-align: -3px;
+  margin: 0 0.125rem;
+  vertical-align: -0.1875rem;
 }
 .pad-badge.b-a { background: #4fd67a; }
 .pad-badge.b-b { background: #ff5d6c; }
 .pad-badge.b-x { background: #5aa8ff; }
 .pad-badge.b-y { background: #ffd54f; }
 .pad-badge.b-lb, .pad-badge.b-rb, .pad-badge.b-lt, .pad-badge.b-rt, .pad-badge.b-start {
-  border-radius: 5px;
+  border-radius: 0.3125rem;
   min-width: auto;
-  padding: 0 6px;
+  padding: 0 0.375rem;
   background: #3a4454;
   color: var(--ink);
   font-size: 0.72em;
@@ -186,22 +206,22 @@ input[type="range"] { width: 100%; margin-bottom: 18px; accent-color: var(--cyan
 
 .big-btn {
   width: 100%;
-  padding: 15px;
-  margin-top: 4px;
+  padding: 0.9375rem;
+  margin-top: 0.25rem;
   font: inherit;
-  font-size: 17px;
+  font-size: 1.0625rem;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: #06111a;
   background: var(--cyan);
   border: 0;
-  border-radius: 10px;
+  border-radius: 0.625rem;
   cursor: pointer;
 }
 .big-btn:hover { filter: brightness(1.08); }
 .text-btn {
   display: block;
-  margin: 12px auto 0;
+  margin: 0.75rem auto 0;
   background: none;
   border: 0;
   color: var(--dim);
@@ -211,44 +231,44 @@ input[type="range"] { width: 100%; margin-bottom: 18px; accent-color: var(--cyan
 }
 
 .howto {
-  margin-top: 18px;
-  padding-top: 16px;
+  margin-top: 1.125rem;
+  padding-top: 1.0rem;
   border-top: 1px solid var(--edge);
   color: var(--dim);
-  font-size: 13.5px;
+  font-size: 0.8438rem;
   line-height: 1.6;
 }
 .howto b { color: var(--ink); font-weight: 600; }
-.howto-keys { color: #6e7a8c; font-size: 12.5px; }
-.build { margin: 20px 0 0; color: #55606f; font-size: 11px; letter-spacing: 0.1em; }
+.howto-keys { color: #6e7a8c; font-size: 0.7812rem; }
+.build { margin: 1.25rem 0 0; color: #55606f; font-size: 0.6875rem; letter-spacing: 0.1em; }
 
 /* ---------- in-run HUD ---------- */
 .hud { position: fixed; inset: 0; z-index: 10; pointer-events: none; }
 
 .hud-top {
   position: absolute;
-  top: 14px;
+  top: 0.875rem;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
-  gap: 8px;
+  gap: 0.5rem;
   flex-wrap: wrap;
   justify-content: center;
 }
 .pill {
   display: flex;
-  gap: 8px;
+  gap: 0.5rem;
   align-items: baseline;
-  padding: 6px 12px;
+  padding: 0.375rem 0.75rem;
   background: var(--panel);
   border: 1px solid var(--edge);
-  border-radius: 999px;
-  font-size: 14px;
+  border-radius: 62.4375rem;
+  font-size: 0.875rem;
   font-variant-numeric: tabular-nums;
 }
-.pill.dim { color: #5b6675; font-size: 11px; }
+.pill.dim { color: #5b6675; font-size: 0.6875rem; }
 .pill-label {
-  font-size: 10px;
+  font-size: 0.625rem;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--dim);
@@ -260,7 +280,7 @@ input[type="range"] { width: 100%; margin-bottom: 18px; accent-color: var(--cyan
    + a soft glow only (no size change), so the pill row never reflows. */
 .pill.gain {
   border-color: var(--good);
-  box-shadow: 0 0 0 3px rgba(127, 214, 192, 0.35);
+  box-shadow: 0 0 0 0.1875rem rgba(127, 214, 192, 0.35);
   transition: border-color 0.4s ease-out, box-shadow 0.4s ease-out;
 }
 
@@ -274,10 +294,10 @@ input[type="range"] { width: 100%; margin-bottom: 18px; accent-color: var(--cyan
   position: fixed;
   top: 0;
   left: 0;
-  width: 9px;
-  height: 9px;
-  margin: -4.5px 0 0 -4.5px; /* centre the dot on its translate() point */
-  border-radius: 3px;
+  width: 0.5625rem;
+  height: 0.5625rem;
+  margin: -0.2812rem 0 0 -0.2812rem; /* centre the dot on its translate() point */
+  border-radius: 0.1875rem;
   pointer-events: none;
   z-index: 15;
   transition: transform 0.55s cubic-bezier(0.2, 0.6, 0.3, 1), opacity 0.55s ease-in;
@@ -290,38 +310,38 @@ input[type="range"] { width: 100%; margin-bottom: 18px; accent-color: var(--cyan
 
 .hud-left {
   position: absolute;
-  top: 66px;
-  left: 16px;
-  width: 262px;
-  padding: 12px;
+  top: 4.125rem;
+  left: 1.0rem;
+  width: 16.375rem;
+  padding: 0.75rem;
   background: var(--panel);
   border: 1px solid var(--edge);
-  border-radius: 12px;
+  border-radius: 0.75rem;
 }
 .roster-head {
-  font-size: 11px;
+  font-size: 0.6875rem;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--dim);
-  margin-bottom: 10px;
+  margin-bottom: 0.625rem;
 }
 .roster-note { text-transform: none; letter-spacing: 0; color: #5b6675; }
 
 .roster-row {
   display: grid;
-  grid-template-columns: 16px 1fr auto;
+  grid-template-columns: 1.0rem 1fr auto;
   grid-template-areas: "key name role" ". read read";
-  gap: 2px 8px;
-  padding: 6px 6px;
-  border-radius: 8px;
+  gap: 0.125rem 0.5rem;
+  padding: 0.375rem 0.375rem;
+  border-radius: 0.5rem;
   border-left: 2px solid transparent;
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 .roster-row.selected { background: rgba(116, 224, 255, 0.09); border-left-color: var(--cyan); }
-.r-key { grid-area: key; color: #58626f; font-size: 11px; }
+.r-key { grid-area: key; color: #58626f; font-size: 0.6875rem; }
 .r-name { grid-area: name; letter-spacing: 0.08em; }
-.r-role { grid-area: role; color: #5b6675; font-size: 11px; }
-.r-read { grid-area: read; color: var(--dim); font-size: 11.5px; font-style: italic; }
+.r-role { grid-area: role; color: #5b6675; font-size: 0.6875rem; }
+.r-read { grid-area: read; color: var(--dim); font-size: 0.7188rem; font-style: italic; }
 
 /* Qualitative reads only — the colour IS the readout. */
 .tag-ok .r-read { color: #6f7d8e; }
@@ -334,46 +354,46 @@ input[type="range"] { width: 100%; margin-bottom: 18px; accent-color: var(--cyan
 .roster-row.uncertain .r-read { color: #8a6ea8; }
 
 .sel-line {
-  margin-top: 8px;
-  padding-top: 8px;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
   border-top: 1px solid var(--edge);
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: #5b6675;
 }
 .sel-line span { color: var(--cyan); }
 
 .subtitles {
   position: absolute;
-  bottom: 96px;
+  bottom: 6.0rem;
   left: 50%;
   transform: translateX(-50%);
-  width: min(760px, calc(100% - 40px));
+  width: min(47.5rem, calc(100% - 2.5rem));
   text-align: center;
-  font-size: 15px;
+  font-size: 0.9375rem;
   line-height: 1.5;
-  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.9);
+  text-shadow: 0 0.125rem 0.75rem rgba(0, 0, 0, 0.9);
 }
-.sub { margin: 2px 0; color: #c6d0dd; }
+.sub { margin: 0.125rem 0; color: #c6d0dd; }
 .sub.gone { color: var(--bad); font-style: italic; }
 .sub.warn { color: var(--warm); }
 .sub.good { color: var(--good); }
 
 .action-prompt {
   position: absolute;
-  bottom: 172px;
+  bottom: 10.75rem;
   left: 50%;
   transform: translateX(-50%);
-  padding: 8px 16px;
+  padding: 0.5rem 1.0rem;
   background: rgba(116, 224, 255, 0.12);
   border: 1px solid rgba(116, 224, 255, 0.4);
-  border-radius: 999px;
-  font-size: 14px;
+  border-radius: 62.4375rem;
+  font-size: 0.875rem;
   opacity: 0;
   transition: opacity 0.18s;
   overflow: hidden; /* clips the fill bar to the pill's rounded corners */
 }
 .action-prompt.show { opacity: 1; }
-.action-prompt::after { content: "  [E]"; color: var(--cyan); font-size: 12px; }
+.action-prompt::after { content: "  [E]"; color: var(--cyan); font-size: 0.75rem; }
 /* Hold-to-gather progress. Width is set directly from JS each frame — no CSS
    transition here, since a transition would lag a per-frame value and read as
    mushy rather than responsive to how long the button has actually been down. */
@@ -390,26 +410,26 @@ input[type="range"] { width: 100%; margin-bottom: 18px; accent-color: var(--cyan
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 5px;
-  height: 5px;
-  margin: -2.5px 0 0 -2.5px;
+  width: 0.3125rem;
+  height: 0.3125rem;
+  margin: -0.1562rem 0 0 -0.1562rem;
   border-radius: 50%;
   background: rgba(223, 230, 240, 0.5);
 }
 
 .item-bar {
   position: absolute;
-  left: 16px;
-  bottom: 22px;
+  left: 1.0rem;
+  bottom: 1.375rem;
   display: flex;
-  gap: 6px;
+  gap: 0.375rem;
 }
 .item-slot {
-  padding: 8px 12px;
+  padding: 0.5rem 0.75rem;
   background: var(--panel);
   border: 1px solid var(--edge);
-  border-radius: 8px;
-  font-size: 12px;
+  border-radius: 0.5rem;
+  font-size: 0.75rem;
   color: var(--dim);
 }
 .item-slot.sel { color: var(--ink); border-color: var(--cyan); background: rgba(116, 224, 255, 0.12); }
@@ -419,13 +439,13 @@ input[type="range"] { width: 100%; margin-bottom: 18px; accent-color: var(--cyan
    pressing craft would actually do something, so [C] is never a guess. */
 .craft-hint {
   position: absolute;
-  left: 16px;
-  bottom: 58px;
-  padding: 5px 10px;
+  left: 1.0rem;
+  bottom: 3.625rem;
+  padding: 0.3125rem 0.625rem;
   background: rgba(127, 214, 192, 0.14);
   border: 1px solid rgba(127, 214, 192, 0.4);
-  border-radius: 8px;
-  font-size: 11.5px;
+  border-radius: 0.5rem;
+  font-size: 0.7188rem;
   color: var(--good);
   opacity: 0;
   transition: opacity 0.18s;
@@ -434,34 +454,34 @@ input[type="range"] { width: 100%; margin-bottom: 18px; accent-color: var(--cyan
 
 .hints {
   position: absolute;
-  bottom: 12px;
+  bottom: 0.75rem;
   left: 50%;
   transform: translateX(-50%);
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: #5b6675;
   text-align: center;
 }
 
 .touch-buttons {
   position: absolute;
-  right: 16px;
-  bottom: 22px;
+  right: 1.0rem;
+  bottom: 1.375rem;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0.5rem;
   pointer-events: auto;
 }
 .tbtn {
-  padding: 13px 18px;
-  min-width: 108px;
+  padding: 0.8125rem 1.125rem;
+  min-width: 6.75rem;
   background: var(--panel);
   border: 1px solid var(--edge);
-  border-radius: 10px;
+  border-radius: 0.625rem;
   color: var(--ink);
   font: inherit;
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
-.tbtn.small { font-size: 11px; padding: 8px 14px; }
+.tbtn.small { font-size: 0.6875rem; padding: 0.5rem 0.875rem; }
 /* Shown only while the LIVE active input scheme is touch (see refreshSchemeUI in
    main.js) — not a static hover/pointer media query. A media query is a guess
    made once at load; `data-scheme` tracks the device actually in the player's
@@ -473,41 +493,41 @@ body[data-scheme="touch"] .touch-buttons { display: flex; }
 
 /* ---------- debrief ---------- */
 .debrief-card {
-  width: min(620px, 100%);
+  width: min(38.75rem, 100%);
   background: var(--panel);
   border: 1px solid var(--edge);
-  border-radius: 14px;
-  padding: 26px;
+  border-radius: 0.875rem;
+  padding: 1.625rem;
 }
-.debrief-card h2 { margin: 0 0 6px; letter-spacing: 0.2em; font-weight: 400; }
-.debrief-sub { color: var(--dim); margin: 0 0 14px; }
-.debrief-warn { color: var(--bad); margin: 0 0 14px; font-size: 13px; }
-.debrief-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 14px; }
+.debrief-card h2 { margin: 0 0 0.375rem; letter-spacing: 0.2em; font-weight: 400; }
+.debrief-sub { color: var(--dim); margin: 0 0 0.875rem; }
+.debrief-warn { color: var(--bad); margin: 0 0 0.875rem; font-size: 0.8125rem; }
+.debrief-table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; margin-bottom: 0.875rem; }
 .debrief-table th {
   text-align: left;
-  font-size: 10px;
+  font-size: 0.625rem;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--dim);
   border-bottom: 1px solid var(--edge);
-  padding: 6px 4px;
+  padding: 0.375rem 0.25rem;
 }
-.debrief-table td { padding: 6px 4px; border-bottom: 1px solid rgba(140, 168, 200, 0.08); }
+.debrief-table td { padding: 0.375rem 0.25rem; border-bottom: 1px solid rgba(140, 168, 200, 0.08); }
 .debrief-table .row-gone td { color: var(--bad); }
-.debrief-foot { color: #5b6675; font-size: 12px; }
+.debrief-foot { color: #5b6675; font-size: 0.75rem; }
 
 @media (max-width: 720px) {
-  .hud-left { width: 190px; padding: 9px; top: 58px; left: 10px; }
+  .hud-left { width: 11.875rem; padding: 0.5625rem; top: 3.625rem; left: 0.625rem; }
   .r-role { display: none; }
-  .subtitles { bottom: 130px; font-size: 13px; }
-  .hud-top { gap: 5px; }
-  .pill { padding: 5px 9px; font-size: 12px; }
+  .subtitles { bottom: 8.125rem; font-size: 0.8125rem; }
+  .hud-top { gap: 0.3125rem; }
+  .pill { padding: 0.3125rem 0.5625rem; font-size: 0.75rem; }
   /* Six touch buttons no longer fit one column on a phone screen without
      running off the top — wrap into a compact block instead. */
-  .touch-buttons { flex-direction: row; flex-wrap: wrap; justify-content: flex-end; max-width: 230px; }
-  .tbtn { min-width: 90px; padding: 10px 12px; font-size: 12px; }
-  .item-bar { bottom: 18px; }
-  .craft-hint { bottom: 52px; }
+  .touch-buttons { flex-direction: row; flex-wrap: wrap; justify-content: flex-end; max-width: 14.375rem; }
+  .tbtn { min-width: 5.625rem; padding: 0.625rem 0.75rem; font-size: 0.75rem; }
+  .item-bar { bottom: 1.125rem; }
+  .craft-hint { bottom: 3.25rem; }
 }
 
 /* ---------- couch co-op ---------- */
@@ -519,7 +539,7 @@ body[data-scheme="touch"] .touch-buttons { display: flex; }
 body[data-coop="2"] .coop-badges {
   display: flex;
   position: absolute;
-  bottom: 14px;
+  bottom: 0.875rem;
   left: 0;
   width: 100%;
   pointer-events: none;
@@ -527,19 +547,18 @@ body[data-coop="2"] .coop-badges {
 body[data-coop="2"] .coop-badge {
   width: 50%;
   display: flex;
-  gap: 8px;
+  gap: 0.5rem;
   align-items: baseline;
   justify-content: center;
-  /* Fixed px, never a viewport fraction — see the note above. */
-  font-size: 13px;
+  font-size: 0.8125rem;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--dim);
 }
 .coop-num {
   font-weight: 700;
-  padding: 2px 7px;
-  border-radius: 999px;
+  padding: 0.125rem 0.4375rem;
+  border-radius: 62.4375rem;
   border: 1px solid var(--edge);
   background: var(--panel);
   color: var(--ink);
@@ -553,9 +572,9 @@ body[data-coop="2"] .hud::after {
   left: 50%;
   top: 0;
   bottom: 0;
-  width: 2px;
+  width: 0.125rem;
   background: rgba(140, 168, 200, 0.25);
-  transform: translateX(-1px);
+  transform: translateX(-0.0625rem);
 }
 /* In split-screen the shared top pills and the roster belong to the LEAD's
    half, so pull them into it rather than letting them straddle the seam. */
@@ -568,9 +587,9 @@ body[data-coop="2"] .hud-left { max-width: 44%; }
 .action-prompt.p2 { display: none; }
 body[data-coop="2"] .action-prompt.p2 { display: block; left: 75%; }
 body[data-coop="2"] #actionPrompt { left: 25%; }
-.action-prompt.p2::after { content: "  [A]"; color: var(--cyan); font-size: 12px; }
+.action-prompt.p2::after { content: "  [A]"; color: var(--cyan); font-size: 0.75rem; }
 
-.item-bar.p2 { display: none; left: auto; right: 16px; }
+.item-bar.p2 { display: none; left: auto; right: 1.0rem; }
 body[data-coop="2"] .item-bar.p2 { display: flex; }
 
 /* Resume: hidden unless main.js finds a save. Sits above "Walk in" and is
@@ -580,8 +599,8 @@ body[data-coop="2"] .item-bar.p2 { display: flex; }
 .big-btn.resume.show { display: block; }
 .resume-detail {
   display: block;
-  margin-top: 4px;
-  font-size: 11px;
+  margin-top: 0.25rem;
+  font-size: 0.6875rem;
   letter-spacing: 0.04em;
   color: var(--dim);
   text-transform: none;

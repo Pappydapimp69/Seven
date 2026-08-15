@@ -5,16 +5,16 @@ import {
   createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem, dropItem, craftItem, gatherTarget, offerItem,
   possess, release, possessableCompanions, activatePylon, pylonAt,
   PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=mirage-0.10.0";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=mirage-0.10.0";
-import { createRenderer } from "./render.js?v=mirage-0.10.0";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=mirage-0.10.0";
-import { createInput, ACTIONS } from "./input.js?v=mirage-0.10.0";
-import { createAudio } from "./audio.js?v=mirage-0.10.0";
-import { hashSeed } from "./rng.js?v=mirage-0.10.0";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings } from "./save.js?v=mirage-0.10.0";
+} from "./state.js?v=mirage-0.10.1";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=mirage-0.10.1";
+import { createRenderer } from "./render.js?v=mirage-0.10.1";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=mirage-0.10.1";
+import { createInput, ACTIONS } from "./input.js?v=mirage-0.10.1";
+import { createAudio } from "./audio.js?v=mirage-0.10.1";
+import { hashSeed } from "./rng.js?v=mirage-0.10.1";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings } from "./save.js?v=mirage-0.10.1";
 
-const BUILD = "mirage-0.10.0";
+const BUILD = "mirage-0.10.1";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -932,6 +932,11 @@ if (typeof window !== "undefined") {
     act: (action, arg) => run && handleAction(action, arg),
     /** Leave the run for the title screen — what "quit" does, for tests. */
     toTitle() { run = null; paused = false; screens("title"); },
+    /** Feed a raw pointer-lock delta in CSS pixels, as a real mouse would.
+     * The DPI test needs to send the SAME PHYSICAL sweep at several display
+     * scaling levels, and the only honest way to do that is to hand the input
+     * layer the CSS-pixel figure a real device would report at that scaling. */
+    debugMouseLook(dx, dy) { return input.debugLook(dx, dy); },
     /** Drive the menu grid down one row — for testing focus over a changing menu. */
     menuDown() { menuNavY(1); },
     // Couch co-op, driven without physical controllers. The real join path is

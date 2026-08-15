@@ -59,6 +59,9 @@ if [ -d /opt/pw-browsers ] && node -e 'require("/opt/node22/lib/node_modules/pla
   echo
   echo "== field of view (real browser, aspect independence) =="
   node tests/fov.mjs
+  echo
+  echo "== display scaling (real browser, 100/125/150% OS zoom) =="
+  node tests/dpi.mjs
 else
   echo "== smoke + gamepad: SKIPPED — Playwright/Chromium not available here =="
   echo "   (the 3D layer was NOT exercised in this run)"

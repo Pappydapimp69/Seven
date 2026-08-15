@@ -6,9 +6,9 @@
 // list as the real ones.
 
 import * as THREE from "../lib/three.module.js";
-import { CELL, GRID, cellToWorld } from "./world.js?v=mirage-0.10.0";
-import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=mirage-0.10.0";
-import { PYLON_RADIUS } from "./state.js?v=mirage-0.10.0";
+import { CELL, GRID, cellToWorld } from "./world.js?v=mirage-0.10.1";
+import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=mirage-0.10.1";
+import { PYLON_RADIUS } from "./state.js?v=mirage-0.10.1";
 
 const PALETTE = {
   sky: 0x0a0f16,
@@ -537,6 +537,13 @@ export function createRenderer(canvas, sim) {
   function resize() {
     const w = canvas.clientWidth || window.innerWidth;
     const h = canvas.clientHeight || window.innerHeight;
+    // Re-apply the pixel ratio EVERY resize, not once at construction. It is
+    // not a property of the machine: it changes when the user alters Windows
+    // display scaling, when they zoom the browser, and when the window is
+    // dragged to a monitor with a different DPI. Set once, it goes stale, and
+    // `setSize(w, h, false)` then allocates a drawing buffer at the wrong
+    // resolution for the CSS box it is stretched across.
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setSize(w, h, false);
     camera.aspect = w / h || 1;
     camera.fov = verticalFov(camera.aspect, hfov);
@@ -575,6 +582,25 @@ export function createRenderer(canvas, sim) {
     };
   }
   window.addEventListener("resize", resize);
+
+  // A system-zoom change does NOT always fire `resize` — the CSS viewport can
+  // keep the same dimensions while devicePixelRatio moves under it (dragging
+  // the window to a monitor with different scaling is the clearest case). The
+  // only reliable notification is a resolution media query, which has to be
+  // re-armed after every change because it matches one exact ratio. Without
+  // this the buffer resolution silently goes stale mid-session.
+  let dprQuery = null;
+  const onDprChange = () => {
+    armDprWatch();
+    resize();
+  };
+  function armDprWatch() {
+    if (typeof window.matchMedia !== "function") return;
+    if (dprQuery) dprQuery.removeEventListener?.("change", onDprChange);
+    dprQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+    dprQuery.addEventListener?.("change", onDprChange);
+  }
+  armDprWatch();
   resize();
 
   /**
@@ -586,6 +612,7 @@ export function createRenderer(canvas, sim) {
    */
   function dispose() {
     window.removeEventListener("resize", resize);
+    dprQuery?.removeEventListener?.("change", onDprChange);
     scene.traverse((obj) => {
       if (obj.geometry) obj.geometry.dispose();
       const mats = Array.isArray(obj.material) ? obj.material : obj.material ? [obj.material] : [];
