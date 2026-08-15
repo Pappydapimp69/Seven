@@ -66,6 +66,9 @@ if [ -d /opt/pw-browsers ] && node -e 'require("/opt/node22/lib/node_modules/pla
   echo
   echo "== display scaling (real browser, 100/125/150% OS zoom) =="
   node tests/dpi.mjs
+  echo
+  echo "== tutorial play (real browser, stages start and steps fire) =="
+  node tests/tutorial-play.mjs
 else
   echo "== smoke + gamepad: SKIPPED — Playwright/Chromium not available here =="
   echo "   (the 3D layer was NOT exercised in this run)"

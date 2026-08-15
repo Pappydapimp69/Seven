@@ -11,8 +11,8 @@
 // assert "a hallucinating lead is shown a marker the sim does not contain"
 // without booting a browser.
 
-import { HALLUCINATION, BAND, bandOf, ITEM_INFO, LUCIDITY_GRACE, CORROBORATE_RADIUS } from "./state.js?v=mirage-0.10.2";
-import { ITEM_KINDS } from "./world.js?v=mirage-0.10.2";
+import { HALLUCINATION, BAND, bandOf, ITEM_INFO, LUCIDITY_GRACE, CORROBORATE_RADIUS } from "./state.js?v=mirage-0.11.0";
+import { ITEM_KINDS } from "./world.js?v=mirage-0.11.0";
 
 const PHANTOM_NAMES = ["the Sixth Stone", "the Watching Slab", "the Other Cairn", "the Hollow Tooth"];
 const PHANTOM_COMPANIONS = ["ODEN", "MARIS", "THE SEVENTH"];
@@ -1049,7 +1049,11 @@ export function rosterRead(percept, sim, companion) {
     if (percept.kind === HALLUCINATION.DOUBLED_PARTY
       && companion.id === percept.ghostOf
       && !isClear(percept, sim)) {
-      return { tag: "ok", note: "steady", uncertain: false, doubled: true };
+      // "keeping up", not "steady". The roster note is a behavioural read, but
+      // "steady" is also verbatim the name of a lucidity BAND — the one piece
+      // of vocabulary the game never shows — and a player who learns the band
+      // names elsewhere would be reading the meter straight off the roster.
+      return { tag: "ok", note: "keeping up", uncertain: false, doubled: true };
     }
     return { tag: "unknown", note: "you can't tell", uncertain: true };
   }
@@ -1073,5 +1077,5 @@ export function rosterRead(percept, sim, companion) {
   if (companion.steadyUntil > sim.time) return { tag: "steadied", note: "steadier, for now", uncertain: false };
   if (band === BAND.FRAYING) return { tag: "off", note: "talking to the ridge", uncertain: false };
   if (band === BAND.UNSETTLED) return { tag: "quiet", note: "quieter than usual", uncertain: false };
-  return { tag: "ok", note: "steady", uncertain: false };
+  return { tag: "ok", note: "keeping up", uncertain: false };
 }

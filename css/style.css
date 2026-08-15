@@ -611,3 +611,30 @@ body[data-coop="2"] .item-bar.p2 { display: flex; }
   border-color: var(--warm);
   color: var(--warm);
 }
+
+/* --- the walk in ---------------------------------------------------------
+   Sized in rem like everything else, so a stage brief holds the same share of
+   the screen at 100% and at 150% Windows scaling. */
+.objective {
+  position: absolute;
+  top: 4.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 34rem;
+  padding: 0.6rem 1.1rem;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  text-align: center;
+  pointer-events: none;
+}
+.objective.hidden { display: none; }
+.objective-title {
+  font-size: 0.75rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--cyan);
+  margin-bottom: 0.25rem;
+}
+.objective-text { font-size: 0.9rem; color: var(--ink); line-height: 1.4; }
+.big-btn.quiet { background: transparent; border-color: var(--edge); }

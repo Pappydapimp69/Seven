@@ -6,9 +6,9 @@
 // list as the real ones.
 
 import * as THREE from "../lib/three.module.js";
-import { CELL, GRID, cellToWorld } from "./world.js?v=mirage-0.10.2";
-import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=mirage-0.10.2";
-import { PYLON_RADIUS } from "./state.js?v=mirage-0.10.2";
+import { CELL, GRID, cellToWorld } from "./world.js?v=mirage-0.11.0";
+import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=mirage-0.11.0";
+import { PYLON_RADIUS } from "./state.js?v=mirage-0.11.0";
 
 const PALETTE = {
   sky: 0x0a0f16,

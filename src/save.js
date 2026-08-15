@@ -17,7 +17,7 @@
 //     options (dbh#E4, wrong-sky#E2). And an ended run is never saved, so a
 //     "Resume" can't drop you back onto the frame you already lost.
 
-import { createRun } from "./state.js?v=mirage-0.10.2";
+import { createRun } from "./state.js?v=mirage-0.11.0";
 
 export const SAVE_KEY = "mirage:run";
 // Bumped whenever the shape below changes incompatibly. A save from an older
@@ -329,7 +329,12 @@ export function describeSave(data) {
 // which are unrelated questions.
 export const SETTINGS_KEY = "mirage:settings";
 
-const DEFAULT_SETTINGS = { volume: 0.7, muted: false, difficulty: "standard", coop: "solo", fov: 90 };
+// Tutorial progress lives HERE, in the settings payload, not as its own
+// localStorage key — brain: dog#E64, where a "seen once ever" bit kept outside
+// the save payload became a cross-slot leak the moment the game grew slots.
+// Settings rather than the run payload because progress has to survive
+// clearSave(), which every new run calls.
+const DEFAULT_SETTINGS = { volume: 0.7, muted: false, difficulty: "standard", coop: "solo", fov: 90, tutorial: { done: [], current: 0 } };
 
 /** Preferences, with unknown/corrupt values replaced by defaults rather than trusted. */
 export function loadSettings() {
@@ -347,6 +352,10 @@ export function loadSettings() {
       volume: typeof d.volume === "number" && d.volume >= 0 && d.volume <= 1 ? d.volume : DEFAULT_SETTINGS.volume,
       muted: typeof d.muted === "boolean" ? d.muted : DEFAULT_SETTINGS.muted,
       difficulty: ["gentle", "standard", "bleak"].includes(d.difficulty) ? d.difficulty : DEFAULT_SETTINGS.difficulty,
+      tutorial: {
+        done: Array.isArray(d.tutorial?.done) ? d.tutorial.done.filter((x) => typeof x === "string") : [],
+        current: Number.isFinite(d.tutorial?.current) ? d.tutorial.current : 0,
+      },
       coop: ["solo", "couch"].includes(d.coop) ? d.coop : DEFAULT_SETTINGS.coop,
       fov: typeof d.fov === "number" && d.fov >= 70 && d.fov <= 110 ? d.fov : DEFAULT_SETTINGS.fov,
     };

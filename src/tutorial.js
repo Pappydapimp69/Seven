@@ -203,3 +203,123 @@ export function leaks(text) {
   const low = String(text || "").toLowerCase();
   return FORBIDDEN.filter((w) => low.includes(w));
 }
+
+// ---------------------------------------------------------------------------
+// Stage construction
+// ---------------------------------------------------------------------------
+
+/**
+ * Shape a normally generated basin into one stage.
+ *
+ * POST-PROCESS, never bespoke geometry: `generateWorld` owns reachability,
+ * spire placement and the camp, and re-earning any of that by hand would be a
+ * new class of bug for no gain. Everything below only prunes, moves and flags
+ * entities in a world that is already known-good.
+ *
+ * Two rules every stage obeys:
+ *
+ * 1. CLEAR WHAT OUTRANKS. The prompt resolver surfaces exactly one verb, so
+ *    anything above the taught verb must be removed from the teaching site or
+ *    the step is unreachable and nothing errors. `siteVerb` below is the same
+ *    ladder, and tests/tutorial.mjs asserts it agrees with hud.js's real order.
+ * 2. THE CLOCK STAYS OFF. `sim.time` starts at 0, inside the calm window, so no
+ *    stage is secretly a race and no meter moves while someone is learning to
+ *    press a button. The one stage that needs a mind to go under puts it there
+ *    directly rather than by waiting.
+ */
+export function applyStage(sim, stage) {
+  // A clean slate: nothing discovered, nothing in reach, no clock pressure.
+  sim.time = 0;
+  sim.status = "playing";
+  for (const m of sim.monoliths) { m.discovered = false; m.logged = false; m.x += 4000; m.z += 4000; }
+  for (const it of sim.items) { it.discovered = false; it.taken = true; }
+  for (const t of sim.trees) { t.discovered = false; t.chopped = true; }
+  for (const st of sim.stones || []) { st.discovered = false; st.taken = true; }
+  for (const p of sim.pylons) { p.spent = true; p.primedBy = []; }
+  sim.inventory.length = 0;
+
+  const at = sim.player;
+  const near = (dx, dz) => ({ x: at.x + dx, z: at.z + dz });
+
+  switch (stage.id) {
+    case "walk-in":
+      // Nothing to press. Five people, a formation, and room to walk.
+      break;
+
+    case "ground": {
+      // ONE item, pinned by id, and no pylon anywhere near it — pylon outranks
+      // pickup, so a pylon in radius would replace the prompt this stage exists
+      // to show.
+      const spot = near(6, -8);
+      sim.items.push({ id: "tut-item-a", ...spot, itemKind: "flare", discovered: true, taken: false });
+      break;
+    }
+
+    case "craft":
+      // The two halves of one recipe, already in hand: this stage teaches the
+      // combine, not the finding.
+      sim.inventory.push({ id: "tut-craft-a", real: true, kind: "flare", claimedKind: null });
+      sim.inventory.push({ id: "tut-craft-b", real: true, kind: "tether", claimedKind: null });
+      break;
+
+    case "hands":
+      sim.inventory.push({ id: "tut-give", real: true, kind: "flare", claimedKind: null });
+      break;
+
+    case "pylon": {
+      // The one live pylon in the basin, on top of the party, so the two-hands
+      // rule is the only thing the stage is about.
+      const p = sim.pylons[0];
+      p.spent = false;
+      p.primedBy = [];
+      p.primedAt = -1e9;
+      p.x = at.x + 3;
+      p.z = at.z - 5;
+      break;
+    }
+
+    case "ask":
+      // One mind that will shade its answer and one that will not. The player
+      // is never told which; the debrief is.
+      sim.companions[2].lucidity = 22; // HALDER — low enough to shade
+      sim.companions[3].lucidity = 96; // NKEM — steady
+      break;
+
+    case "first-lie": {
+      // The lead goes under, here, on purpose, with no real marker in reach and
+      // nobody close enough to refuse the entry. Survivable and reversible: the
+      // stage ends the moment the false entry is written.
+      const lead = sim.player;
+      lead.lucidity = 0;
+      lead.hallucinating = true;
+      lead.hallucination = "phantomMarker";
+      lead.microUntil = 0;
+      for (const c of sim.companions) { c.x = at.x + 300; c.z = at.z + 300; }
+      break;
+    }
+
+    default:
+      break;
+  }
+  return sim;
+}
+
+/**
+ * Which verb the prompt resolver would surface for `actor` right now.
+ *
+ * The same ladder as hud.js's `paintPrompt`, expressed over rules primitives so
+ * a stage's reachability can be asserted without a DOM. It is not a second
+ * source of truth: tests/tutorial.mjs parses the real order out of hud.js and
+ * fails if the two ever disagree, which is what makes this safe to rely on.
+ */
+export function siteVerb(sim, actor, helpers) {
+  const { pylonAt, nearestItem, gatherTarget, nearestMarker } = helpers;
+  if (pylonAt(sim, actor)) return "pylon";
+  if (nearestItem(sim, actor)) return "pickup";
+  if (gatherTarget(sim, actor)) return "gather";
+  if (nearestMarker(sim, actor)) return "survey";
+  return null;
+}
+
+/** The line shown while a stage is running. Never names the hidden meter. */
+export const objectiveText = (stage) => (stage ? stage.brief : "");

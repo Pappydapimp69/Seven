@@ -5,16 +5,17 @@ import {
   createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem, dropItem, craftItem, gatherTarget, offerItem,
   possess, release, possessableCompanions, activatePylon, pylonAt,
   PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=mirage-0.10.2";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=mirage-0.10.2";
-import { createRenderer } from "./render.js?v=mirage-0.10.2";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=mirage-0.10.2";
-import { createInput, ACTIONS } from "./input.js?v=mirage-0.10.2";
-import { createAudio } from "./audio.js?v=mirage-0.10.2";
-import { hashSeed } from "./rng.js?v=mirage-0.10.2";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings } from "./save.js?v=mirage-0.10.2";
+} from "./state.js?v=mirage-0.11.0";
+import { STAGES, applyStage, observe, objectiveText, stageById } from "./tutorial.js?v=mirage-0.11.0";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=mirage-0.11.0";
+import { createRenderer } from "./render.js?v=mirage-0.11.0";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=mirage-0.11.0";
+import { createInput, ACTIONS } from "./input.js?v=mirage-0.11.0";
+import { createAudio } from "./audio.js?v=mirage-0.11.0";
+import { hashSeed } from "./rng.js?v=mirage-0.11.0";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings } from "./save.js?v=mirage-0.11.0";
 
-const BUILD = "mirage-0.10.2";
+const BUILD = "mirage-0.11.0";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -51,7 +52,7 @@ function screens(show) {
   input.setMode(show === "hudLayer" ? "game" : "menu");
   // Before focus is seated, so the grid is already its final shape: showing or
   // hiding Resume changes which rows exist.
-  if (show === "title") refreshTitleSave();
+  if (show === "title") { refreshTitleSave(); refreshLearnLabel(); }
   if (show !== "hudLayer") setupMenuFocus(show);
 }
 
@@ -187,9 +188,76 @@ function refreshTitleSave() {
   if (menu.root === "title") setupMenuFocus("title");
 }
 
+// ---- the walk in -----------------------------------------------------------
+// A tutorial stage is a REAL run, mounted through the same mountRun as anything
+// else, with its basin post-processed by applyStage. There is no tutorial mode
+// to exit and no second implementation of any verb — the overlay only watches
+// (brain: the-game-prologue#E15).
+let tut = null; // { stage, index, done } while a stage is running; null otherwise
+
+function tutorialProgress() {
+  const s = loadSettings();
+  return s.tutorial || { done: [], current: 0 };
+}
+
+function refreshLearnLabel() {
+  const d = el("learnDetail");
+  if (!d) return;
+  const p = tutorialProgress();
+  const n = p.done.length;
+  d.textContent = n === 0 ? "" : n >= STAGES.length ? " · done" : ` · ${n}/${STAGES.length}`;
+}
+
+function startStage(index) {
+  const stage = STAGES[index];
+  if (!stage) { tut = null; screens("title"); return null; }
+  const sim = createRun({ seed: 7000 + index, difficulty: "gentle", level: 1, campaignLength: 1 });
+  applyStage(sim, stage);
+  tut = { stage, index, done: false, startX: sim.player.x, startZ: sim.player.z };
+  const r = mountRun(sim, stage.brief);
+  setObjective(`${index + 1}/${STAGES.length}  ${stage.title}`, stage.brief);
+  // The companion line lands a beat later so it reads as somebody speaking
+  // rather than as a second caption on the same frame.
+  if (stage.line) setTimeout(() => run && hudSay(`${sim.companions[stage.line.who - 1].name}: ${stage.line.text}`), 1200);
+  return r;
+}
+
+function setObjective(title, text) {
+  const box = el("objective");
+  if (!box) return;
+  box.classList.toggle("hidden", !title);
+  if (!title) return;
+  el("objectiveTitle").textContent = title;
+  el("objectiveText").textContent = text || "";
+}
+
+function hudSay(text) { run?.hud.say(text, ""); }
+
+/** A stage's step just fired: show its debrief, then move on. */
+function completeStage() {
+  if (!tut || tut.done) return;
+  tut.done = true;
+  const { stage, index } = tut;
+  const p = tutorialProgress();
+  if (!p.done.includes(stage.id)) p.done.push(stage.id);
+  p.current = Math.min(index + 1, STAGES.length);
+  saveSettings({ tutorial: p });
+  setObjective(`${stage.title} — done`, stage.debrief);
+  hudSay(stage.debrief);
+  // Long enough to read, short enough that it does not feel like a cutscene.
+  setTimeout(() => {
+    if (!tut) return;
+    const next = index + 1;
+    if (next >= STAGES.length) { tut = null; setObjective(null); screens("title"); return; }
+    startStage(next);
+  }, 4200);
+}
+
 function startRun({ seed, difficulty } = {}) {
   const seedValue = seed ?? Math.floor(Math.random() * 0xffffff) + 1;
   campaignSeed = seedValue;
+  tut = null;
+  setObjective(null);
   const sim = createRun({ seed: seedValue, difficulty: difficulty || "standard", level: 1, campaignLength: CAMPAIGN_LENGTH });
   // A NEW run always clears the slot: leaving the old save behind would offer
   // a Resume that silently jumps out of the run now on screen (Brain: dbh#E4 —
@@ -683,6 +751,23 @@ function step(dt, intent) {
 
   tick(sim, dt, { move, run: intent.run, yaw, interact: intent.interact, others });
   const events = actionEvents.concat(sim.events);
+
+  // THE observer hook. It has to be here and nowhere else: `sim.events` alone
+  // is wiped by tick() on its first line, so every verb a stage teaches —
+  // pickup, craft, offerUsed, draw, report — exists only in this merged array.
+  // An observer in state.js would have watched an empty stream forever without
+  // erroring (brain: sandbox-resolver-starves-tutorial#E2 — one silent
+  // starvation candidate per pipeline layer).
+  if (tut && !tut.done) {
+    const p = tutorialProgress();
+    // The movement stage has no entity to pin to, so it watches distance
+    // walked rather than an event, and synthesises the one kind it needs.
+    const seen = tut.stage.step.on === "moved"
+      ? (Math.hypot(sim.player.x - tut.startX, sim.player.z - tut.startZ) >= tut.stage.step.minDistance
+          ? [{ kind: "moved" }] : [])
+      : events;
+    if (observe(p, tut.stage, seen, sim)) completeStage();
+  }
   for (const p of run.players) {
     updatePercept(p.percept, sim, dt);
     // A one-shot stinger on ONSET only — the id persisting across frames
@@ -864,6 +949,12 @@ function boot() {
   el("continueBtn").addEventListener("click", () => {
     if (!resumeRun()) refreshTitleSave(); // the save vanished or was unreadable — re-sync the button
   });
+  el("learnBtn").addEventListener("click", () => {
+    const p = tutorialProgress();
+    // Resume where they stopped; a finished tutorial restarts from the top
+    // rather than refusing, because these are worth replaying.
+    startStage(p.current >= STAGES.length ? 0 : p.current);
+  });
   el("howBtn").addEventListener("click", () => el("howto").classList.toggle("hidden"));
   el("resumeBtn").addEventListener("click", togglePause);
   el("quitBtn").addEventListener("click", () => {
@@ -937,6 +1028,10 @@ if (typeof window !== "undefined") {
      * scaling levels, and the only honest way to do that is to hand the input
      * layer the CSS-pixel figure a real device would report at that scaling. */
     debugMouseLook(dx, dy) { return input.debugLook(dx, dy); },
+    /** Start a tutorial stage by index — the same path the title button takes. */
+    startStage(i) { return startStage(i); },
+    /** Which stages are recorded done, for the browser tutorial test. */
+    tutorialDone() { return tutorialProgress().done.slice(); },
     /** Drive the menu grid down one row — for testing focus over a changing menu. */
     menuDown() { menuNavY(1); },
     // Couch co-op, driven without physical controllers. The real join path is
