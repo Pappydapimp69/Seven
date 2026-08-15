@@ -125,12 +125,48 @@ check("a pinned step ignores the same event from a different entity", () => {
 check("a step wanting two entities needs both", () => {
   const stage = STAGES.find((s) => s.id === "ask");
   const p = freshProgress();
-  observe(p, stage, [{ kind: "report", who: "c3" }], null);
+  const tut = {};
+  observe(p, stage, [{ kind: "report", who: "c3" }], null, tut);
   eq(p.done.length, 0, "one of two answers completed the stage");
-  observe(p, stage, [{ kind: "report", who: "c3" }], null);
+  observe(p, stage, [{ kind: "report", who: "c3" }], null, tut);
   eq(p.done.length, 0, "the same answer twice completed the stage");
-  observe(p, stage, [{ kind: "report", who: "c4" }], null);
+  observe(p, stage, [{ kind: "report", who: "c4" }], null, tut);
   eq(p.done.length, 1, "both answers did not complete the stage");
+});
+
+// The bug this exists for: main.js does NOT hold one progress object. It calls
+// tutorialProgress() -> loadSettings() every frame, which re-parses localStorage
+// and hands back a brand-new object. The previous version of the test above
+// reused a single `p` across all three calls, so the half-finished tally lived
+// on an object that in real play does not survive to the next frame — and the
+// only multi-target stage in the game could never be completed by a player.
+//
+// So this drives it the way main.js does: progress rebuilt every call, only the
+// stage-lifetime scratch carried over.
+check("a two-entity step survives progress being rebuilt every frame", () => {
+  const stage = STAGES.find((s) => s.id === "ask");
+  const stored = freshProgress();
+  const reload = () => ({ done: stored.done.slice(), current: stored.current });
+  const tut = {};
+  const frame = (who) => {
+    const p = reload();
+    if (observe(p, stage, [{ kind: "report", who }], null, tut)) {
+      stored.done = p.done.slice();
+      stored.current = p.current;
+    }
+  };
+  frame("c3");
+  eq(stored.done.length, 0, "one answer completed the stage");
+  frame("c4");
+  eq(stored.done.length, 1, "the tally was lost between frames — the stage is uncompletable in real play");
+});
+
+check("a multi-target step refuses to run without somewhere to keep its tally", () => {
+  const stage = STAGES.find((s) => s.id === "ask");
+  let threw = false;
+  try { observe(freshProgress(), stage, [{ kind: "report", who: "c3" }], null); }
+  catch { threw = true; }
+  assert(threw, "observe silently dropped a multi-target tally instead of refusing");
 });
 
 check("a completed stage is never re-completed", () => {
@@ -154,7 +190,7 @@ check("observing never mutates the sim", () => {
   const before = shape();
   const p = freshProgress();
   for (const stage of STAGES) {
-    observe(p, stage, [{ kind: "pickup", id: "tut-item-a" }, { kind: "draw", id: "p0" }, { kind: "report", who: "c3" }], sim);
+    observe(p, stage, [{ kind: "pickup", id: "tut-item-a" }, { kind: "draw", id: "p0" }, { kind: "report", who: "c3" }], sim, {});
   }
   eq(shape(), before, "the tutorial overlay mutated the simulation");
 });
@@ -163,9 +199,10 @@ check("a seeded run is identical whether or not the overlay is watching", () => 
   const run = (watch) => {
     const sim = createRun({ seed: 99, difficulty: "standard" });
     const p = freshProgress();
+    const scratch = {};
     for (let i = 0; i < 600; i++) {
       tick(sim, 1 / 20, { move: { x: 0.3, z: -1 }, yaw: 0.2 });
-      if (watch) for (const s of STAGES) observe(p, s, sim.events, sim);
+      if (watch) for (const s of STAGES) observe(p, s, sim.events, sim, scratch);
     }
     return JSON.stringify({
       t: sim.time.toFixed(4), rng: sim.rng.snapshot(),

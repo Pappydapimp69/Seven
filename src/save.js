@@ -17,7 +17,7 @@
 //     options (dbh#E4, wrong-sky#E2). And an ended run is never saved, so a
 //     "Resume" can't drop you back onto the frame you already lost.
 
-import { createRun } from "./state.js?v=mirage-0.11.0";
+import { createRun } from "./state.js?v=mirage-0.11.1";
 
 export const SAVE_KEY = "mirage:run";
 // Bumped whenever the shape below changes incompatibly. A save from an older
@@ -336,13 +336,24 @@ export const SETTINGS_KEY = "mirage:settings";
 // clearSave(), which every new run calls.
 const DEFAULT_SETTINGS = { volume: 0.7, muted: false, difficulty: "standard", coop: "solo", fov: 90, tutorial: { done: [], current: 0 } };
 
+/**
+ * A defaults object nobody can corrupt. `{ ...DEFAULT_SETTINGS }` is a SHALLOW
+ * copy, so every caller taking the no-key path used to receive the SAME nested
+ * `tutorial` object — pushing a completed stage into it mutated the module-level
+ * default for the rest of the session, and the next "fresh" load came back
+ * already carrying it. Worse, it hid a real bug: mid-stage progress appeared to
+ * persist across frames purely because every frame was handed that one aliased
+ * object, and stopped the moment a settings key existed to parse instead.
+ */
+const freshSettings = () => ({ ...DEFAULT_SETTINGS, tutorial: { done: [], current: 0 } });
+
 /** Preferences, with unknown/corrupt values replaced by defaults rather than trusted. */
 export function loadSettings() {
   const ls = store();
-  if (!ls) return { ...DEFAULT_SETTINGS };
+  if (!ls) return freshSettings();
   try {
     const raw = ls.getItem(SETTINGS_KEY);
-    if (!raw) return { ...DEFAULT_SETTINGS };
+    if (!raw) return freshSettings();
     const d = JSON.parse(raw) || {};
     return {
       // Clamped and whitelisted on the way IN: a hand-edited or
@@ -360,7 +371,7 @@ export function loadSettings() {
       fov: typeof d.fov === "number" && d.fov >= 70 && d.fov <= 110 ? d.fov : DEFAULT_SETTINGS.fov,
     };
   } catch {
-    return { ...DEFAULT_SETTINGS };
+    return freshSettings();
   }
 }
 
