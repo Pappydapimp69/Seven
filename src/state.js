@@ -14,9 +14,9 @@
 // The sim's job is to keep an honest, testable record of what is TRUE; `percept.js`
 // is the only place allowed to lie about it.
 
-import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=mirage-0.10.1";
-import { makeRng } from "./rng.js?v=mirage-0.10.1";
-import { updateCompanions, companionRemark } from "./party.js?v=mirage-0.10.1";
+import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=mirage-0.10.2";
+import { makeRng } from "./rng.js?v=mirage-0.10.2";
+import { updateCompanions, companionRemark } from "./party.js?v=mirage-0.10.2";
 
 export const PARTY_SIZE = 6; // you + 5 companions — the spec's five NPCs, plus the player
 export const MAX_LUCIDITY = 100;
@@ -635,6 +635,7 @@ export function activatePylon(sim, actor = sim.player) {
   }
   sim.stats.draws = (sim.stats.draws || 0) + 1;
   emit(sim, "draw", `The pylon gives out — ${inside.length} of you caught it. It will not light again.`, {
+    id: p.id,
     count: inside.length,
   });
   return { ok: true, primed: true, confirmed: true, caught: inside.length };
@@ -1160,7 +1161,11 @@ export function pickupItem(sim, actor = sim.player) {
   }
 
   sim.inventory.push({ id: nextSlotId(sim), real: true, kind: near.itemKind, claimedKind: null });
-  emit(sim, "pickup", secured, { itemKind: near.itemKind, who: actor.id });
+  // `id` names the ITEM, `who` names the taker. Both are needed: an observer
+  // that can only see the kind cannot tell one flare from another, which is
+  // the difference between a teaching step pinned to an entity and one that
+  // any later flare satisfies by accident.
+  emit(sim, "pickup", secured, { id: near.id, itemKind: near.itemKind, who: actor.id });
   return { ok: true, real: true, kind: near.itemKind };
 }
 

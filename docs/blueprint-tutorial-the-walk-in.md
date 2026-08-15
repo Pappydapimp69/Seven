@@ -4,79 +4,120 @@
 
 MIRAGE's core mechanic is deliberately unstated, and the game is not
 trial-and-error friendly: the punishment for not understanding it is a run you
-lose without learning why. Two of us know the system; nobody else does.
+lose without learning why.
 
 The obvious tutorial — one stage per verb — teaches the CONTROLS and none of the
 GAME. MIRAGE's actual skill is epistemic: deciding whether to trust what you are
-shown and what you are told. A player who finishes a verb tour and is then
-dropped into a basin has learned to press E and nothing about doubt.
+shown and what you are told. So the progression has to do both, and the second
+has to be taught the way the game teaches it: by being done to you.
 
-So the progression has to do both, and the second one has to be taught the same
-way the game teaches it: **by being done to you**, not by being described.
+## Decisions taken (owner may veto)
+
+- **Stage 7 betrays a first-time player.** It is seeded by 2/3/4/6, it is
+  survivable, and the debrief explains it. A tutorial that only foreshadows
+  leaves the player's first real betrayal in a run that matters.
+- **Stages gate on DEMONSTRATION, not completion.** Walking past a verb teaches
+  nothing. This is also the reason brain's starvation lessons apply at all — a
+  completion gate cannot starve.
 
 ## The hard constraint
 
-**Never show the lucidity meter, in any stage, in any form.** No bar, no number,
-no "your sanity is dropping" caption. The moment a tutorial prints the hidden
-variable, every later run is played against a number the player now believes
-exists. What gets taught instead is the READ: lag, silence, a wrong colour,
-someone narrating a ridge that isn't moving.
-
-Corollary: the tutorial must not say "you are hallucinating" either. Same leak.
+**No lucidity value, band name, or hallucination state is ever rendered during a
+tutorial stage.** No bar, no number, no "you are hallucinating" caption — the
+last is the same leak one step down. What gets taught is the READ: lag, silence,
+a wrong colour, someone narrating a ridge that isn't moving.
 
 ## The stages
 
-Each stage is a short, hand-authored basin with the clock and the drain off
-unless the stage is about them. Each teaches ONE verb and plants ONE epistemic
-seed that gets collected later.
+Each teaches ONE verb and plants ONE seed a later stage collects.
 
-**1. The walk in** — movement, look, sprint. No verbs at all.
-*Seed:* you have five named people, they hold a formation, they talk unprompted.
-The party is established as a thing before it is established as a tool.
+1. **The walk in** — movement, look, sprint. *Seed:* five named people who hold
+   a formation and talk.
+2. **What the ground gives** — discover and pick up. *Seed:* a companion
+   describes the item, not the HUD. Information arrives through people.
+3. **Two things become one** — crafting. *Seed:* a recipe is a claim about two
+   objects.
+4. **Hands** — give, drop, receive. *Seed:* things change hands, and the person
+   handing it over believes something about it.
+5. **The pylon takes two** — the level goal and the two-hands rule. *Seed:*
+   relief is finite and needs someone else.
+6. **Ask them** — check-in. Forces one on someone fraying and one on someone
+   fine, never says which; the debrief shows both answers against the truth.
+   *Seed collected:* an answer is evidence, not fact.
+7. **The first lie** — a scripted, survivable hallucination. Shown a marker that
+   is not there, invited to log it, with a lucid companion in range to refuse
+   it. *Seeds 2/3/4/6 collect here.*
 
-**2. What the ground gives** — discover and pick up; what each item does.
-*Seed:* the item you are told to pick up is described by a companion, not by the
-HUD. Information in this game arrives through people.
+## What must remain UNCHANGED
 
-**3. Two things become one** — crafting.
-*Seed:* a recipe is a claim about two objects. Hold that thought.
+- A non-tutorial run must be byte-identical with this code present. The overlay
+  is read-only and inert outside stages.
+- `generateWorld` and its reachability guarantees. Stages POST-PROCESS a
+  normally generated world; no bespoke geometry, no new generator parameters.
+- The single-action prompt resolver's priority order. The tutorial adapts to it;
+  it does not get a special case.
+- The save schema's existing fields, and the rng draw sequence.
 
-**4. Hands** — give, drop, receive. A companion brings you something.
-*Seed:* things change hands, and the person handing it to you believes something
-about it.
+## Preflight
 
-**5. The pylon takes two** — the level goal, and the two-hands rule.
-*Seed:* relief is finite and requires someone else. This is the first stage
-where the party is mechanically load-bearing rather than scenery.
+**Authoritative state and functions**
 
-**6. Ask them** — check-in, and what an answer is worth.
-The stage forces a check-in on someone who is fraying and shades the truth, and
-on someone who is fine. The player is never told which was which — the DEBRIEF
-shows both answers against what was actually true.
-*Seed collected:* an answer is evidence, not fact.
+- `createRun({seed, difficulty, level, campaignLength, carryOver})` — the only
+  run constructor. `generateWorld(seed)` takes a seed and nothing else.
+- `tick(sim, dt, input)` — sole mutator; wipes `sim.events` on its first line.
+- `emit(sim, kind, text, opts)` — sole event producer.
+- `saveRun/loadSave` in save.js are the ONLY `localStorage` callers (verified:
+  two keys, both behind `store()`).
+- `paintPrompt` in hud.js — the single-action resolver.
 
-**7. The first lie** — the graduation stage.
-A scripted, safe hallucination. The player is shown a marker that is not there
-and invited to log it. A lucid companion is standing close enough to refuse it,
-and the prompt to check in is available. Both outcomes are survivable and both
-are shown at the debrief: this is what a corrupted record looks like, and this
-is what the check that prevents it looks like.
-*Seeds 2, 3, 4 and 6 all collect here:* the thing you were told, the recipe you
-trusted, the item you were handed, the answer you were given.
+**Conflicting overrides / listeners — two found, both design-changing**
 
-## What "done" looks like
+1. **`sim.events` is not the event stream.** `tick()` clears it on entry, so the
+   verbs the tutorial is built on (pickup, craft, give, log, dose — all emitted
+   by `handleAction`) exist only in main.js's merged
+   `actionEvents.concat(sim.events)` at frame end. An observer placed in
+   state.js would silently never see them. **The observer hooks the merged array
+   in main.js.** This is brain's per-layer starvation lesson landing on real
+   code before a line was written.
+2. **The resolver's priority ladder is pylon → pickup → gather → survey →
+   strike.** A step teaching SURVEY starves if an item or a tree is in reach; a
+   step teaching PICKUP starves inside a pylon radius. Stage post-processing
+   must clear higher-priority targets from the teaching site, and a test must
+   prove it rather than trusting the authoring.
 
-- A player who finishes stage 7 has used every bound verb at least once.
-- They have been lied to once, safely, and shown afterwards that they were.
-- They have never seen a lucidity number.
-- Stages are skippable and replayable from the title screen; finishing them is
-  not required to start a real run.
+**Invariants the finished build must satisfy**
 
-## Open questions for brain
+- **I1** No tutorial-reachable string contains a lucidity number, a band name,
+  or the word "hallucinat*".
+- **I2** The observer never mutates the sim (fingerprint before/after).
+- **I3** Every step is pinned to a specific entity id, never a bare event kind.
+- **I4** For every step, the target verb is the resolver's TOP choice at the
+  teaching site — no starvation.
+- **I5** Tutorial progress lives inside the save payload; no third raw
+  localStorage key anywhere in the codebase.
+- **I6** Every bound verb is taught by at least one stage.
+- **I7** A non-tutorial run is unchanged: same rng stream, same outcomes.
 
-1. How much hand-holding before it stops being a game — prompts vs objectives
-   vs a companion telling you.
-2. Whether the betrayal in stage 7 is fair when it is the first time, or whether
-   the deception has to be foreshadowed harder in 2-6.
-3. Whether stage gating should be on completion or on demonstration (did they
-   actually use the verb, or did they just walk past it).
+**Regression risks**
+
+- R1 Observer hooked into the frame path could reorder audio/HUD calls.
+- R2 A new save field changes the schema — resume/campaign tests.
+- R3 Post-processing a world could strand an entity behind geometry.
+- R4 Stage runs create sims; the constant-roll-count discipline must hold.
+
+**How CI verifies them**
+
+- `tests/tutorial.mjs` (node): I1 by scanning all stage copy for forbidden
+  tokens; I2 by fingerprint; I3 and I6 by walking the step table; I4 by calling
+  the REAL resolver at each teaching site; I7 by running a seeded normal run
+  with and without the overlay loaded and comparing fingerprints.
+- `tests/stress.mjs`: I5 by grepping the tree for `localStorage` outside
+  save.js.
+- Browser: one stage played end to end, asserting the step fires and no
+  forbidden token ever reaches the DOM.
+
+## Still requires a human
+
+Whether stage 7's betrayal lands as a lesson or as a cheat; whether the pacing
+of seven stages is tolerable; whether the read-the-people teaching actually
+transfers to a real basin. None of that is measurable here.
