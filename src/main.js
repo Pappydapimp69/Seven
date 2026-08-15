@@ -766,7 +766,10 @@ function step(dt, intent) {
       ? (Math.hypot(sim.player.x - tut.startX, sim.player.z - tut.startZ) >= tut.stage.step.minDistance
           ? [{ kind: "moved" }] : [])
       : events;
-    if (observe(p, tut.stage, seen, sim)) completeStage();
+    // `tut` is the one object that lives for exactly as long as the stage does,
+    // which makes it the only correct home for a multi-target step's running
+    // tally — `p` is rebuilt from localStorage every frame (see observe).
+    if (observe(p, tut.stage, seen, sim, tut)) completeStage();
   }
   for (const p of run.players) {
     updatePercept(p.percept, sim, dt);

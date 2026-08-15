@@ -162,7 +162,7 @@ export const isComplete = (progress) => (progress?.done?.length || 0) >= STAGES.
  * would be invisible to an observer reading it. That is the same silent
  * starvation as the resolver case, one layer further out.
  */
-export function observe(progress, stage, events, sim) {
+export function observe(progress, stage, events, sim, scratch) {
   if (!progress || !stage || progress.done.includes(stage.id)) return false;
   const want = stage.step;
   for (const ev of events || []) {
@@ -173,14 +173,24 @@ export function observe(progress, stage, events, sim) {
       const id = ev.id ?? ev.who ?? ev.itemId ?? ev.name;
       const targets = Array.isArray(want.target) ? want.target : [want.target];
       if (!targets.includes(id)) continue;
+      // A MULTI-TARGET step spans frames, so the half-finished tally needs a
+      // home that outlives one call. It must be `scratch` — an object the
+      // CALLER guarantees is the same one next frame — and never `progress`:
+      // `progress` comes back from loadSettings(), which re-parses localStorage
+      // and rebuilds the object every single frame, so anything written there
+      // mid-stage is thrown away before the next event arrives. The only
+      // multi-target stage in the tutorial ("ask HALDER, then NKEM") could
+      // therefore never complete in real play, while a unit test that reused
+      // one `progress` object across calls saw it pass.
       if (Array.isArray(want.target)) {
-        progress.seen = progress.seen || [];
-        if (!progress.seen.includes(id)) progress.seen.push(id);
-        if (progress.seen.length < want.target.length) continue;
+        if (!scratch) throw new Error(`observe: stage "${stage.id}" is multi-target and needs a scratch object`);
+        scratch.seen = scratch.seen || [];
+        if (!scratch.seen.includes(id)) scratch.seen.push(id);
+        if (scratch.seen.length < want.target.length) continue;
       }
     }
     progress.done.push(stage.id);
-    progress.seen = [];
+    if (scratch) scratch.seen = [];
     return true;
   }
   return false;
