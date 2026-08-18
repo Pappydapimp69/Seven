@@ -177,6 +177,41 @@ check("a completed stage is never re-completed", () => {
   eq(p.done.length, 1, "a stage completed twice");
 });
 
+// --- can a player actually AIM the verb a stage teaches? --------------------
+// brain: the `assert-every-bound-verb-is-explained` kernel. Bound verbs accrete
+// — a mechanic lands, the input map and the hint strip get updated because they
+// are needed to play it, and the explaining text silently does not, because
+// nothing breaks. That is exactly what happened here: Q/R (prev/next target)
+// were bound in input.js and named in NO keyboard legend, while the gamepad
+// legend listed [LB]/[RB] select. `give` acts only on the roster selection and
+// has no direct-target form, so a keyboard player was handed a verb with no
+// discoverable way to aim it — invisible to every functional test, because the
+// verb itself worked perfectly.
+check("both control legends explain how to select a companion", () => {
+  const hud = readFileSync(new URL("../src/hud.js", import.meta.url), "utf8");
+  for (const scheme of ["keyboard", "gamepad"]) {
+    const m = hud.match(new RegExp(`${scheme}:\\s*"([^"]*)"`));
+    assert(m, `no ${scheme} control legend found in hud.js`);
+    assert(
+      /select/i.test(m[1]),
+      `the ${scheme} legend never mentions selecting — but "give" acts on the selection and nothing else can aim it: "${m[1]}"`,
+    );
+  }
+});
+
+check("a stage that names a companion says how to aim at one", () => {
+  for (const s of STAGES) {
+    const targets = Array.isArray(s.step.target) ? s.step.target : [s.step.target];
+    // Only stages pinned to a COMPANION id (c1..c5) need this; an item- or
+    // pylon-pinned step is aimed by standing next to the thing.
+    if (!targets.some((t) => typeof t === "string" && /^c\d+$/.test(t))) continue;
+    assert(
+      /select|pick|choose|number/i.test(s.brief),
+      `stage "${s.id}" tells the player to act on a named companion but never says how to aim at one: "${s.brief}"`,
+    );
+  }
+});
+
 // --- I2 / I7: the overlay is inert ----------------------------------------
 check("observing never mutates the sim", () => {
   const sim = createRun({ seed: 21, difficulty: "standard" });

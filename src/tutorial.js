@@ -94,7 +94,14 @@ export const STAGES = Object.freeze([
     id: "hands",
     title: "Hands",
     verb: "give",
-    brief: "Give it to IREN. She will carry it for you.",
+    // Names the AIMING step, not the key. `give` acts on the roster selection
+    // and has no direct-target form, so "give it to IREN" alone is an
+    // instruction a player cannot carry out — but spelling out a keybind here
+    // would duplicate the legend in prose that drifts the next time a binding
+    // moves, and it would be WRONG for whichever scheme the player is not on.
+    // The always-visible hint strip carries the keys
+    // (brain: the-game-the-answering-deep#E9); this says what to do with them.
+    brief: "Pick IREN out on the roster, then hand it to her.",
     step: { id: "gave", on: "offerUsed", target: "c2" },
     debrief: "Things change hands. The person handing one to you believes something about it.",
   },
@@ -110,7 +117,10 @@ export const STAGES = Object.freeze([
     id: "ask",
     title: "Ask them",
     verb: "checkin",
-    brief: "Check in on HALDER. Then on NKEM.",
+    // `check in` IS directly targetable — every name on the roster carries its
+    // own number — so this points at the numbers rather than at the selection
+    // cycle. Same rule as stage 4: say how to aim, let the legend say with what.
+    brief: "Check in on HALDER, then on NKEM. Their numbers are beside their names.",
     step: { id: "askedBoth", on: "report", target: ["c3", "c4"] },
     // The stage forces a check-in on someone who shades the truth and someone
     // who does not, and never says which was which until the debrief. The

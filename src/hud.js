@@ -6,8 +6,8 @@
 // the one hallucinating. The only place a real number is ever printed is the
 // debrief, after the run is over.
 
-import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds } from "./percept.js?v=mirage-0.11.1";
-import { LOG_RADIUS, PYLON_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, gatherTarget, GATHER_HOLD_TIME, previewCraft, claimedEntryAt, pylonAt } from "./state.js?v=mirage-0.11.1";
+import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds } from "./percept.js?v=mirage-0.11.2";
+import { LOG_RADIUS, PYLON_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, gatherTarget, GATHER_HOLD_TIME, previewCraft, claimedEntryAt, pylonAt } from "./state.js?v=mirage-0.11.2";
 
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 
@@ -432,7 +432,7 @@ export function createHud(sim, percept, opts = {}) {
 
   function setHints(scheme) {
     const text = {
-      keyboard: "WASD move · Shift run · E survey/pick up, hold to gather · Z cycle item · X use item · V drop · B give · C craft · 1–5 check in · Shift+1–5 dose · Esc pause",
+      keyboard: "WASD move · Shift run · E survey/pick up, hold to gather · Z cycle item · X use item · V drop · Q/R select · B give · C craft · 1–5 check in · Shift+1–5 dose · Esc pause",
       gamepad: "Stick move · [A] survey/pick up, hold to gather · [RT] cycle item · [B] use item · D-pad Up craft · D-pad Down drop · D-pad Right give · [X] check in · [Y] dose · [LB]/[RB] select · [Start] pause",
       touch: "Left half steers · right half looks · buttons bottom-right",
     }[scheme] || "";
