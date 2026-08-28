@@ -29,7 +29,13 @@ export const SAVE_KEY = "mirage:run";
 // two keys, and the first `sim.stats.falseCrafts += 1` would write NaN — which
 // then rides silently into the debrief. Adding a counter to a serialised bag of
 // counters is a schema change even though nothing was renamed or removed.
-export const SAVE_VERSION = 2;
+// v3: cohesion. Following was replaced by a chain, a periodic ping and a CALL
+// verb, all of which keep per-character deadlines (wanderUntil, pingAt/Until,
+// summonBy/Until, the two call cadences). `wanderUntil` gates three rng draws,
+// so a v2 snapshot restored without it re-rolls on a different tick and the
+// resumed run silently forks — which is precisely how the divergence test
+// caught it.
+export const SAVE_VERSION = 3;
 
 const store = () => (typeof localStorage === "undefined" ? null : localStorage);
 
@@ -78,6 +84,27 @@ function packCharacter(c) {
     remarkCooldown: c.remarkCooldown ?? 0,
     repathTimer: c.repathTimer ?? 0,
     facing: c.facing ?? 0,
+    // Cohesion state. Same rule as the throttle countdowns above, and it broke
+    // the divergence test the same way: `wanderUntil` decides WHICH TICK a
+    // companion draws three rng values to pick somewhere new to stroll, so a
+    // resume with it reset re-rolls on a different tick and every other mind
+    // sharing that tick shifts. The call cadences and the ping deadlines gate
+    // movement rather than draws, but they decide where somebody IS, which
+    // decides what they encounter, which decides everything downstream.
+    wanderGoal: c.wanderGoal ? { x: c.wanderGoal.x, z: c.wanderGoal.z } : null,
+    wanderUntil: c.wanderUntil ?? 0,
+    pingAt: c.pingAt ?? 0,
+    pingUntil: c.pingUntil ?? 0,
+    summonBy: c.summonBy ?? null,
+    summonUntil: c.summonUntil ?? 0,
+    answerReadyAt: c.answerReadyAt ?? 0,
+    callReadyAt: c.callReadyAt ?? 0,
+    // Two latches that were never saved and never noticed, because until
+    // cohesion they were only ever set on paths a resumed run happened to
+    // re-enter immediately. `goneAnnounced` is the load-bearing one: it gates
+    // `remarkCooldown = 0`, which gates an rng draw.
+    goneAnnounced: !!c.goneAnnounced,
+    wasAway: c.wasAway ?? null,
     // Saved rather than recomputed for the same reason: a null path re-paths
     // on a different tick than a live one, which moves the draws again.
     // GRID CELLS (cx, cz), not world coordinates. This mapped x/z for a while,
@@ -125,7 +152,20 @@ function applyCharacter(c, s) {
     c.repathTimer = s.repathTimer ?? 0;
     c.facing = s.facing ?? 0;
     c.path = s.path ? s.path.map((n) => ({ cx: n.cx, cz: n.cz })) : null;
+    c.wanderGoal = s.wanderGoal ? { x: s.wanderGoal.x, z: s.wanderGoal.z } : null;
+    c.wanderUntil = s.wanderUntil ?? 0;
+    c.pingAt = s.pingAt ?? 0;
+    c.pingUntil = s.pingUntil ?? 0;
+    c.summonBy = s.summonBy ?? null;
+    c.summonUntil = s.summonUntil ?? 0;
+    c.answerReadyAt = s.answerReadyAt ?? 0;
+    c.goneAnnounced = !!s.goneAnnounced;
+    c.wasAway = s.wasAway ?? null;
   }
+  // The lead calls; companions answer. `callReadyAt` is therefore the ONLY one
+  // of these that belongs to the player too, and it sits outside the
+  // !isPlayer guard for that reason.
+  c.callReadyAt = s.callReadyAt ?? 0;
 }
 
 /** Flags for world features, keyed by id — positions come back from the seed. */

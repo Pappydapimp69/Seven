@@ -442,6 +442,17 @@ export function updateCompanions(sim, dt) {
 
     const band = bandOf(c.lucidity);
 
+    // PER-TICK BOOKKEEPING, NOT A BRANCH OUTCOME. This has to run for every
+    // companion every tick, before anything below can `continue` past it. It
+    // sat inside the wander branch first, which meant a companion busy at a
+    // pylon or on an errand never advanced their ping clock at all: `pingAt`
+    // went stale behind them, and the moment they left that branch it was
+    // already overdue and fired instantly. That made behaviour depend on which
+    // branches a companion had happened to take, which is precisely the kind of
+    // hidden history a save cannot carry — the divergence test caught it as a
+    // resumed run forking four seconds in.
+    updatePing(sim, c);
+
     // BRITTLE is the loud, uniform tell: everyone breaks formation for a
     // remembered pylon by then, whether or not you were planning to go
     // there. A companion with a high selfCare trait acts on that same signal
@@ -555,7 +566,12 @@ export function updateCompanions(sim, dt) {
     // like a party that scatters, even when everyone is in fact back on
     // station. Latched on the goalKind transition so it fires once per
     // absence, and only for absences the lead could have noticed.
-    if (c.goalKind && c.goalKind !== "follow" && c.goalKind !== "resting") {
+    // "Away" means away on SOMETHING — a pylon, an errand, a broken mind. The
+    // ambient states do not count, or the latch is set every tick for everyone
+    // and "X comes back over" fires forever. This used to exclude "follow"; the
+    // default is "wander" now, and leaving the old exclusion in place made
+    // every companion permanently, silently away.
+    if (c.goalKind && !["follow", "wander", "resting", "regrouping"].includes(c.goalKind)) {
       c.wasAway = c.goalKind;
     }
     // Somebody in the party has set hands on a pylon and is waiting for a
@@ -588,7 +604,6 @@ export function updateCompanions(sim, dt) {
     // driven by balanced inflow and outflow reaches a fixed point and freezes
     // there). When the deadline passes they stop where they are and go back to
     // their own business, wherever that has left them.
-    updatePing(sim, c);
     const summoned = isAnswering(sim, c);
     if (summoned || isReturning(sim, c)) {
       c.goalKind = summoned ? "answering" : "regrouping";
