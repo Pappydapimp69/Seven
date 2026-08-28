@@ -11,7 +11,9 @@
 // assert "a hallucinating lead is shown a marker the sim does not contain"
 // without booting a browser.
 
-import { HALLUCINATION, BAND, bandOf, ITEM_INFO, LUCIDITY_GRACE, CORROBORATE_RADIUS } from "./state.js?v=mirage-0.11.2";
+import { HALLUCINATION, BAND, bandOf, ITEM_INFO, LUCIDITY_GRACE, CORROBORATE_RADIUS,
+  LINK_RANGE, PING_RANGE,
+} from "./state.js?v=mirage-0.11.2";
 import { ITEM_KINDS } from "./world.js?v=mirage-0.11.2";
 
 const PHANTOM_NAMES = ["the Sixth Stone", "the Watching Slab", "the Other Cairn", "the Hollow Tooth"];
@@ -456,9 +458,23 @@ const CHORUS_EARNED = new Set([
 // out of formation while you weren't watching — so the shape of the party
 // stays intact precisely when it has stopped being intact. The gap you should
 // have noticed is the gap that gets covered.
-const VACANCY_DIST = 14; // beyond this (or gone) a companion has left their slot
-const VACANCY_RETURN = 10; // ...and must come back inside this to reclaim it (hysteresis)
-const SLOT_MEMORY_DIST = 9; // how close a companion must be for their slot to be remembered
+// These three are scaled to COHESION RANGE, not to a formation.
+//
+// They were originally 14 / 10 / 9, tuned when the party walked in the lead's
+// pocket and "their slot" meant a station 5-7m away. Cohesion replaced that:
+// a companion is with the group if they are within LINK_RANGE of ANYONE, so in
+// ordinary play they range much further and the old SLOT_MEMORY_DIST of 9 meant
+// almost nobody was ever close enough to have a remembered place at all. The
+// phantom then had no gap to fill and fell back to orbiting, which is the
+// hallucination's weakest form — and nothing errored, the tell just quietly
+// stopped happening.
+//
+// Anchored to LINK_RANGE so the two systems cannot drift apart again: you are
+// remembered while you are linked, you have left when you are past the ping's
+// reach, and you reclaim your place by coming properly back inside the link.
+const VACANCY_DIST = PING_RANGE; // beyond this (or gone) a companion has left their place
+const VACANCY_RETURN = LINK_RANGE * 0.75; // ...and must come back inside this to reclaim it (hysteresis)
+const SLOT_MEMORY_DIST = LINK_RANGE; // how close a companion must be for their place to be remembered
 const GHOST_EASE = 1.1; // how fast the phantom slides into a slot — a drift, never a cut
 // ...and hard-capped at a real companion's own walking pace (party.js
 // WALK_SPEED). An ease alone is smooth but not necessarily PLAUSIBLE: a

@@ -614,7 +614,16 @@ export function activatePylon(sim, actor = sim.player) {
     p.primedBy = [];
     p.primedAt = sim.time;
   }
-  if (!p.primedBy.includes(actor.id)) p.primedBy.push(actor.id);
+  // IDEMPOTENT. A companion standing on a pylon waiting for a second pair of
+  // hands re-enters this function every tick — that is by design, it is how
+  // they notice the moment somebody joins. What must NOT happen is a fresh
+  // "sets hands on the pylon" line every tick for the whole wait: 12 seconds
+  // of waiting emitted 121 identical events, which flooded the 64-entry event
+  // buffer and silently evicted everything else in it, chatter included. The
+  // bug predates cohesion; a following party simply never stood on a pylon
+  // alone for long enough to show it.
+  const already = p.primedBy.includes(actor.id);
+  if (!already) p.primedBy.push(actor.id);
 
   // One pair of hands is a claim; two is a fact. Until a SECOND mind standing
   // in the same light does the same thing, nothing happens.
@@ -622,7 +631,9 @@ export function activatePylon(sim, actor = sim.player) {
     (c) => p.primedBy.includes(c.id) && dist2D(p, c) <= PYLON_RADIUS,
   );
   if (confirmers.length < 2) {
-    emit(sim, "prime", `${actor.name} sets hands on the pylon. It needs a second.`, { who: actor.id });
+    // Only the FIRST touch announces itself. Re-entering while still waiting is
+    // silent — the state is unchanged, so there is nothing new to say.
+    if (!already) emit(sim, "prime", `${actor.name} sets hands on the pylon. It needs a second.`, { who: actor.id });
     return { ok: true, primed: true, confirmed: false, waitingFor: 2 - confirmers.length };
   }
 
@@ -833,6 +844,168 @@ export function useDose(sim, targetId) {
     emit(sim, "dose", `${ch.isPlayer ? "You take" : `${ch.name} takes`} a lumen dose.`, { who: ch.id });
   }
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// COHESION — who is still with the group
+// ---------------------------------------------------------------------------
+
+/** How close two people must be to count as linked. */
+export const LINK_RANGE = 20;
+/** Beyond this from the lead, the ping turns you around. */
+export const PING_RANGE = 26;
+/** Seconds between pings, for a mind in good order. */
+export const PING_EVERY = 17;
+/** How long a pinged companion walks back before resuming their own business. */
+export const PING_DURATION = 5.5;
+/** At full decline the ping interval has stretched by this factor. */
+export const PING_STRETCH = 3.2;
+
+/**
+ * The set of ids currently in the lead's group.
+ *
+ * A CHAIN, not a leash: you are with the group if you are within LINK_RANGE of
+ * ANYONE in it, not of the player. Five people spaced 19m apart in a line are
+ * all together even though the far end is 76m from the lead. This is what makes
+ * the party read as a crew spread over ground rather than an escort walking in
+ * your pocket.
+ *
+ * `members` is whoever the CALLER believes is there. Pass percept's roster and
+ * a hallucinated sixth companion becomes a valid link in the chain — the group
+ * reads intact, through somebody who is not there, while the real party has
+ * already scattered past any real connection. Pass sim.party and you get the
+ * truth. Neither is the default; the caller chooses, and that choice is the
+ * whole mechanic.
+ *
+ * Straight-line distance, deliberately. Two people can therefore be "linked"
+ * through a cabin wall or a rock spire, which sandbox-distance#E1 is the
+ * general warning about — on obstacled ground, straight-line closeness is not
+ * reachability. Accepted here because the alternative is a BFS per pair per
+ * tick, and because a link through a thin rock reads as "they are just over
+ * there" rather than as a bug. Recorded as a decision, not an oversight.
+ */
+export function groupWith(members, leadId) {
+  const ids = members.map((m) => m.id);
+  const parent = new Map(ids.map((id) => [id, id]));
+  const find = (a) => { while (parent.get(a) !== a) { parent.set(a, parent.get(parent.get(a))); a = parent.get(a); } return a; };
+  const union = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent.set(ra, rb); };
+  for (let i = 0; i < members.length; i++) {
+    for (let j = i + 1; j < members.length; j++) {
+      if (dist2D(members[i], members[j]) <= LINK_RANGE) union(members[i].id, members[j].id);
+    }
+  }
+  if (!parent.has(leadId)) return new Set();
+  const root = find(leadId);
+  return new Set(ids.filter((id) => find(id) === root));
+}
+
+/**
+ * How long THIS mind waits between pings.
+ *
+ * Stretches as they decline, so somebody slipping comes back less often and
+ * drifts further. That is the tell, and it is the good kind: you read their
+ * condition from how reliably they return, not from a number.
+ *
+ * It is also a leak if anything renders it. No HUD element may derive from this
+ * value and no roster note may change wording as it grows — it is legible only
+ * as a felt pattern over minutes.
+ */
+export function pingInterval(ch) {
+  const gone = 1 - Math.max(0, Math.min(1, ch.lucidity / 100));
+  return PING_EVERY * (1 + gone * (PING_STRETCH - 1));
+}
+
+/**
+ * Decide, once per tick, whether this companion turns back toward the lead.
+ *
+ * A DECAYING IMPULSE, NEVER A RESTORING FORCE. brain: dog#E41 — an emergent
+ * cluster driven by balanced inflow and outflow reaches a fixed point and
+ * freezes there forever. If the ping pulled inward exactly as hard as wander
+ * pushes outward, the party would settle at one radius and sit at it, which
+ * looks like a bug and feels like a leash. So a ping is an impulse with a
+ * deadline: walk back for PING_DURATION seconds, then stop and go back to your
+ * own business, wherever that has left you.
+ *
+ * Mutates only the companion's own ping bookkeeping. Draws no rng.
+ */
+export function updatePing(sim, ch) {
+  if (ch.isPlayer) return;
+  if (sim.time < (ch.pingAt || 0)) return;
+  ch.pingAt = sim.time + pingInterval(ch);
+  // A mind that is gone does not care where the group is.
+  if (ch.hallucinating) return;
+  if (dist2D(ch, sim.player) <= PING_RANGE) return;
+  ch.pingUntil = sim.time + PING_DURATION;
+}
+
+/** Is this companion currently walking back toward the lead after a ping? */
+export function isReturning(sim, ch) {
+  return sim.time < (ch.pingUntil || 0) && !ch.hallucinating;
+}
+
+// ---------------------------------------------------------------------------
+// CALL — bring one companion to you
+// ---------------------------------------------------------------------------
+
+/** Seconds before the caller may call ANYONE again. */
+export const CALL_COOLDOWN = 30;
+/** Seconds before a SPECIFIC companion will answer again. */
+export const CALL_PERSONAL = 120;
+/** How long a called companion walks toward the caller before resuming their own business. */
+export const CALL_DURATION = 25;
+
+/**
+ * Call a companion over.
+ *
+ * TWO GATES, AND A REFUSED CALL IS FREE (brain: opticon#E15 — a cooldown
+ * ability needs "recharged" AND "has a valid target now", with the cooldown
+ * assigned only after every precondition passes, or a refused use silently
+ * costs the player their next real one).
+ *
+ * THE CALL NEVER REPORTS FAILURE. This is the leak rule, and it is the whole
+ * reason this function returns so little. A "nobody heard you" message is a
+ * direct readout of hidden state: the player would learn their own condition,
+ * or a companion's, from an error string instead of from the world. So a call
+ * that will be answered and a call that will not are byte-identical at the
+ * moment of the press — same event, same text, same sound. The ONLY difference
+ * is whether anybody actually walks out of the trees, which is ambiguous,
+ * delayed, and readable as distance or terrain or somebody being busy.
+ *
+ * The cooldowns are absolute DEADLINES (`sim.time >= readyAt`), never a
+ * `remaining -= dt` countdown. cadence-frametick#E1 is about the latter: a
+ * decrementing float makes the discrete-event rate frame-rate dependent. A
+ * deadline compared against the same accumulated `sim.time` everything else
+ * uses has no such drift, and matches every other timer in this file
+ * (vouchUntil, steadyUntil, microUntil, decayPausedUntil).
+ */
+export function callCompanion(sim, id, caller = sim.player) {
+  const ch = sim.companions.find((c) => c.id === id);
+  // Gate 1: is there anybody to call? Gate 2: are both cadences recharged?
+  // Checked BEFORE anything is spent.
+  if (!ch) return { ok: false, reason: "no-target" };
+  if (sim.time < (caller.callReadyAt || 0)) return { ok: false, reason: "recharging" };
+  if (sim.time < (ch.answerReadyAt || 0)) return { ok: false, reason: "recharging" };
+
+  caller.callReadyAt = sim.time + CALL_COOLDOWN;
+  ch.answerReadyAt = sim.time + CALL_PERSONAL;
+
+  // Whether they COME is a separate question from whether the call went out.
+  // A mind that is gone does not answer, and is not told about it here — the
+  // player finds out by watching the treeline.
+  const answers = !ch.hallucinating && !inMicroEpisode(ch);
+  if (answers) {
+    ch.summonBy = caller.id;
+    ch.summonUntil = sim.time + CALL_DURATION;
+  }
+
+  // Deliberately does NOT branch on `answers`. Same text either way.
+  emit(sim, "call", `You call out for ${ch.name}.`, { who: ch.id });
+  return { ok: true, who: ch.id };
+}
+
+/** Is this companion currently walking to somebody who called them? */
+export function isAnswering(sim, ch) {
+  return !!ch.summonBy && sim.time < (ch.summonUntil || 0) && !ch.hallucinating;
 }
 
 /**

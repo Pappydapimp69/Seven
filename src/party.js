@@ -21,6 +21,7 @@ import {
   companionPickup,
   handoffToPlayer,
   activatePylon,
+  updatePing, isAnswering, isReturning,
 } from "./state.js?v=mirage-0.11.2";
 
 // Higher band = worse. Lets a per-companion trait move the pylon-seeking
@@ -94,7 +95,13 @@ const KNOWN_PYLON_DIST = 24; // how close they must have been to remember a pylo
 const SEEK_PYLON_DIST = 70; // and how far they will then travel back to one
 const REPATH_INTERVAL = 0.9; // seconds between path recomputes
 const SEEK_ITEM_DIST = 55; // how far an idle companion will travel on a fetch errand
-const PYLON_RETRY = 90; // seconds before a companion will try an abandoned pylon again
+const PYLON_RETRY = 90;
+
+// Ambient wandering, the default state of anybody nobody is talking to.
+const WANDER_NEAR = 4;        // never pick somewhere they are already standing
+const WANDER_SPREAD = 14;     // ...scaled by the companion's own `wander` trait
+const WANDER_DWELL_MIN = 4;   // seconds before choosing somewhere new
+const WANDER_DWELL_MAX = 11; // seconds before a companion will try an abandoned pylon again
 
 // --- what "gone" looks like from the outside ---------------------------------
 // A companion's hallucination is only a tell if the lead can SEE it. The
@@ -571,23 +578,58 @@ export function updateCompanions(sim, dt) {
       continue;
     }
 
-    c.goalKind = "follow";
-    const slot = formationSlot(sim, c);
-    const d = dist(c, slot);
-    if (c.wasAway && d <= FOLLOW_SLACK * 2.5) {
-      const how = c.wasAway === "hallucinating" ? `${c.name} is back with us.` : `${c.name} falls back into formation.`;
-      c.wasAway = null;
-      emit(sim, "break", how, { who: c.id });
+    // ---- coming to you ---------------------------------------------------
+    // Following is GONE. Five people walking in your pocket reads as an escort,
+    // not a crew, and it makes "am I alone out here" impossible to feel because
+    // you never are. What replaces it is two impulses, both with deadlines:
+    // somebody you CALLED, and somebody the periodic ping turned around.
+    //
+    // Both are impulses, never restoring forces (brain: dog#E41 — a cluster
+    // driven by balanced inflow and outflow reaches a fixed point and freezes
+    // there). When the deadline passes they stop where they are and go back to
+    // their own business, wherever that has left them.
+    updatePing(sim, c);
+    const summoned = isAnswering(sim, c);
+    if (summoned || isReturning(sim, c)) {
+      c.goalKind = summoned ? "answering" : "regrouping";
+      const d = dist(c, sim.player);
+      if (c.wasAway && d <= FOLLOW_SLACK * 2.5) {
+        const how = c.wasAway === "hallucinating" ? `${c.name} is back with us.` : `${c.name} comes back over.`;
+        c.wasAway = null;
+        emit(sim, "break", how, { who: c.id });
+      }
+      // Close enough. A called companion who has arrived stops being called —
+      // otherwise they stand pressed against the lead for the rest of the
+      // window, which is the leash again by another name.
+      if (d <= FOLLOW_SLACK * 2) {
+        if (summoned) c.summonUntil = 0;
+        c.pingUntil = 0;
+        c.facing = Math.atan2(sim.player.x - c.x, sim.player.z - c.z);
+      } else {
+        stepToward(sim, c, sim.player, followSpeed(d, band), dt);
+      }
+      continue;
     }
-    if (d > FOLLOW_SLACK) {
-      // Fraying companions lag: the gap between them and the lead is the tell,
-      // and GRIP above is what makes that gap open at a rate you can read.
-      stepToward(sim, c, slot, followSpeed(d, band), dt);
-    } else {
-      // On station. Face where the lead faces, so a held formation reads as a
-      // formation and not as five people who happen to be standing near you.
-      c.facing = sim.player.heading ?? sim.player.yaw;
+
+    // ---- their own business ----------------------------------------------
+    // Nobody called, no ping is pulling them back. Before cohesion this branch
+    // was "follow", and removing following left NOTHING here — companions
+    // simply stopped, which read as five people frozen at whatever distance
+    // they happened to be. A crew that only ever moves when summoned is not a
+    // crew; the wandering is what makes the calling mean anything.
+    //
+    // A stroll, not a patrol: pick somewhere within reach, walk there, stand a
+    // moment, pick again. Radius scales with this companion's own `wander`
+    // trait, so the restless ones really do get further away and the homebodies
+    // stay close — one of the behavioural tells the player is meant to learn.
+    c.goalKind = "wander";
+    if (sim.time >= (c.wanderUntil || 0) || !c.wanderGoal) {
+      const a = sim.rng.float(0, Math.PI * 2);
+      const r = sim.rng.float(WANDER_NEAR, WANDER_NEAR + WANDER_SPREAD * (0.4 + c.wander));
+      c.wanderGoal = { x: c.x + Math.cos(a) * r, z: c.z + Math.sin(a) * r };
+      c.wanderUntil = sim.time + sim.rng.float(WANDER_DWELL_MIN, WANDER_DWELL_MAX);
     }
+    if (dist(c, c.wanderGoal) > 1.2) stepToward(sim, c, c.wanderGoal, WALK_SPEED * 0.7, dt);
   }
 }
 
