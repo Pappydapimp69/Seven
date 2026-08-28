@@ -196,6 +196,37 @@ blueprint.
 **Never show the chain.** No lines, no "connected" indicator, no count. You
 infer membership from who you can see and who answers.
 
+## Part 5 — who the party is
+
+Two populations, deliberately different.
+
+**In camp, the party is fixed.** VOSS, IREN, HALDER, NKEM and PAO, with the
+trait bundles they have today, in the slots they have today. The tutorial's
+authored briefs may keep naming them directly — no slot-reference indirection
+is needed, because these five never change. Canonically everyone here is
+training; this is the crew you learn on.
+
+**Entering the basin re-rolls the party.** New display names drawn per
+campaign, AND the trait bundles shuffled across slots, so the wanderer is a
+different person with a different name every run. Ids (`c1`..`c5`) stay stable
+as the internal handle; only the name and the bundle attached to a slot move.
+
+Both changes are needed, not one. Renaming alone leaves the roster order
+readable — "the third person always lags" survives a rename — so the bundles
+must move too, or the table has been relabelled rather than scrambled.
+
+Consequences:
+
+- Both the names and the slot->bundle mapping become save state, rolled once
+  through `sim.rng` at basin entry and restored exactly, for the same reason
+  traits already are: a resumed party that reshuffles its personalities
+  silently invalidates every behavioural tell the player has learned to read.
+- The person you trained with is not the person you walk in with. That is a
+  feature — it is the moment the game stops being a lesson.
+- This is the hook for later systems: recruiting a sixth, losing someone
+  permanently, upgrading a trait. All of them need exactly this — a party
+  whose composition is data rolled at a known point, not a constant table.
+
 ## What must remain UNCHANGED
 
 - `state.js` stays the only source of sim truth; all randomness through
