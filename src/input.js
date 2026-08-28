@@ -37,6 +37,7 @@ export const ACTIONS = Object.freeze({
   // only way to find out something is wrong with YOUR OWN reading of it — see
   // state.offerItem.
   OFFER_ITEM: "offerItem",
+  CALL: "call",
   PAUSE: "pause",
 });
 
@@ -150,6 +151,7 @@ export function createInput(canvas, opts = {}) {
       case "KeyC": push(ACTIONS.CRAFT); break;
       case "KeyV": push(ACTIONS.DROP_ITEM); break;
       case "KeyB": push(ACTIONS.OFFER_ITEM); break;
+      case "KeyT": push(ACTIONS.CALL); break;
       case "Escape": push(ACTIONS.PAUSE); break;
       case "Space": e.preventDefault(); break;
       default: return;
@@ -340,6 +342,7 @@ export function createInput(canvas, opts = {}) {
     if (edges[12]) queue.push(ACTIONS.CRAFT);
     if (edges[13]) queue.push(ACTIONS.DROP_ITEM);
     if (edges[15]) queue.push(ACTIONS.OFFER_ITEM);
+    if (edges[14]) queue.push(ACTIONS.CALL);
 
     return {
       move: { x: lx, z: ly },
@@ -404,6 +407,7 @@ export function createInput(canvas, opts = {}) {
     if (edges[12]) push(ACTIONS.CRAFT); // D-pad Up
     if (edges[13]) push(ACTIONS.DROP_ITEM); // D-pad Down — mirrors craft above it
     if (edges[15]) push(ACTIONS.OFFER_ITEM); // D-pad Right — handing it across, sideways
+    if (edges[14]) push(ACTIONS.CALL); // D-pad Left — the only face/d-pad input still free
     if (edges[9]) push(ACTIONS.PAUSE); // Start
     state.look.dx += rx * 13;
     state.look.dy += ry * 9;
