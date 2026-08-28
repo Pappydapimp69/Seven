@@ -16,7 +16,7 @@
 // difficulty for a human who is shown markers that do not exist and told by their
 // own party that everything is fine — costs it almost nothing.
 
-import { createRun, tick, logMarker, trueLogCount, debrief, activatePylon, LOG_RADIUS, PYLON_RADIUS, FULL_DRAIN_AT } from "../src/state.js";
+import { createRun, tick, logMarker, trueLogCount, debrief, activatePylon, callCompanion, LOG_RADIUS, PYLON_RADIUS, FULL_DRAIN_AT } from "../src/state.js";
 import { createPercept, updatePercept } from "../src/percept.js";
 import { findPath, worldToCell, cellToWorld, floodFill, GRID } from "../src/world.js";
 
@@ -59,6 +59,7 @@ function playRun(seed, policy, difficulty = "standard") {
   const cooldown = new Map(); // pylon id -> sim time it becomes selectable again
   let path = null;
   let goal = null;
+  let waitingAt = null; // which pylon we are holding, and until when
   let goalKind = null;
   let repath = 0;
 
@@ -228,15 +229,45 @@ function playRun(seed, policy, difficulty = "standard") {
       continue;
     }
 
-    // A pylon fires the moment somebody is standing in it, once, and is then
-    // dead. There is nothing to wait for and nothing to ration — the only
-    // decision is when to spend it and who is close enough to catch it, and the
-    // bot's version of that is simply "walk in".
+    // A pylon takes TWO pairs of hands, and since cohesion nobody follows you
+    // any more — so "walk in and press it" is no longer a policy, it is a way
+    // to waste the basin's scarcest resource. The bot has to do what a player
+    // has to do: get someone to come.
+    //
+    // This is the change that made the difference. Before it the deceived bot
+    // won 0% of standard seeds, not because the deception got harder but
+    // because it could not reach relief at all: it primed pylon after pylon
+    // alone and nobody ever joined. A policy that ignores a verb the game
+    // requires is not measuring difficulty, it is measuring its own blind spot.
     if (goalKind === "pylon" && dist(goal, sim.player) < PYLON_RADIUS * 0.6) {
+      const helper = sim.companions.find(
+        (c) => !c.hallucinating && dist(c, sim.player) <= PYLON_RADIUS,
+      );
+      if (helper) {
+        // Somebody is already in the light. Both sets of hands, and it fires.
+        activatePylon(sim);
+        activatePylon(sim, helper);
+        step({ move: { x: 0, z: 0 }, yaw: sim.player.yaw });
+        cooldown.set(goal.id, sim.time + 25);
+        goal = null;
+        continue;
+      }
+      // Nobody here. Set hands on it, call the nearest mind that still answers,
+      // and hold the spot while they walk over. The call refuses silently when
+      // it is recharging, which costs nothing.
       activatePylon(sim);
+      const mate = sim.companions
+        .filter((c) => !c.hallucinating)
+        .sort((a, b) => dist(a, sim.player) - dist(b, sim.player))[0];
+      if (mate) callCompanion(sim, mate.id);
       step({ move: { x: 0, z: 0 }, yaw: sim.player.yaw });
-      cooldown.set(goal.id, sim.time + 25);
-      goal = null;
+      // Wait, but not forever: PRIME_WINDOW is what the prime is worth.
+      if (!waitingAt || waitingAt.id !== goal.id) waitingAt = { id: goal.id, until: sim.time + 14 };
+      if (sim.time > waitingAt.until) {
+        cooldown.set(goal.id, sim.time + 40);
+        waitingAt = null;
+        goal = null;
+      }
       continue;
     }
 

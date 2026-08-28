@@ -718,13 +718,33 @@ function updateDoubledParty(percept, sim, p, dt, lying) {
     return;
   }
 
-  // Remember formation slots, in the eye's own frame.
+  // Remember where each companion IS, in the eye's own frame.
+  //
+  // SEEDED ON THE FIRST FRAME OF THE EPISODE, for everybody, whatever the
+  // distance. This used to record only companions already inside
+  // SLOT_MEMORY_DIST, which was right when the party walked in formation and
+  // wrong the moment cohesion replaced following: a wandering crew is rarely
+  // stably inside that radius, so almost nobody ever HAD a remembered place to
+  // vacate, and the phantom fell back to orbiting — the hallucination's weakest
+  // form — in most episodes. Measured at 13% takeover before this, against 90%
+  // when the party walked behind you.
+  //
+  // Seeding is also the more honest model: the lead has been looking at these
+  // people all along. They know roughly where everyone was when the light
+  // went. Distant ones are clamped inward so the phantom stands somewhere the
+  // lead could actually see rather than eighty metres out in the fog.
   for (const c of sim.companions) {
     const dx = c.x - p.x;
     const dz = c.z - p.z;
     const r = Math.hypot(dx, dz);
-    if (c.hallucinating || r > SLOT_MEMORY_DIST || r < 1e-6) continue;
-    percept.slotMemory.set(c.id, { r, bearing: angularDelta(Math.atan2(dz, dx), p.yaw) });
+    if (r < 1e-6) continue;
+    const fresh = !percept.slotMemory.has(c.id);
+    if (c.hallucinating && !fresh) continue;
+    if (!fresh && r > SLOT_MEMORY_DIST) continue;
+    percept.slotMemory.set(c.id, {
+      r: Math.min(r, SLOT_MEMORY_DIST),
+      bearing: angularDelta(Math.atan2(dz, dx), p.yaw),
+    });
   }
 
   // Does the current occupant still count as away? (hysteresis: they have to
@@ -733,6 +753,18 @@ function updateDoubledParty(percept, sim, p, dt, lying) {
   if (held) {
     const back = !held.hallucinating && Math.hypot(held.x - p.x, held.z - p.z) <= VACANCY_RETURN;
     if (back) percept.ghostOf = null;
+    // PREEMPTION. The pick used to be sticky: whoever was first found missing
+    // held the phantom's attention until they personally walked back. That was
+    // fine when the only way to be missing was to break, and wrong the moment
+    // cohesion let people wander legitimately far — a stroller claimed the slot
+    // in the first second of an episode and still held it minutes later, so the
+    // companion who actually came apart was never the one impersonated. The
+    // phantom stood over a real absence the whole time and told the wrong lie.
+    // Measured at 30% of episodes impersonating a stroller instead of the mind
+    // that broke, with the takeover itself running the entire episode.
+    else if (!held.hallucinating && sim.companions.some((c) => c.hallucinating && percept.slotMemory.has(c.id))) {
+      percept.ghostOf = null;
+    }
   } else {
     percept.ghostOf = null;
   }
@@ -742,13 +774,27 @@ function updateDoubledParty(percept, sim, p, dt, lying) {
     // still NEAREST is the one who most recently walked out of it. Picking by
     // distance rather than by roster order keeps the choice deterministic
     // without pinning it to c1 forever.
+    // A MIND THAT HAS COME APART OUTRANKS ONE THAT MERELY WANDERED OFF.
+    //
+    // Both leave a gap, but they are not the same gap. Someone who broke is the
+    // gap that matters — the phantom standing in their place is what makes the
+    // roster's one confident line a lie about a specific person. Before
+    // cohesion this never came up, because a following party had nobody
+    // casually beyond the vacancy distance; now people are out there all the
+    // time, and picking purely by nearest meant a stroller was impersonated
+    // instead of the person who had just stopped making sense, in about a
+    // third of episodes. Distance still breaks ties within each group.
     let best = null;
     let bestD = Infinity;
+    let bestBroken = false;
     for (const c of sim.companions) {
       if (!percept.slotMemory.has(c.id)) continue;
       const d = Math.hypot(c.x - p.x, c.z - p.z);
       if (!c.hallucinating && d <= VACANCY_DIST) continue;
-      if (d < bestD) { bestD = d; best = c; }
+      const broken = !!c.hallucinating;
+      if (best && bestBroken && !broken) continue;        // never demote a broken pick
+      if (best && !bestBroken && broken) { bestD = Infinity; } // a broken one always wins
+      if (d < bestD) { bestD = d; best = c; bestBroken = broken; }
     }
     if (best) {
       percept.ghostOf = best.id;

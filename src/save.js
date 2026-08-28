@@ -72,7 +72,10 @@ function packCharacter(c) {
     drain: c.drain, stoic: c.stoic, chatty: c.chatty, wander: c.wander, selfCare: c.selfCare,
     aliveTime: c.aliveTime,
     goalKind: c.goalKind,
-    goal: c.goal ? { x: c.goal.x, z: c.goal.z } : null,
+    // `label` rides along: a hallucinated goal carries the NAME of the marker a
+    // gone mind believes it is walking to, and dropping it changed what they
+    // said they were doing.
+    goal: c.goal ? { x: c.goal.x, z: c.goal.z, label: c.goal.label ?? null } : null,
     fetchItemId: c.fetchItemId ?? null,
     // These three are THROTTLE COUNTDOWNS, and dropping them was a real bug
     // the divergence test caught: they decide WHICH TICK chatter and
@@ -105,6 +108,18 @@ function packCharacter(c) {
     // `remarkCooldown = 0`, which gates an rng draw.
     goneAnnounced: !!c.goneAnnounced,
     wasAway: c.wasAway ?? null,
+    // THE LOST-DRIFT STATE. `lostSince` is the worst offender this file has
+    // held: the dwell test is `sim.time - c.lostSince < LOST_DWELL`, and with
+    // it dropped that reads `sim.time - undefined`, which is NaN, and NaN < x
+    // is false — so a resumed hallucinating mind skipped its entire dwell,
+    // took a different branch, and drew a different number of rng values. A
+    // missing number that silently becomes NaN does not throw and does not
+    // fail a round-trip check; it just quietly changes what happens next.
+    lostSince: c.lostSince ?? null,
+    lostStallUntil: c.lostStallUntil ?? 0,
+    // Only used to keep a gone mind from repeating itself, but it changes
+    // which line `pick` lands on, so two runs disagree about what was said.
+    lastGoneLine: c.lastGoneLine ?? null,
     // Saved rather than recomputed for the same reason: a null path re-paths
     // on a different tick than a live one, which moves the draws again.
     // GRID CELLS (cx, cz), not world coordinates. This mapped x/z for a while,
@@ -139,12 +154,24 @@ function applyCharacter(c, s) {
   c.microUntil = s.microUntil || 0;
   c.microCooldownUntil = s.microCooldownUntil || 0;
   c.vouchUntil = s.vouchUntil || 0;
+  // `goalKind` and `goal` are NOT companion-only. A hallucinating LEAD is
+  // driven by the same lost-drift code as a companion — they get a goalKind of
+  // "hallucinating" and a drift goal — and leaving them out of the restore
+  // meant a resumed lead re-entered that branch from scratch and drew three
+  // fresh rng values the original had already spent. Every other mind sharing
+  // that tick then shifted, and the run forked. They were inside the
+  // !isPlayer guard because they were assumed to be party-AI state; they are
+  // hallucination state, which the lead very much has.
+  c.goalKind = s.goalKind;
+  c.goal = s.goal ? { x: s.goal.x, z: s.goal.z, label: s.goal.label ?? null } : null;
+  // Same reasoning as goalKind: the lead hallucinates too, so the lost-drift
+  // clock is not companion-only state.
+  c.lostSince = s.lostSince ?? null;
+  c.lostStallUntil = s.lostStallUntil ?? 0;
   if (!c.isPlayer) {
     c.drain = s.drain; c.stoic = s.stoic; c.chatty = s.chatty;
     c.wander = s.wander; c.selfCare = s.selfCare;
     c.aliveTime = s.aliveTime;
-    c.goalKind = s.goalKind;
-    c.goal = s.goal ? { x: s.goal.x, z: s.goal.z } : null;
     c.fetchItemId = s.fetchItemId ?? null;
     c.inventory = s.inventory ? s.inventory.map((slot) => ({ ...slot })) : [];
     if (s.known) c.known = { pylons: new Set(s.known.pylons), monoliths: new Set(s.known.monoliths) };
@@ -161,6 +188,7 @@ function applyCharacter(c, s) {
     c.answerReadyAt = s.answerReadyAt ?? 0;
     c.goneAnnounced = !!s.goneAnnounced;
     c.wasAway = s.wasAway ?? null;
+    c.lastGoneLine = s.lastGoneLine ?? null;
   }
   // The lead calls; companions answer. `callReadyAt` is therefore the ONLY one
   // of these that belongs to the player too, and it sits outside the

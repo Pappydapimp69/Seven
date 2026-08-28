@@ -23,6 +23,14 @@ echo "== kinds (the four that used to be static) =="
 node tests/kinds.test.mjs
 echo
 
+echo "== camp (the one authored map earns its guarantees) =="
+node tests/camp.mjs
+echo
+
+echo "== cohesion (the call, the chain, the ping) =="
+node tests/cohesion.mjs
+echo
+
 echo "== tutorial (step pinning, starvation, meter leaks) =="
 node tests/tutorial.mjs
 echo

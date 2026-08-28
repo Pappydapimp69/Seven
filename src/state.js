@@ -141,7 +141,15 @@ export const PYLON_PAUSE = 10; // seconds of held-off decay the pulse buys
 // It also gives cohesion a job that ISN'T armour. Corroboration was removed as
 // a passive shield against the lie; this is the same party, spending the same
 // closeness, on something they have to actually do.
-export const PRIME_WINDOW = 14;
+// LONGER THAN IT TAKES CALLED HELP TO ARRIVE. 14 seconds was right when the
+// second pair of hands was already standing beside you; with cohesion they have
+// to walk, and CALL_DURATION gives them 25 seconds to do it. A prime that
+// expires at 14 means the mechanic that creates the need (a pylon takes two)
+// and the mechanic that answers it (call someone over) actively contradict:
+// help arrives to find the prime already gone, every time, and the basin's only
+// renewable relief becomes unreachable. Measured: the deceived bot's win rate
+// fell to 0% and it burned pylon after pylon priming them alone.
+export const PRIME_WINDOW = 32;
 export const DOSE_COUNT = 3; // "lumen" ampoules — the whole supply, for six people
 export const DOSE_RESTORE = 70;
 export const RECOVER_AT = 45; // lucidity a mind comes back to after hallucinating
@@ -369,8 +377,13 @@ function makeCharacter(tpl, spawn, index) {
  * every caller that doesn't know about campaigns — the balance harness, the
  * logic tests — is unaffected; only main.js opts a real playthrough in.
  */
-export function createRun({ seed = 1, difficulty = "standard", level = 1, campaignLength = 1, carryOver = null } = {}) {
-  const world = generateWorld(seed);
+export function createRun({ seed = 1, difficulty = "standard", level = 1, campaignLength = 1, carryOver = null, world: given = null } = {}) {
+  // `world` is an INJECTION POINT, not a second generator. Basins still come
+  // from generateWorld(seed) and nothing about that changes; the camp is the
+  // one authored map and hands its own world in. Everything downstream reads
+  // the same shape either way and never learns which it got — see camp.js on
+  // why that contract is asserted field-for-field in tests.
+  const world = given || generateWorld(seed);
   const rng = makeRng(seed ^ 0x5eed);
   const spawn = { x: world.camp.x, z: world.camp.z };
 
@@ -534,6 +547,16 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
     time: 0, // the sim's own clock. Tests assert against THIS, never wall time.
     status: "playing", // playing | levelComplete | won | lost
     ending: null,
+    // Basins contain no mossed pylons, so this is true there and only the camp
+    // ever turns it off. See clearMoss.
+    canClearMoss: true,
+    // The camp suppresses DRAIN, not the clock. A continuous tutorial runs well
+    // past LUCIDITY_GRACE and would start eating people mid-lesson, turning a
+    // lesson into a race nobody was told they had entered — but stopping
+    // `sim.time` instead would freeze every deadline in the game with it,
+    // including the call cadences, which would then never recharge. Time moves;
+    // nobody decays.
+    noDrain: false,
     dissolveTimer: 0,
     events: [], // transient, drained by the HUD each frame
     // Reused across a campaign's basins (not recreated) so the end-of-campaign
@@ -583,7 +606,23 @@ export function pylonAt(sim, ch) {
   // the same light could prime DIFFERENT pylons and never confirm either.
   let best = null, bestD = Infinity;
   for (const p of sim.pylons) {
-    if (p.spent) continue;
+    // A mossed pylon is not a pylon yet. Returning one here would let it be
+    // primed while inert, and would put "set hands on the pylon" at the top of
+    // the prompt ladder at a site where that verb does nothing — starving
+    // whatever else is in reach. `mossedAt` is the separate lookup for the one
+    // caller that wants to find them.
+    if (p.spent || p.mossed) continue;
+    const d = dist2D(p, ch);
+    if (d <= PYLON_RADIUS && d < bestD) { bestD = d; best = p; }
+  }
+  return best;
+}
+
+/** The nearest mossed pylon in reach, which `pylonAt` deliberately hides. */
+export function mossedAt(sim, ch) {
+  let best = null, bestD = Infinity;
+  for (const p of sim.pylons) {
+    if (!p.mossed) continue;
     const d = dist2D(p, ch);
     if (d <= PYLON_RADIUS && d < bestD) { bestD = d; best = p; }
   }
@@ -691,12 +730,34 @@ export function tickLucidity(sim, ch, dt) {
     beginHallucinating(sim, ch);
     return 0;
   }
-  const grace = graceMultiplier(sim.time);
+  // The camp sets noDrain: nobody decays while they are being taught. One
+  // multiplier, at the source, so every downstream consumer of `grace` (drain,
+  // micro-episode rate, the bands) is switched off together and none of them
+  // needs to know the camp exists.
+  const grace = sim.noDrain ? 0 : graceMultiplier(sim.time);
   if (grace <= 0) return 0; // still inside the dead-calm window
 
-  const centroid = partyCentroid(sim);
+  // ISOLATION IS ABOUT THE CHAIN, NOT ABOUT A CENTROID.
+  //
+  // This used to be "more than ISOLATION_DIST from the party's centre of mass",
+  // which was the right question while the party walked in a clump behind you.
+  // Cohesion made it the wrong one: a crew ranging over ground is routinely
+  // 20-30m from the centroid while being perfectly connected, so the penalty
+  // fired on everybody, almost always, for doing exactly what the design now
+  // asks of them. Measured: party-seconds-lost went from 17 to 383 and the
+  // deceived bot's win rate from 42% to 0% — the basin was not harder, it was
+  // punishing its own intended behaviour.
+  //
+  // Being alone now means what it says: not linked, however indirectly, to
+  // anybody. Someone at the far end of a five-person chain is with the group;
+  // someone twelve metres away with nobody in between is not.
+  //
+  // This deliberately does NOT make cohesion a shield (a resolved tension):
+  // being in the chain removes a PENALTY for being alone, it does not slow the
+  // ordinary decline that everybody pays regardless.
+  const group = groupWith(sim.party, sim.player.id);
   let mult = 1;
-  if (dist2D(centroid, ch) > ISOLATION_DIST) mult *= ISOLATION_MULT;
+  if (!group.has(ch.id)) mult *= ISOLATION_MULT;
   const witnessed = sim.party.filter((o) => o !== ch && o.hallucinating && dist2D(o, ch) <= CONTAGION_DIST).length;
   mult *= 1 + CONTAGION_MULT * witnessed;
   mult *= 1 + SCAR_MULT * ch.scars;
@@ -819,6 +880,17 @@ export function beginHallucinating(sim, ch) {
 export function recover(sim, ch, cause) {
   ch.hallucinating = false;
   ch.hallucination = null;
+  // CLEAR THE SLIP WINDOW TOO. This function predates micro-episodes and only
+  // ever knew how to end the bottomed-out kind of hallucination. Pulling
+  // somebody out of a SLIP from outside — a pylon firing around them, a dose —
+  // left `microUntil` set on a character who was now lucid, which is the exact
+  // state the stress invariant forbids: a slip window with nobody in it. The
+  // refractory is applied as well, because a slip cut short by help is still a
+  // slip that happened, and without it they could immediately slip again.
+  if ((ch.microUntil || 0) > 0) {
+    ch.microUntil = 0;
+    ch.microCooldownUntil = sim.time + MICRO_REFRACTORY;
+  }
   ch.recoverProgress = 0;
   ch.scars += 1;
   ch.lucidity = RECOVER_AT;
@@ -844,6 +916,38 @@ export function useDose(sim, targetId) {
     emit(sim, "dose", `${ch.isPlayer ? "You take" : `${ch.name} takes`} a lumen dose.`, { who: ch.id });
   }
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// MOSS — a pylon you can find but not yet use
+// ---------------------------------------------------------------------------
+
+/**
+ * Scrape the moss off a pylon.
+ *
+ * The camp's pylons stand there from the first frame, crusted over and inert.
+ * A player who wanders before being told anything finds one, presses the verb,
+ * and gets a real answer — "it's under moss" — rather than silence or a
+ * mysterious refusal. That is gating by what the world IS, not by forbidding a
+ * press (brain: wrong-sky#E8 — gate discovery interactables by EFFECT, give the
+ * not-yet-active case an explicit in-fiction no-op). Blocking the input instead
+ * would put a guard at a shared entry point, which is the thing that silently
+ * starves every other consumer of that event stream.
+ *
+ * `sim.canClearMoss` is what the lesson opens. Basins have no mossed pylons at
+ * all, so it defaults to true there and only the camp ever sets it false.
+ */
+export function clearMoss(sim, p, actor = sim.player) {
+  if (!p || !p.mossed) return { ok: false, reason: "not-mossed" };
+  if (!sim.canClearMoss) {
+    // A real answer, and deliberately not a refusal sound. They learn where it
+    // is; they come back when they know what it is for.
+    emit(sim, "mossFast", "Moss has grown right over it. It will not shift.", { id: p.id, who: actor.id });
+    return { ok: false, reason: "sealed" };
+  }
+  p.mossed = false;
+  emit(sim, "unmoss", "The moss comes away. Whatever this is, it is still live.", { id: p.id, who: actor.id });
+  return { ok: true, id: p.id };
 }
 
 // ---------------------------------------------------------------------------

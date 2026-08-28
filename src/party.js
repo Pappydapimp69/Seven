@@ -22,6 +22,7 @@ import {
   handoffToPlayer,
   activatePylon,
   updatePing, isAnswering, isReturning,
+  PRIME_WINDOW,
 } from "./state.js?v=mirage-0.11.2";
 
 // Higher band = worse. Lets a per-companion trait move the pylon-seeking
@@ -453,6 +454,29 @@ export function updateCompanions(sim, dt) {
     // resumed run forking four seconds in.
     updatePing(sim, c);
 
+    // THREE DRAWS, EVERY COMPANION, EVERY TICK, WHATEVER BRANCH THEY TAKE.
+    // brain: waiting-city#E9 (constant roll count), and the same discipline
+    // tickLucidity states one file over: "if a value is only USED on one
+    // branch, it still has to be DRAWN on all of them."
+    //
+    // These are the ambient-wander values, used only when a companion is on
+    // their own business and their dwell has run out. Drawing them there —
+    // inside the branch, only when needed — is what broke the resume: a
+    // companion busy at a pylon skipped the draws, so the number of draws in a
+    // tick depended on which branch each of five companions happened to be in,
+    // and a resumed run that differed by one branch entry re-perturbed every
+    // mind sharing that tick. The divergence test caught it as a fork four
+    // seconds after restore, and the draw count differed by exactly three.
+    //
+    // Drawing unconditionally costs three rng calls per companion per tick and
+    // makes the stream position a function of TIME ALONE, which is the only
+    // form a save can carry.
+    const wanderRoll = {
+      angle: sim.rng.float(0, Math.PI * 2),
+      reach: sim.rng.float(0, 1),
+      dwell: sim.rng.float(WANDER_DWELL_MIN, WANDER_DWELL_MAX),
+    };
+
     // BRITTLE is the loud, uniform tell: everyone breaks formation for a
     // remembered pylon by then, whether or not you were planning to go
     // there. A companion with a high selfCare trait acts on that same signal
@@ -585,7 +609,7 @@ export function updateCompanions(sim, dt) {
         !p.spent &&
         p.primedBy?.length &&
         !p.primedBy.includes(c.id) &&
-        sim.time - p.primedAt <= 14 &&
+        sim.time - p.primedAt <= PRIME_WINDOW &&
         dist(p, c) <= PYLON_RADIUS,
     );
     if (waiting) {
@@ -639,10 +663,12 @@ export function updateCompanions(sim, dt) {
     // stay close — one of the behavioural tells the player is meant to learn.
     c.goalKind = "wander";
     if (sim.time >= (c.wanderUntil || 0) || !c.wanderGoal) {
-      const a = sim.rng.float(0, Math.PI * 2);
-      const r = sim.rng.float(WANDER_NEAR, WANDER_NEAR + WANDER_SPREAD * (0.4 + c.wander));
+      // Uses the values drawn unconditionally at the top of this iteration.
+      // Nothing here may call sim.rng.
+      const a = wanderRoll.angle;
+      const r = WANDER_NEAR + wanderRoll.reach * WANDER_SPREAD * (0.4 + c.wander);
       c.wanderGoal = { x: c.x + Math.cos(a) * r, z: c.z + Math.sin(a) * r };
-      c.wanderUntil = sim.time + sim.rng.float(WANDER_DWELL_MIN, WANDER_DWELL_MAX);
+      c.wanderUntil = sim.time + wanderRoll.dwell;
     }
     if (dist(c, c.wanderGoal) > 1.2) stepToward(sim, c, c.wanderGoal, WALK_SPEED * 0.7, dt);
   }
