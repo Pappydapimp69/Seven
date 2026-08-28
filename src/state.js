@@ -657,8 +657,12 @@ export function activatePylon(sim, actor = sim.player) {
   // hands re-enters this function every tick — that is by design, it is how
   // they notice the moment somebody joins. What must NOT happen is a fresh
   // "sets hands on the pylon" line every tick for the whole wait: 12 seconds
-  // of waiting emitted 121 identical events, which flooded the 64-entry event
-  // buffer and silently evicted everything else in it, chatter included. The
+  // of waiting emitted 121 identical events. (An earlier version of this comment
+  // claimed that flooded the 64-entry buffer and evicted chatter with it; a
+  // sandbox built to reproduce that found no eviction at any re-entry length,
+  // because tick() drains the buffer far faster than the cap is reached. The
+  // spam was real and worth fixing on its own terms — 121 identical subtitles
+  // for one action — but the eviction was an inference, not an observation.) The
   // bug predates cohesion; a following party simply never stood on a pylon
   // alone for long enough to show it.
   const already = p.primedBy.includes(actor.id);
