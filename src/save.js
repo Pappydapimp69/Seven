@@ -35,7 +35,7 @@ export const SAVE_KEY = "seven:run";
 // so a v2 snapshot restored without it re-rolls on a different tick and the
 // resumed run silently forks — which is precisely how the divergence test
 // caught it.
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 const store = () => (typeof localStorage === "undefined" ? null : localStorage);
 
@@ -66,6 +66,12 @@ function packCharacter(c) {
     microUntil: c.microUntil,
     microCooldownUntil: c.microCooldownUntil,
     vouchUntil: c.vouchUntil,
+    // Whether this slot is holding a replacement. Not cosmetic: it decides
+    // whether askAbout() returns the day or the day with a fact bent, so a
+    // resume that dropped it would hand the player a fake who suddenly tells
+    // the truth. `tellSeed` is deliberately NOT here — it is derived from the
+    // run seed in createRun and comes back identical on its own.
+    swapped: !!c.swapped,
     // Rolled once per campaign — must survive or a resumed party reshuffles
     // its personalities, and every behavioural tell the player has learned to
     // read (who breaks early, who lags, who talks) silently changes hands.
@@ -154,6 +160,7 @@ function applyCharacter(c, s) {
   c.microUntil = s.microUntil || 0;
   c.microCooldownUntil = s.microCooldownUntil || 0;
   c.vouchUntil = s.vouchUntil || 0;
+  c.swapped = !!s.swapped;
   // `goalKind` and `goal` are NOT companion-only. A hallucinating LEAD is
   // driven by the same lost-drift code as a companion — they get a goalKind of
   // "hallucinating" and a drift goal — and leaving them out of the restore
@@ -249,6 +256,9 @@ export function serializeRun(sim) {
     slotSeq: sim.slotSeq,
     doses: sim.doses,
     logEntries: sim.logEntries.map((e) => ({ ...e })),
+    // The day's record. Entries are plain facts, so a shallow copy per entry
+    // plus a fresh actors array is the whole of it.
+    chronicle: sim.chronicle.map((e) => ({ ...e, actors: e.actors.slice() })),
     stats: { ...sim.stats },
     dissolveTimer: sim.dissolveTimer,
     gatherHold: { ...sim.gatherHold },
@@ -300,6 +310,7 @@ export function deserializeRun(data) {
   sim.slotSeq = data.slotSeq;
   sim.doses = data.doses;
   sim.logEntries = data.logEntries.map((e) => ({ ...e }));
+  sim.chronicle = (data.chronicle || []).map((e) => ({ ...e, actors: e.actors.slice() }));
   sim.stats = { ...data.stats };
   sim.dissolveTimer = data.dissolveTimer;
   sim.gatherHold = { ...data.gatherHold };

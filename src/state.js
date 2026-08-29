@@ -15,7 +15,8 @@
 // is the only place allowed to lie about it.
 
 import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=seven-0.12.0";
-import { makeRng } from "./rng.js?v=seven-0.12.0";
+import { makeRng, hashSeed } from "./rng.js?v=seven-0.12.0";
+import { accountOf } from "./chronicle.js?v=seven-0.12.0";
 import { updateCompanions, companionRemark } from "./party.js?v=seven-0.12.0";
 
 export const PARTY_SIZE = 6; // you + 5 companions — the spec's five NPCs, plus the player
@@ -441,6 +442,17 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
   // Traits are rolled once per CAMPAIGN, not per basin — carryOver below
   // restores them on every level after the first, so a personality doesn't
   // reshuffle just because the party reached a new basin.
+  // DERIVED from the run seed, never drawn. A per-companion `rng()` here would
+  // have been the obvious way to seed a private stream, and it would also have
+  // been a population-timing perturbation of the shared one: five extra draws
+  // at createRun re-phases world gen and every later roll, so every existing
+  // seed would quietly become a different run (Brain: prologue#E19, the same
+  // mechanism confirmed twice). hashSeed costs no draw and is still a pure
+  // function of the seed, which is the property that actually matters.
+  for (const ch of companions) {
+    ch.tellSeed = hashSeed(`${seed}:${ch.id}:tell`);
+    ch.swapped = false; // set overnight; gates whether an account is false
+  }
   if (!carryOver) {
     for (const ch of companions) Object.assign(ch, rollTraits(rng, ch));
   }
@@ -559,6 +571,10 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
     noDrain: false,
     dissolveTimer: 0,
     events: [], // transient, drained by the HUD each frame
+    // The day's record. NOT `events` — that one is emptied at the top of every
+    // tick. This is what an account is derived from, so it has to outlive the
+    // frame and the save. See chronicle.js.
+    chronicle: [],
     // Reused across a campaign's basins (not recreated) so the end-of-campaign
     // debrief reports cumulative totals, not just the final basin's.
     // `falseCrafts` and `phantomsRevealed` are the crafting-deception counters:
@@ -1146,6 +1162,42 @@ export function checkIn(sim, id) {
   };
   emit(sim, "report", `${ch.name}: ${report.text}`, { who: ch.id, claim });
   return report;
+}
+
+/**
+ * Overnight, one of them is replaced. Same id, same name, same skills — the
+ * roster is bit-identical the next morning, which is the whole point: a player
+ * who spots a new name has learned nothing.
+ *
+ * The draw happens whether or not the caller named a victim. A scripted day
+ * picks its own and a free run rolls for one, and if those two paths spent
+ * different numbers of draws the shared stream would fork between them — the
+ * same constant-roll-count rule the rest of the sim lives by. Draw
+ * unconditionally, use conditionally.
+ */
+export function swapOvernight(sim, id = null) {
+  const pool = sim.companions.filter((c) => !c.swapped);
+  const rolled = pool.length ? pool[Math.floor(sim.rng() * pool.length)] : null;
+  const victim = id ? sim.companions.find((c) => c.id === id) : rolled;
+  if (!victim || victim.swapped) return null;
+  victim.swapped = true;
+  // Nothing is emitted. No event, no line, no HUD change — the tell is that
+  // NOBODY finds it strange, and an announcement here would hand the player
+  // the answer before they asked a single question.
+  return victim;
+}
+
+/**
+ * Ask someone about a day you both lived through.
+ *
+ * Distinct from checkIn(), which asks how they are RIGHT NOW and answers from
+ * the lucidity bands. This asks what happened, and answers from the chronicle.
+ * It draws nothing: see chronicle.js on why the private stream matters.
+ */
+export function askAbout(sim, id) {
+  const ch = sim.companions.find((c) => c.id === id);
+  if (!ch) return null;
+  return accountOf(sim.chronicle, ch, sim.companions);
 }
 
 function reportText(ch, claim) {

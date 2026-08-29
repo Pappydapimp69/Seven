@@ -131,7 +131,7 @@ export function accountOf(chronicle, speaker, roster) {
   // draw a false one does, so the two are indistinguishable from the outside
   // and a later change to `false === no draw` cannot re-phase anything.
   const chosen = pool.length ? pool[Math.floor(rng() * pool.length)] : null;
-  const tell = speaker.false && chosen ? chosen : null;
+  const tell = speaker.swapped && chosen ? chosen : null;
 
   let order = seen.map((e) => e);
   if (tell?.type === TELL.ORDER) {
@@ -171,7 +171,7 @@ export function accountOf(chronicle, speaker, roster) {
  * of eyeballing prose.
  */
 export function truthFor(chronicle, speaker, roster) {
-  return accountOf(chronicle, { ...speaker, false: false }, roster);
+  return accountOf(chronicle, { ...speaker, swapped: false }, roster);
 }
 
 /** Where two accounts disagree. Returns the differing statement indices. */
@@ -190,6 +190,6 @@ export function divergence(a, b) {
  * false — the run is over at this point, so the truth is finally sayable.
  */
 export function accuse(roster, id) {
-  const actual = roster.find((r) => r.false)?.id ?? null;
+  const actual = roster.find((r) => r.swapped)?.id ?? null;
   return { accused: id, actual, correct: id === actual };
 }

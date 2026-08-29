@@ -39,7 +39,7 @@ function makeRoster(falseIdx, seed) {
     // Drawn for EVERY member, not just the fake — that is the point. The draw
     // count must not depend on who is false, or the run forks on the swap.
     tellSeed: (rng() * 0xffffffff) >>> 0,
-    false: i === falseIdx,
+    swapped: i === falseIdx,
   }));
 }
 
@@ -92,7 +92,7 @@ console.log("chronicle — a real account");
 test("a real member recounts the day exactly", () => {
   const roster = makeRoster(1, 2);
   const sim = makeDay(roster);
-  for (const r of roster.filter((r) => !r.false)) {
+  for (const r of roster.filter((r) => !r.swapped)) {
     const acct = accountOf(sim.chronicle, r, roster);
     assert.equal(acct.tell, null, "a real account has no tell");
     assert.deepEqual(divergence(acct, truthFor(sim.chronicle, r, roster)), []);
@@ -105,7 +105,7 @@ test("a real member recounts the day exactly", () => {
 test("two real members agree with each other", () => {
   const roster = makeRoster(4, 3);
   const sim = makeDay(roster);
-  const [a, b] = roster.filter((r) => !r.false);
+  const [a, b] = roster.filter((r) => !r.swapped);
   assert.deepEqual(divergence(accountOf(sim.chronicle, a, roster),
                               accountOf(sim.chronicle, b, roster)), []);
 });
@@ -184,8 +184,8 @@ test("a real and a false member burn the same private draws", () => {
   // happened before the swap.
   const roster = makeRoster(0, 13);
   const sim = makeDay(roster, 13);
-  const asReal = accountOf(sim.chronicle, { ...roster[0], false: false }, roster);
-  const asFake = accountOf(sim.chronicle, { ...roster[0], false: true }, roster);
+  const asReal = accountOf(sim.chronicle, { ...roster[0], swapped: false }, roster);
+  const asFake = accountOf(sim.chronicle, { ...roster[0], swapped: true }, roster);
   assert.ok(asFake.tell, "the fake picked a tell");
   assert.equal(asReal.tell, null, "the real one did not use it");
   assert.deepEqual(divergence(asReal, truthFor(sim.chronicle, roster[0], roster)), []);
@@ -251,6 +251,110 @@ test("NC: re-seeding per ask breaks the same-story guard", () => {
   }
   assert.ok(moved > 0,
     "re-seeding produced identical accounts — the stability guard proves nothing");
+});
+
+
+// ---------------------------------------------------------------------------
+// Wiring: the chronicle inside a real sim, across a real save.
+// ---------------------------------------------------------------------------
+
+const { createRun, swapOvernight, askAbout } = await import("../src/state.js");
+const { serializeRun, deserializeRun, SAVE_VERSION } = await import("../src/save.js");
+
+const liveDay = (sim) => {
+  const ids = sim.companions.map((c) => c.id);
+  const places = ["the fire", "the creek", "the deadfall"];
+  for (let i = 0; i < 6; i++) {
+    sim.time += 1;
+    record(sim, CHRONICLE_KINDS[i % CHRONICLE_KINDS.length], {
+      actors: [ids[i % ids.length], ids[(i + 1) % ids.length], ...ids],
+      place: places[i % places.length],
+      weather: WEATHER[i % WEATHER.length],
+    });
+  }
+  return sim;
+};
+
+console.log("chronicle — wired into the sim");
+
+test("tellSeed is derived from the run seed, not drawn", () => {
+  const a = createRun({ seed: 42 });
+  const b = createRun({ seed: 42 });
+  const c = createRun({ seed: 43 });
+  assert.deepEqual(a.companions.map((x) => x.tellSeed), b.companions.map((x) => x.tellSeed),
+    "same seed must give the same tells");
+  assert.notDeepEqual(a.companions.map((x) => x.tellSeed), c.companions.map((x) => x.tellSeed),
+    "a different seed must give different tells");
+  // Every companion has one, whether or not they are ever swapped — the whole
+  // point of deriving rather than drawing at swap time.
+  assert.ok(a.companions.every((x) => Number.isInteger(x.tellSeed) && x.tellSeed >= 0));
+});
+
+test("swapOvernight changes nothing a player can see", () => {
+  const sim = liveDay(createRun({ seed: 5 }));
+  const before = sim.companions.map((c) => `${c.id}/${c.name}/${c.drain}/${c.stoic}`);
+  const victim = swapOvernight(sim, "c3");
+  assert.equal(victim.id, "c3");
+  assert.deepEqual(sim.companions.map((c) => `${c.id}/${c.name}/${c.drain}/${c.stoic}`), before,
+    "the roster must be identical the next morning");
+  assert.equal(sim.events.length, 0, "nothing may be announced");
+});
+
+test("swapOvernight burns the same draw named or unnamed", () => {
+  const named = liveDay(createRun({ seed: 6 }));
+  const rolled = liveDay(createRun({ seed: 6 }));
+  const start = named.rng.snapshot();
+  assert.equal(rolled.rng.snapshot(), start);
+  swapOvernight(named, "c2");
+  swapOvernight(rolled);
+  assert.equal(named.rng.snapshot(), rolled.rng.snapshot(),
+    "naming the victim must cost the same draw as rolling for one");
+});
+
+test("askAbout answers from the day, and moves no draw", () => {
+  const sim = liveDay(createRun({ seed: 7 }));
+  swapOvernight(sim, "c4");
+  const before = sim.rng.snapshot();
+  const real = askAbout(sim, "c1");
+  const fake = askAbout(sim, "c4");
+  assert.equal(sim.rng.snapshot(), before, "asking must not move the run's stream");
+  assert.equal(real.tell, null);
+  assert.ok(fake.tell, "the swapped one has something wrong");
+  assert.ok(divergence(fake, real).length > 0, "and it must be findable");
+  assert.equal(askAbout(sim, "nobody"), null);
+});
+
+test("the day and the swap survive a save", () => {
+  const sim = liveDay(createRun({ seed: 8 }));
+  swapOvernight(sim, "c5");
+  const askedBefore = sim.companions.map((c) => askAbout(sim, c.id));
+
+  const data = serializeRun(sim);
+  assert.equal(data.v, SAVE_VERSION);
+  const back = deserializeRun(JSON.parse(JSON.stringify(data)));
+
+  assert.deepEqual(back.chronicle, sim.chronicle, "the day itself");
+  assert.deepEqual(back.companions.map((c) => c.swapped), sim.companions.map((c) => c.swapped));
+  assert.deepEqual(back.companions.map((c) => c.tellSeed), sim.companions.map((c) => c.tellSeed));
+  for (const c of back.companions) {
+    const i = sim.companions.findIndex((x) => x.id === c.id);
+    assert.deepEqual(divergence(askAbout(back, c.id), askedBefore[i]), [],
+      `${c.name} tells a different story after a resume`);
+  }
+});
+
+test("NC: dropping `swapped` from the save makes the fake honest", () => {
+  // The reverted defect: `swapped` left out of packCharacter. Everything else
+  // restores, the roster looks right, and the one thing the investigation runs
+  // on is silently gone.
+  const sim = liveDay(createRun({ seed: 9 }));
+  swapOvernight(sim, "c2");
+  const data = JSON.parse(JSON.stringify(serializeRun(sim)));
+  for (const p of data.party) delete p.swapped;
+  const back = deserializeRun(data);
+  assert.equal(askAbout(sim, "c2").tell !== null, true);
+  assert.equal(askAbout(back, "c2").tell, null,
+    "the negative control did not reproduce the defect — the guard is unmeasured");
 });
 
 console.log(`\n${passed} passed`);
