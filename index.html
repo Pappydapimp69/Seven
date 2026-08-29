@@ -58,10 +58,15 @@
       <button id="continueBtn" class="big-btn resume" data-row="2" data-col="0">
         Resume run<span id="continueDetail" class="resume-detail"></span>
       </button>
-      <button id="startBtn" class="big-btn" data-row="3" data-col="0">Walk in</button>
-      <button id="learnBtn" class="big-btn quiet" data-row="4" data-col="0">
+      <!-- TUTORIAL ABOVE "Walk in", and not quiet, until it has been finished.
+           It was below and styled quiet, so a first-time player pressed the
+           obvious top button and was dropped straight into a basin with no idea
+           the tutorial existed. Ordering is the whole fix; refreshLearnLabel()
+           demotes it once the walk in is done. -->
+      <button id="learnBtn" class="big-btn" data-row="3" data-col="0">
         Learn the walk<span id="learnDetail" class="resume-detail"></span>
       </button>
+      <button id="startBtn" class="big-btn" data-row="4" data-col="0">Walk in</button>
       <button id="howBtn" class="text-btn" data-row="5" data-col="0">How to play</button>
 
       <p id="menuHints" class="menu-hints"></p>

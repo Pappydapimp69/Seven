@@ -208,6 +208,10 @@ function refreshLearnLabel() {
   const p = tutorialProgress();
   const n = p.done.length;
   d.textContent = n === 0 ? "" : n >= STAGES.length ? " · done" : ` · ${n}/${STAGES.length}`;
+  // Loud until it has been finished, then it steps back. A player who has never
+  // done the walk in should not have to notice a quiet button underneath a loud
+  // one to find out the game has a tutorial at all.
+  el("learnBtn")?.classList.toggle("quiet", n >= STAGES.length);
 }
 
 /**
