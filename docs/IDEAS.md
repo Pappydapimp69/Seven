@@ -31,6 +31,53 @@ for; the value of this file is that writing in it costs nothing.
 
 ---
 
-## 2026-08-28 — (placeholder)
+## 2026-08-28 — MIRAGE as an investigation: play the party one at a time, find who was never there  [open]
 
-Nothing recorded yet.
+Came out of asking how the balance bots are set up, and noticing the phantom
+sixth companion is a problem in normal play rather than just a stat.
+
+**The problem that started it.** A hallucinated companion who is always present
+and never works is either solved instantly or is just irritating. You call them,
+they do not come; they never confirm a pylon. Within a level or two the player
+knows which one is fake and there is no mystery left — and until then it reads
+as the game being broken, not as the game lying. A permanent unreliable
+teammate is a bug the player learns to route around.
+
+**The idea.** Stop making the fake one detectable by behaviour, and make finding
+them the actual game.
+
+- You play as ONE named character for a level or two, not as a generic lead.
+  The whole party is present, phantoms included, and the phantom behaves like a
+  real member — maybe slightly less reliable, but not obviously broken.
+- Then you switch and play through as a DIFFERENT member of the party, and go
+  through their version of events.
+- Each perspective legitimately differs — different people saw different things
+  — so disagreement alone proves nothing. That is the point.
+- Eventually you play as the hallucinated one. Their level looks correct: same
+  map, same gameplay. The tells are small and textual — a teammate's name
+  spelled differently (Stephanie / Stefanie), trees slightly wrong, small
+  omissions in the account.
+- The object becomes: reconstruct who was actually there. Possibly more than
+  one was not.
+
+**The other half — days instead of a clock.** Instead of lucidity being a timer
+that runs down every level, a level becomes a DAY:
+
+- Clear an area: activate one or two pylons, then make camp.
+- Making camp lets the party rest and ends the day.
+- Waking up starts the next day, and the hallucination pressure steps up.
+- The campaign is something like ten days before the hallucinated member takes
+  the whole party.
+- So pylons and camps stop being "turn on the lights, walk A to B" and become
+  the thing that SLOWS how fast the hallucination spreads. The race is against
+  takeover, not against a clock.
+
+**Why it might be worth doing.** It reframes the loop from "complete objectives
+before a meter empties" to "work out what is true before it stops mattering",
+which is what the deception layer was always for. It also gives the phantom
+somewhere to go other than being an annoyance.
+
+**Open questions, not answered here.** How a rest/camp verb interacts with
+pylons firing once. Whether per-character playthroughs mean per-character saves.
+Whether "play as the phantom" is a twist that only works once. Whether multiple
+fakes is legible or just noise. How much of the current basin loop survives.
