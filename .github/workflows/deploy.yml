@@ -53,6 +53,7 @@ jobs:
         run: |
           mkdir -p site
           cp index.html site/
+          cp woods.html site/
           cp -r css lib src site/
 
       - name: Upload the site as the Pages artifact

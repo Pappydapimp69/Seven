@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SEVEN — the woods (alpha)</title>
+<style>
+  :root {
+    --bg: #0e1013; --panel: #161a1f; --line: #262c34;
+    --ink: #d8dee6; --dim: #8b95a3; --warm: #d9c08a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2rem 1.25rem 4rem; background: var(--bg); color: var(--ink);
+    font: 16px/1.55 ui-serif, Georgia, "Times New Roman", serif;
+  }
+  main { max-width: 62rem; margin: 0 auto; }
+  h1 { font-size: 1.5rem; letter-spacing: .18em; font-weight: 600; margin: 0 0 .25rem; }
+  h2 { font-size: 1.05rem; letter-spacing: .12em; color: var(--warm); font-weight: 600;
+       text-transform: uppercase; margin: 0 0 .75rem; }
+  h3 { font-size: 1rem; letter-spacing: .1em; margin: 0 0 .5rem; }
+  .sub { color: var(--dim); margin: 0 0 2rem; font-size: .9rem; }
+  ul { list-style: none; padding: 0; margin: 0; }
+  li { padding: .4rem 0; border-bottom: 1px solid var(--line); }
+  li:last-child { border-bottom: 0; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 4px;
+           padding: 1.1rem 1.25rem; }
+  button {
+    font: inherit; font-size: .9rem; color: var(--ink); background: transparent;
+    border: 1px solid var(--line); border-radius: 3px; padding: .45rem .9rem;
+    cursor: pointer; margin-top: .75rem;
+  }
+  button:hover { border-color: var(--warm); color: var(--warm); }
+  button.name { display: block; }
+  .cols { display: grid; grid-template-columns: minmax(18rem, 1fr) minmax(18rem, 1.2fr); gap: 1.5rem; }
+  @media (max-width: 46rem) { .cols { grid-template-columns: 1fr; } }
+  #memory-wrap { position: sticky; top: 1rem; align-self: start; }
+  .person { border-top: 1px solid var(--line); padding: 1rem 0; }
+  .person:first-child { border-top: 0; }
+  .account li { color: var(--dim); }
+  .count { color: var(--dim); font-size: .85rem; }
+  .right { color: #8fbf7f; }
+  .wrong { color: #c98080; }
+  .said { color: var(--warm); border: 0; padding-left: 0; }
+  footer { margin-top: 3rem; color: var(--dim); font-size: .8rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>THE WOODS</h1>
+  <p class="sub">One day at camp. <span id="seed"></span></p>
+
+  <section id="yesterday">
+    <h2>Yesterday</h2>
+    <div class="panel"><ul id="lived"></ul></div>
+    <button id="sleep">Sleep</button>
+  </section>
+
+  <section id="morning" hidden>
+    <h2>This morning</h2>
+    <div class="cols">
+      <div id="memory-wrap">
+        <div class="panel">
+          <h3>What you remember</h3>
+          <ul id="memory"></ul>
+        </div>
+        <p class="count" id="asked"></p>
+      </div>
+      <div class="panel" id="who"></div>
+    </div>
+  </section>
+
+  <section id="verdict" hidden>
+    <h2>The call</h2>
+    <div class="panel">
+      <h3 id="call"></h3>
+      <p id="reveal"></p>
+      <ul id="what"></ul>
+    </div>
+    <button id="again">Another day</button>
+  </section>
+
+  <footer>Alpha. One day, one swap, one guess. Add <code>?seed=N</code> to replay a day.</footer>
+</main>
+<script type="module" src="src/woods.js?v=seven-0.12.0"></script>
+</body>
+</html>
