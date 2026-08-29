@@ -7,7 +7,7 @@
 // behaviour that needed time INSIDE the event (an arsonist reached a target 0
 // times in 251 assigned ticks). No error; the event still "happened".
 //
-// The MIRAGE case: a pylon prime is valid for PRIME_WINDOW seconds and needs a
+// The SEVEN case: a pylon prime is valid for PRIME_WINDOW seconds and needs a
 // second pair of hands to arrive inside it. Calibrated at 14s when the party
 // walked beside you (arrival ~2s). Cohesion replaced following with a chain and
 // a CALL verb, so arrival became a WALK of up to 25s. Nothing errored; the

@@ -1,6 +1,6 @@
 # ADR 0002 — item truth is observer-relative, and resolves only at crossings
 
-**Status:** accepted · 2026-08-03 · applies to this repo (`Pappydapimp69/mirage`)
+**Status:** accepted · 2026-08-03 · applies to this repo (now `Pappydapimp69/Seven`; written when it was `Pappydapimp69/mirage`)
 
 ## Context
 

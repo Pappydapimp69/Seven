@@ -17,7 +17,7 @@
 // Usage: node tools/verify-deploy.mjs [baseUrl]
 //   defaults to the project's GitHub Pages url.
 
-const BASE = (process.argv[2] || "https://pappydapimp69.github.io/mirage/").replace(/\/?$/, "/");
+const BASE = (process.argv[2] || "https://pappydapimp69.github.io/Seven/").replace(/\/?$/, "/");
 
 const problems = [];
 const note = (m) => problems.push(m);
@@ -29,7 +29,7 @@ async function get(url) {
 }
 
 const IMPORT_RE = /from\s+"(\.\/[^"]+)"/g;
-const TOKEN_RE = /\?v=(mirage-[\d.]+)/g;
+const TOKEN_RE = /\?v=(seven-[\d.]+)/g;
 
 (async () => {
   console.log(`checking ${BASE}`);

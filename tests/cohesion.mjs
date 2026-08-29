@@ -185,4 +185,4 @@ check("none of it draws from the rng", () => {
 console.log(`\n${passed} passed, ${failures.length} failed`);
 for (const f of failures) console.log("  ✗ " + f);
 if (failures.length) process.exit(1);
-console.log("mirage cohesion: OK");
+console.log("seven cohesion: OK");

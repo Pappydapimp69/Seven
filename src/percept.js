@@ -1,4 +1,4 @@
-// percept.js — the only module in MIRAGE that is allowed to lie.
+// percept.js — the only module in SEVEN that is allowed to lie.
 //
 // state.js keeps an honest record of the basin. This file answers a different
 // question: what does the LEAD believe is in front of them right now? While the
@@ -13,8 +13,8 @@
 
 import { HALLUCINATION, BAND, bandOf, ITEM_INFO, LUCIDITY_GRACE, CORROBORATE_RADIUS,
   LINK_RANGE, PING_RANGE,
-} from "./state.js?v=mirage-0.12.0";
-import { ITEM_KINDS } from "./world.js?v=mirage-0.12.0";
+} from "./state.js?v=seven-0.12.0";
+import { ITEM_KINDS } from "./world.js?v=seven-0.12.0";
 
 const PHANTOM_NAMES = ["the Sixth Stone", "the Watching Slab", "the Other Cairn", "the Hollow Tooth"];
 const PHANTOM_COMPANIONS = ["ODEN", "MARIS", "THE SEVENTH"];

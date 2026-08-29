@@ -1,7 +1,7 @@
-name: Deploy MIRAGE to GitHub Pages
+name: Deploy SEVEN to GitHub Pages
 
 # Publishes the repo root as the site root, so the game is playable at
-# https://<owner>.github.io/mirage/ . configure-pages(enablement:true) turns
+# https://<owner>.github.io/Seven/ . configure-pages(enablement:true) turns
 # Pages on the first time this runs, so no manual settings change is needed.
 #
 # Triggers on push to main AND workflow_dispatch. Unlike Opticon (a multi-branch

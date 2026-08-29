@@ -1,5 +1,5 @@
-// Pure-logic test suite for MIRAGE. No browser, no WebGL, no timers.
-// Run: node mirage/tests/logic.test.mjs
+// Pure-logic test suite for SEVEN. No browser, no WebGL, no timers.
+// Run: node tests/logic.test.mjs
 //
 // Everything asserted here reads the sim's OWN clock (`sim.time`) and its own
 // state — never wall-clock seconds. Headless/loaded environments run frames well
@@ -3106,9 +3106,9 @@ check("every module import and asset URL carries the current BUILD token", () =>
   const seen = new Set();
   for (const file of fsReaddirSync(srcDir).filter((f) => f.endsWith(".js"))) {
     const text = fsReadFileSync(new URL(file, srcDir), "utf8");
-    for (const [, tok] of text.matchAll(/\?v=(mirage-[\d.]+)/g)) seen.add(tok);
+    for (const [, tok] of text.matchAll(/\?v=(seven-[\d.]+)/g)) seen.add(tok);
   }
-  for (const [, tok] of html.matchAll(/\?v=(mirage-[\d.]+)/g)) seen.add(tok);
+  for (const [, tok] of html.matchAll(/\?v=(seven-[\d.]+)/g)) seen.add(tok);
   assert(
     seen.size <= 1,
     `more than one cache-bust token is live (${[...seen].join(", ")}) — a partial stamp loads a module twice under two URLs`,
@@ -3346,7 +3346,7 @@ check("standing at a false claim while lucid offers the strike", () => {
 
   // What the SCREEN shows and what the RULES allow must come apart here. If the
   // prompt vanished while under, its absence would be a perfectly reliable
-  // readout of your own hallucination — the one fact MIRAGE never tells you.
+  // readout of your own hallucination — the one fact SEVEN never tells you.
   beginHallucinating(sim, sim.player);
   eq(strikeTargetAt(sim, sim.player), null, "a hallucinating mind was allowed to audit the record");
   assert(claimedEntryAt(sim, sim.player), "the OFFER vanished while hallucinating — that absence is a tell");
@@ -3460,4 +3460,4 @@ if (failures.length) {
   for (const f of failures) console.log("  ✗ " + f);
   process.exit(1);
 }
-console.log("mirage logic: OK");
+console.log("seven logic: OK");

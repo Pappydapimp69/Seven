@@ -19,7 +19,7 @@
 // moment of asking, so a perturbed fact necessarily changes what is said. Store
 // a rendered string on the entry and you get the opposite: an authored tell.
 
-import { makeRng } from "./rng.js?v=mirage-0.12.0";
+import { makeRng } from "./rng.js?v=seven-0.12.0";
 
 /** The fact axes a false account can get wrong. */
 export const TELL = {

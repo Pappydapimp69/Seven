@@ -1,4 +1,4 @@
-// Headless browser smoke test for MIRAGE. Boots the real page in Chromium,
+// Headless browser smoke test for SEVEN. Boots the real page in Chromium,
 // starts a run, drives it, and asserts on observable state.
 // Run: node tests/smoke.mjs [scenario]
 //   scenario: play (default) | hallucinate | phantomLog
@@ -7,7 +7,7 @@
 //
 // 1. NEVER ASSERT ON WALL-CLOCK TIME. Headless rAF runs at a fraction of real
 //    speed, so "wait 3 seconds, expect ~3 seconds of drain" is a flake. Every
-//    timing assertion below drives `window.__mirage.advance(seconds)`, which
+//    timing assertion below drives `window.__seven.advance(seconds)`, which
 //    steps the sim in fixed slices, and then reads the sim's own clock.
 //
 // 2. "IT LOADED AND NOTHING THREW" IS A FALSE GREEN FOR 3D. Software GL will
@@ -25,7 +25,7 @@ const require = createRequire(import.meta.url);
 const { chromium } = require("/opt/node22/lib/node_modules/playwright");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(__dirname, ".."); // this repo's root — MIRAGE is standalone, served at "/"
+const ROOT = path.resolve(__dirname, ".."); // this repo's root — SEVEN is standalone, served at "/"
 // The static server binds port 0 — the OS picks a free one. A hardcoded port
 // fails with EADDRINUSE when an earlier run's server is still up, and that
 // failure looks nothing like the game being broken; it just burns a debug cycle.
@@ -119,7 +119,7 @@ function assert(cond, msg) {
   page.on("pageerror", (e) => errors.push("PAGEERROR: " + e.message));
 
   await page.goto(`http://localhost:${PORT}/index.html`, { waitUntil: "networkidle" });
-  await page.waitForFunction(() => !!window.__mirage, null, { timeout: 15000 });
+  await page.waitForFunction(() => !!window.__seven, null, { timeout: 15000 });
 
   const build = await page.$eval("#buildLabel", (el) => el.textContent);
   assert(build && build !== "—", `build label never populated (got ${JSON.stringify(build)})`);
@@ -136,10 +136,10 @@ function assert(cond, msg) {
   await page.click('[data-diff="standard"]');
   await page.fill("#seedInput", "1234");
   await page.click("#startBtn");
-  await page.waitForFunction(() => !!window.__mirage.sim, null, { timeout: 10000 });
+  await page.waitForFunction(() => !!window.__seven.sim, null, { timeout: 10000 });
 
   const start = await page.evaluate(() => {
-    const s = window.__mirage.sim;
+    const s = window.__seven.sim;
     return {
       party: s.party.length,
       companions: s.companions.length,
@@ -166,9 +166,9 @@ function assert(cond, msg) {
 
   // --- drive the sim on ITS OWN CLOCK -------------------------------------
   const walked = await page.evaluate(() => {
-    const before = { x: window.__mirage.sim.player.x, z: window.__mirage.sim.player.z };
-    const t = window.__mirage.advance(8, { move: { x: 0, z: -1 }, run: true });
-    const s = window.__mirage.sim;
+    const before = { x: window.__seven.sim.player.x, z: window.__seven.sim.player.z };
+    const t = window.__seven.advance(8, { move: { x: 0, z: -1 }, run: true });
+    const s = window.__seven.sim;
     return {
       simTime: t,
       moved: Math.hypot(s.player.x - before.x, s.player.z - before.z),
@@ -185,7 +185,7 @@ function assert(cond, msg) {
 
   if (glOk) {
     const drew = await page.evaluate(() => {
-      const info = window.__mirage.renderer.renderer.info;
+      const info = window.__seven.renderer.renderer.info;
       return { calls: info.render.calls, triangles: info.render.triangles };
     });
     assert(drew.calls > 0, "the renderer made zero draw calls — the scene is not being drawn");
@@ -195,7 +195,7 @@ function assert(cond, msg) {
 
   // --- the hallucination path ---------------------------------------------
   const gone = await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     M.sim.time = 300; // past LUCIDITY_GRACE — drain is withheld for the first 5 minutes of a basin
     M.drain("you", 0.05);
     M.advance(1);
@@ -232,7 +232,7 @@ function assert(cond, msg) {
   // Whatever kind was drawn, the perceived world must diverge from the real one
   // in the way that kind promises.
   const divergence = await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     const p = M.percept;
     const s = M.sim;
     return {
@@ -258,7 +258,7 @@ function assert(cond, msg) {
 
   // --- recovery -----------------------------------------------------------
   const recovered = await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     const s = M.sim;
     // A pylon no longer works by standing in it. It fires ONCE, when someone
     // activates it — same key as survey — and is then dead for the run. So
@@ -288,7 +288,7 @@ function assert(cond, msg) {
 
   // --- verbs --------------------------------------------------------------
   const verbs = await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     const s = M.sim;
     const before = s.doses;
     M.act(M.ACTIONS.DOSE, 0);
@@ -325,7 +325,7 @@ function assert(cond, msg) {
 
   // --- items: pick up via the contextual survey verb, cycle, use ---------
   const items = await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     const s = M.sim;
     const it = s.items.find((x) => !x.taken);
     it.discovered = true;
@@ -363,7 +363,7 @@ function assert(cond, msg) {
 
   // --- crafting: two real items combine into one via the CRAFT verb -------
   const craft = await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     const s = M.sim;
     s.inventory.length = 0;
     s.inventory.push({ id: "craft-a", real: true, kind: "flare", claimedKind: null });
@@ -407,7 +407,7 @@ function assert(cond, msg) {
   // item (a Flare) to the currently-selected companion, in range and lucid,
   // and confirm it actually reached them.
   await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     const s = M.sim;
     s.inventory.length = 0;
     s.inventory.push({ id: "give-flare", real: true, kind: "flare", claimedKind: null });
@@ -419,7 +419,7 @@ function assert(cond, msg) {
   });
   await pressKeyAndSettle("KeyB");
   const giveKey = await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     const s = M.sim;
     return { inventory: s.inventory.length, lucidity: s.companions[M.selected].lucidity };
   });
@@ -443,7 +443,7 @@ function assert(cond, msg) {
   const btnGiveHandle = await page.$("#btnGive");
   assert(!!btnGiveHandle, "#btnGive is missing from the DOM");
   await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     const s = M.sim;
     s.inventory.length = 0;
     s.inventory.push({ id: "give-tether", real: true, kind: "tether", claimedKind: null });
@@ -453,7 +453,7 @@ function assert(cond, msg) {
   });
   await page.$eval("#btnGive", (el) => el.click());
   const btnGive = await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     return { inventory: M.sim.inventory.length, steadyUntil: M.sim.companions[M.selected].steadyUntil };
   });
   assert(btnGive.inventory === 0, `#btnGive should consume the offered slot, inventory still has ${btnGive.inventory}`);
@@ -466,7 +466,7 @@ function assert(cond, msg) {
   // file (see the check-in assertion above) — the same class of bug would
   // hide a reveal behind stale text left over from tests 1/2 above.
   const offerReveal = await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     const s = M.sim;
     s.inventory.length = 0;
     s.inventory.push({ id: "phantom-flare", real: false, claimedKind: "flare", kind: null });
@@ -491,7 +491,7 @@ function assert(cond, msg) {
   // — the guard that the new belief-view plumbing didn't quietly break the
   // ordinary, honest case.
   const craftHint = await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     const s = M.sim;
     s.inventory.length = 0;
     s.inventory.push({ id: "hint-a", real: true, kind: "flare", claimedKind: null });
@@ -508,7 +508,7 @@ function assert(cond, msg) {
   // --- item hallucinations: a mislabeled real item reveals on use, a husk is
   // real but does nothing --------------------------------------------------
   const reveal = await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     const s = M.sim;
     s.inventory.length = 0;
     s.inventory.push({ id: "reveal-flare", real: true, kind: "flare", claimedKind: null });
@@ -534,7 +534,7 @@ function assert(cond, msg) {
   assert(reveal.inventoryAfter === 0, "the used slot was not consumed");
 
   const husk = await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     const s = M.sim;
     s.player.hallucinating = false;
     s.inventory.length = 0;
@@ -563,7 +563,7 @@ function assert(cond, msg) {
   // Gathering is a HOLD, not a tap: a single M.act(SURVEY) must NOT gather,
   // and only holding interact for long enough should.
   const gather = await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     const s = M.sim;
     // Record the .gain pulse as it happens. M.advance() steps the sim
     // synchronously in a tight loop, so BOTH gathers below land within a few
@@ -642,7 +642,7 @@ function assert(cond, msg) {
     .catch(() => { throw new Error("a pill's landing highlight (.gain) never cleared") });
 
   const stake = await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     const s = M.sim;
     s.wood = 2;
     s.stone = 2;
@@ -671,7 +671,7 @@ function assert(cond, msg) {
 
   // --- campaign: clearing a basin before the last one advances in place ---
   const level = await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     const s = M.sim;
     const levelBefore = s.level;
     const monolithPosBefore = s.monoliths.map((m) => `${m.x.toFixed(1)},${m.z.toFixed(1)}`).join("|");
@@ -706,7 +706,7 @@ function assert(cond, msg) {
 
   // --- pause really stops the world ---------------------------------------
   const paused = await page.evaluate(async () => {
-    const M = window.__mirage;
+    const M = window.__seven;
     M.act(M.ACTIONS.PAUSE);
     const t0 = M.sim.time;
     const l0 = M.sim.player.lucidity;
@@ -731,7 +731,7 @@ function assert(cond, msg) {
   // were both about what the player was TOLD, not what the code did.
   {
     const promptRead = await page.evaluate(() => {
-      const M = window.__mirage;
+      const M = window.__seven;
       const s = M.sim;
       // Somewhere well clear of every real marker, so nothing else claims the
       // prompt's single slot.
@@ -792,7 +792,7 @@ function assert(cond, msg) {
     for (const f of failures) console.log("  ✗ " + f);
     process.exit(1);
   }
-  console.log("mirage smoke: OK");
+  console.log("seven smoke: OK");
 })().catch((e) => {
   console.error("SMOKE CRASHED:", e);
   process.exit(1);

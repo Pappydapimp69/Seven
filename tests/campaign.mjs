@@ -21,7 +21,7 @@ const fails=[];const A=(c,m)=>{if(!c)fails.push(m)};
  await page.goto(`http://localhost:${s.address().port}/index.html`,{waitUntil:"networkidle"});
  // Force-complete basin 1 by logging every marker, then let the sim advance.
  const adv = await page.evaluate(()=>{
-   const M=window.__mirage; M.startRun({seed:2024});
+   const M=window.__seven; M.startRun({seed:2024});
    M.sim.time=300;
    // carry some distinctive state across the boundary
    M.sim.wood=9; M.sim.stone=4; M.sim.doses=2;
@@ -34,8 +34,8 @@ const fails=[];const A=(c,m)=>{if(!c)fails.push(m)};
  A(adv.level===2, `expected to advance to basin 2, got level ${adv.level} status ${adv.status}`);
  // now autosave and resume
  const res = await page.evaluate(()=>{
-   const M=window.__mirage; M.sim.time=300; M.advance(8); // trigger autosave on level 2
-   const saved=JSON.parse(localStorage.getItem("mirage:run")||"null");
+   const M=window.__seven; M.sim.time=300; M.advance(8); // trigger autosave on level 2
+   const saved=JSON.parse(localStorage.getItem("seven:run")||"null");
    M.toTitle();
    const detail=document.getElementById("continueDetail").textContent;
    document.getElementById("continueBtn").click();

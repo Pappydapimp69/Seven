@@ -197,7 +197,7 @@ clause(8, "the same offer costs something — a real item would have helped");
 // ---------------------------------------------------------------------------
 console.log("");
 if (failures) {
-  console.log(`\x1b[31mmirage deception scenario: ${failures} clause check(s) FAILED\x1b[0m`);
+  console.log(`\x1b[31mseven deception scenario: ${failures} clause check(s) FAILED\x1b[0m`);
   process.exit(1);
 }
-console.log("\x1b[32mmirage deception scenario: OK — every clause holds end to end\x1b[0m");
+console.log("\x1b[32mseven deception scenario: OK — every clause holds end to end\x1b[0m");

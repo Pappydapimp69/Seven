@@ -24,7 +24,7 @@ if (!raw) {
   console.error("usage: node tools/stamp-version.mjs <version>   (e.g. 0.7.4)");
   process.exit(1);
 }
-const version = raw.startsWith("mirage-") ? raw : `mirage-${raw}`;
+const version = raw.startsWith("seven-") ? raw : `seven-${raw}`;
 
 // A relative import/export specifier, with or without an existing ?v= stamp.
 const SPECIFIER = /(from\s+")(\.\/[A-Za-z0-9_\-.]+\.js)(?:\?v=[^"]*)?(")/g;

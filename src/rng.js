@@ -1,6 +1,6 @@
 // rng.js — seeded deterministic randomness. Pure; no DOM, no Three.
 //
-// Every random draw in MIRAGE goes through one of these so a run is
+// Every random draw in SEVEN goes through one of these so a run is
 // reproducible from its seed: world generation, drain-rate jitter, which
 // hallucination a character gets, what a fraying companion claims to see. Tests
 // pin the seed and get the same run twice.
