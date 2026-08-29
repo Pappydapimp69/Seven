@@ -31,6 +31,56 @@ for; the value of this file is that writing in it costs nothing.
 
 ---
 
+## 2026-08-28 — replay your own actions back at yourself: the phantom possesses, it does not appear  [open]
+
+Follow-on from the investigation idea, after learning the phantom is only ever
+an episode today and making it permanent would be a large change. This gets the
+same effect without ever adding a seventh body.
+
+**The move.** Never add a seventh entity. Instead, the phantom POSSESSES an
+existing member — one, or two, or three — and the tell is that a possessed
+member does not replay what you actually did.
+
+**How it works across levels.**
+
+- Basin one is ordered, like the tutorial: gather wood, then stone, then build
+  a fire, then a tent, then go activate something. A given sequence, done in
+  order.
+- Basin two you play as a DIFFERENT member, walking through the same events —
+  their account of the same day.
+- Everyone else in that level replays what they did the first time round. The
+  character you played as in basin one should now be a bot repeating YOUR
+  actions: going where you went for the wood, coming back to build the fire, in
+  the order you did it.
+- Where a member has been possessed, the replay is subtly wrong. They fetch
+  stone before wood. They pitch the tent before the fire. Nothing announces
+  itself; the order is just not what you remember doing.
+
+**Why this is the good version.** The player is the recording. You are not
+comparing two accounts the game hands you — you are comparing the game's
+account against your own memory of a level you personally played. That makes
+the evidence something the game cannot fake and cannot hand you by mistake, and
+it means no HUD, no log and no meter is involved at any point.
+
+It also solves the thing that started this: a possessed member behaves like a
+member. They are not broken, they do not fail to answer, they are not
+identifiable by anything not working. They are only identifiable by being out
+of order.
+
+**What it needs, and none of this exists yet.** A recording of the player's
+action sequence per level, kept in the save. A replay driver that can make a
+companion re-perform a recorded sequence rather than run its own AI. A
+per-level ordered objective list for the basin, which the tutorial now has a
+working shape for. Some notion of the same events being replayable from another
+member's viewpoint.
+
+**Open questions.** How exact the replay has to be before "different" reads as
+deliberate rather than as the AI being loose. Whether the player will actually
+remember an order from a level or two ago without a crutch — and whether giving
+them a crutch destroys it. What happens if the player does the first level in a
+weird order, or badly. Whether a possessed member should ever be right by
+coincidence.
+
 ## 2026-08-28 — MIRAGE as an investigation: play the party one at a time, find who was never there  [open]
 
 Came out of asking how the balance bots are set up, and noticing the phantom
