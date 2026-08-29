@@ -40,13 +40,25 @@ for (const file of fs.readdirSync(path.join(ROOT, "src")).filter((f) => f.endsWi
   }
 }
 
-// index.html's own two references, plus the BUILD constant main.js reports.
-const htmlPath = path.join(ROOT, "index.html");
-const html = fs
-  .readFileSync(htmlPath, "utf8")
-  .replace(/(href="css\/style\.css)(?:\?v=[^"]*)?(")/g, `$1?v=${version}$2`)
-  .replace(/(src="src\/main\.js)(?:\?v=[^"]*)?(")/g, `$1?v=${version}$2`);
-fs.writeFileSync(htmlPath, html);
+// Each page's own references, plus the BUILD constant main.js reports. Every
+// page that loads a module has to be stamped, not just index.html: woods.html
+// is a second entry point, and an unstamped entry pins its whole import tree
+// to whatever the browser cached — which is the exact failure this tool was
+// written for, one page over.
+const ENTRIES = [
+  { file: "index.html", script: "src/main.js" },
+  { file: "woods.html", script: "src/woods.js" },
+];
+for (const entry of ENTRIES) {
+  const htmlPath = path.join(ROOT, entry.file);
+  if (!fs.existsSync(htmlPath)) continue;
+  const scriptRe = new RegExp(`(src="${entry.script.replace(/[/.]/g, "\\$&")})(?:\\?v=[^"]*)?(")`, "g");
+  const html = fs
+    .readFileSync(htmlPath, "utf8")
+    .replace(/(href="css\/style\.css)(?:\?v=[^"]*)?(")/g, `$1?v=${version}$2`)
+    .replace(scriptRe, `$1?v=${version}$2`);
+  fs.writeFileSync(htmlPath, html);
+}
 
 const mainPath = path.join(ROOT, "src", "main.js");
 fs.writeFileSync(
@@ -54,4 +66,4 @@ fs.writeFileSync(
   fs.readFileSync(mainPath, "utf8").replace(/const BUILD = "[^"]*";/, `const BUILD = "${version}";`),
 );
 
-console.log(`stamped ${version} — ${touched} module file(s) + index.html`);
+console.log(`stamped ${version} — ${touched} module file(s) + ${ENTRIES.length} page(s)`);
