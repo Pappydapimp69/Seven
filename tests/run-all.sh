@@ -11,6 +11,10 @@ echo "== logic =="
 node tests/logic.test.mjs
 echo
 
+echo "== chronicle (can a player catch a fake by asking?) =="
+node tests/chronicle.test.mjs
+echo
+
 echo "== save/resume (pure) =="
 node tests/save.test.mjs
 echo
