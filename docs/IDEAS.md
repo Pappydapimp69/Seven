@@ -31,6 +31,206 @@ for; the value of this file is that writing in it costs nothing.
 
 ---
 
+## 2026-08-28 — THE WOODS: full design note  [building — forked to its own repo]
+
+Worked out in conversation. This supersedes the two entries below it, which are
+kept because they show how it got here. Everything here is design, not code.
+
+**Status.** Being built as a FORK of mirage, not on top of it. mirage is the
+bones — sim/percept separation, the party, the verbs, the save discipline, the
+test harness. This adds organs. A fork so that a failed organ cannot break a
+working skeleton; the two are not expected to merge back.
+
+### The shape
+
+You set out to walk a trail through the woods and come out the other side. That
+is what the game tells you. It never says anything else, right to the end.
+
+What it is actually about is who walks out with you.
+
+### The map, and hallucination as geography
+
+ONE large persistent map, not levels. Hallucination is a ZONE centred on the
+middle of the woods, in rings, strongest at the heart. Depth is the difficulty
+dial and the player sets it with their feet. This replaces a countdown entirely:
+the hidden meter becomes a PLACE, which is legible without any HUD — the thing
+the original game fought with constantly.
+
+Nothing is walled off. Progress is gated by TIME: a fallen tree across the path
+needs cutting, cutting takes hours, hours are daylight. You can always go
+further; you may not get back before dark. The boundary is self-imposed.
+
+### Days
+
+A day is the unit, not a level. You wake, you have daylight, you decide what to
+spend it on, you sleep when you choose and that ends the day. Night raises the
+hallucination rate substantially. There is a grace period in in-game hours at
+the start of a day, mirroring the existing LUCIDITY_GRACE.
+
+Day one is deliberately quiet: hike in, make camp, gather, craft, explore. No
+hallucination effects. A baseline, so that later wrongness has something to be
+wrong against.
+
+### Pylons, reworked
+
+NOT a reset. A pylon lights a local zone that SLOWS the fill rate — terrain
+modification, not a heal. Small immediate reduction, a pause of a few in-game
+hours, then a burn-down (blue -> red) and death. You cannot camp one forever;
+it buys roughly a day in an area.
+
+Which makes pylons a ROUTE. A chain of lit pylons is a corridor into the centre,
+and it rots behind you as you go. The question stops being "am I safe here" and
+becomes "how far ahead of my own supply line am I."
+
+A pylon is also the one HONEST instrument in the game — everything else you are
+told comes through a person or your own eyes. A pylon burns down on a schedule
+and does not lie. (Consistent with the existing rule that a far-gone mind sees
+dead pylons as live: even the honest instrument stops being honest exactly when
+you need it.)
+
+Pylons are discovered, never explained. The first one appears a few days in,
+often because a companion calls you over to look at something neither of you
+understands. It is evidence before it is a tool.
+
+### The party, and why you care
+
+At the start you RECRUIT a team and SPEND POINTS on their skills (logging,
+etc). You choose who matters. The game never tells you who is important — you
+decided, and that is what makes losing them personal.
+
+Specialisation is a difficulty dial the player sets without realising:
+concentrate ten points in one logger and you move fast and are one disappearance
+from crippled; spread them and you are resilient but slow, and slow means more
+nights, and nights are where the hallucination lives. No dominant answer.
+
+Names are generated per run by SYLLABLE COMPOSITION (~30 fragments with
+adjacency rules), never picked from a list. Seeded from ONE run seed — never
+from device state. The whole codebase is built on the world being a pure
+function of the seed; a run must stay saveable, resumable and reproducible.
+
+Tutorial characters are separate people (canonically everyone in training is
+being trained to LEAD a team, so they scatter). Their names may be reused for
+fakes, which gives a diegetic reason a fake is better at the job. Constraint: a
+fake carrying a trainee's name cannot then be brought home, or two people share
+a name.
+
+### The day everyone vanishes — the keystone
+
+Early on, you wake and the roster is EMPTY. You wander. As you come back into
+range they repopulate one at a time, in a different order than they left.
+
+Some of them are, some are not. You will never know which.
+
+This one scripted event does the work a whole system was being invented for:
+from that morning, no certainty about anyone is available, and every later doubt
+is legitimate. Nothing has to announce itself again, ever.
+
+### Disappearance and return
+
+Nobody teleports. A member who went under WANDERED OFF in the night and is still
+out there on the map. What is at your fire is something that took the empty slot.
+
+- The replacement has the SAME NAME and the SAME SKILLS. It must be competent —
+  if a fake is bad at the job you identify it with a stopwatch and the game is
+  over.
+- Nothing is announced. The tell is that NOBODY ELSE FINDS IT STRANGE. The
+  other members behave normally; a check-in has them recounting yesterday as
+  though the newcomer was there. A player who spots a new name learns nothing;
+  a player who notices that nobody else noticed has found the horror.
+- The missing one CALLS OUT AT NIGHT, from a distance. Recovery costs the hours
+  you least want to spend outside.
+- Going out, you ALWAYS find a pylon; whether you also find THEM is a chance,
+  weighted by things you controlled (how many nights they were out, how deep,
+  whether you went the same night).
+- The window is spatial. They can be found in this area or the next, never
+  further back. So WALKING FORWARD IS HOW YOU ABANDON THEM — no prompt, no
+  confirmation, you just make progress one day too many.
+- Holding a fake raises the chance of losing another. One at a time.
+
+### Investigation — the middle game
+
+The verb is CHECK-IN, which already exists. You ask someone about a day you both
+lived through.
+
+The account is DERIVED FROM THE REAL EVENT LOG, never authored. A real one
+recounts it correctly. A fake's account is generated from the same log with ONE
+FACT PERTURBED — wrong order, wrong weather, a name slightly off. Because the
+days vary, the tells vary; authoring a list of tells is the mistake that would
+kill this by run ten.
+
+Asking costs daylight, which is the thing you never have enough of.
+
+Skill is deliberately useless as evidence. Memory is the only evidence, and only
+you have it, because you were there.
+
+### Acting on a conclusion
+
+Suspicion needs a verb or the investigation dead-ends. The verb is the pylon:
+bring who you doubt, light it, and a hallucination does not survive it.
+
+- Right: they are gone. Cost — a pylon, their skills, and a walk to the next one.
+- Wrong: nothing happens. Cost — the pylon anyway.
+
+You cannot test everyone. Every pylon spent on a person is one not spent on the
+fill rate. And the fake logger is BETTER at logging, so proving it means giving
+up the better worker — you may decide you would rather not know.
+
+### The ending
+
+The centre of the woods holds the exit: pylons that send you home, back to the
+training ground you started in — closing the loop on the mossed, unexplained
+pylon from the tutorial.
+
+THE COUNT. There is one more pylon than you have real people. You see the count
+on arrival. It tells you HOW MANY, never WHICH — so it does not answer the
+question, it destroys your confidence and then makes you choose anyway.
+Arriving convinced your team is whole and seeing three pylons instead of six is
+the best moment in this design.
+
+EVERY ATTEMPT SPENDS THE PYLON, success or failure. So you get exactly ONE
+mistake. Not a game over — one wrong guess, spent at the moment you are most
+rattled. Guess wrong twice and someone real stands there with nothing left, and
+you walk out having abandoned a person you were right about.
+
+A pylon takes TWO, which the tutorial taught on day one. A hallucination cannot
+be the second pair of hands. It was the ending all along.
+
+If every one of them is false you can still walk out — alone, last pylon dark.
+That is an ending, not a failure screen.
+
+### Runs, not a campaign
+
+15-20 minutes per run. The first several end at the centre, which will feel like
+the end of the game. It is the extraction point: bank who you have, or push on.
+
+WHOEVER COMES HOME WITH YOU RETURNS A FRACTION OF THEIR INVESTED POINTS to a
+shared pool. So the score is not distance — it is who you saved. The mechanics
+and the theme finally point the same way, and each run reaches further because
+the team is better, until eventually a run reaches the far side.
+
+### The one real risk
+
+Deduction erodes under repetition. Per-run party generation and log-derived
+tells are what protect it. If the tells ever become a hand-written set, the game
+is dead by run ten. Decide this early — it shapes how investigation is built.
+
+### The alpha to build first
+
+Everything above except one part is known-good machinery from other games. The
+unproven claim is: CAN A PLAYER CATCH A FAKE BY ASKING ABOUT A SHARED DAY, AND
+DOES IT FEEL LIKE DEDUCTION RATHER THAN A COIN FLIP?
+
+Smallest thing that answers it:
+
+- one short scripted day, fixed camp, a handful of events you are present for
+- overnight, one member swapped — same name, same skills, no announcement
+- next morning, ask anyone about yesterday; accounts derived from the event log,
+  the fake's with one fact perturbed
+- name who you think it is; it tells you whether you were right
+
+No map, crafting, days, pylons, recruitment or progression. If that is not fun,
+none of the rest matters.
+
 ## 2026-08-28 — replay your own actions back at yourself: the phantom possesses, it does not appear  [open]
 
 Follow-on from the investigation idea, after learning the phantom is only ever
