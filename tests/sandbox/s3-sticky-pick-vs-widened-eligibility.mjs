@@ -12,7 +12,7 @@
 // reliably locks onto a trivial instance that arrived earlier and never sees
 // the important one at all — and the hold is what does it, not the picking.
 //
-// Live case: MIRAGE's doubled-party phantom stands in the place of a companion
+// Live case: SEVEN's doubled-party phantom stands in the place of a companion
 // who is "missing". Missing used to mean only "came apart", which is rare.
 // Cohesion added "wandered past the vacancy distance", which is common — so a
 // stroller claimed the slot in the first second and still held it minutes later,

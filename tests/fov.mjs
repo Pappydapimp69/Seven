@@ -25,19 +25,19 @@ const fails=[];const A=(c,m)=>{if(!c)fails.push(m)};
  const page=await b.newPage({viewport:{width:960,height:540}});
  const errs=[];page.on("pageerror",e=>errs.push(e.message));
  await page.goto(url,{waitUntil:"networkidle"});
- const def=await page.evaluate(()=>{ const M=window.__mirage; M.startRun({seed:1234}); M.advance(0.3);
+ const def=await page.evaluate(()=>{ const M=window.__seven; M.startRun({seed:1234}); M.advance(0.3);
    const c=M.renderer.camera; return {h:+(2*Math.atan(Math.tan(c.fov*Math.PI/360)*c.aspect)*180/Math.PI).toFixed(0), hfov:M.renderer.hfov}; });
  A(def.h===90,`default should be 90 horizontal, got ${def.h}`);
  // change it in the pause menu
  const wide=await page.evaluate(()=>{ document.querySelector('[data-fov="100"]').click();
-   const M=window.__mirage; M.advance(0.3); const c=M.renderer.camera;
+   const M=window.__seven; M.advance(0.3); const c=M.renderer.camera;
    return {h:+(2*Math.atan(Math.tan(c.fov*Math.PI/360)*c.aspect)*180/Math.PI).toFixed(0),
-           stored:JSON.parse(localStorage.getItem("mirage:settings")||"{}").fov}; });
+           stored:JSON.parse(localStorage.getItem("seven:settings")||"{}").fov}; });
  A(wide.h===100,`Wide should give 100 horizontal, got ${wide.h}`);
  A(wide.stored===100,`Wide should persist, stored ${wide.stored}`);
  // survive a reload AND apply to the new run's renderer
  await page.reload({waitUntil:"networkidle"});
- const after=await page.evaluate(()=>{ const M=window.__mirage; M.startRun({seed:1234}); M.advance(0.3);
+ const after=await page.evaluate(()=>{ const M=window.__seven; M.startRun({seed:1234}); M.advance(0.3);
    const c=M.renderer.camera;
    return {h:+(2*Math.atan(Math.tan(c.fov*Math.PI/360)*c.aspect)*180/Math.PI).toFixed(0),
            sel:document.querySelector('[data-fov].sel')?.dataset.fov}; });
@@ -45,12 +45,12 @@ const fails=[];const A=(c,m)=>{if(!c)fails.push(m)};
  A(after.sel==="100",`the Wide button should be pre-selected, got ${after.sel}`);
  // aspect independence: a different window must keep 100 horizontal, not warp
  await page.setViewportSize({width:1200,height:400}); // ultrawide-ish 3:1
- const ultra=await page.evaluate(()=>{ const M=window.__mirage; M.renderer.resize(); M.advance(0.3);
+ const ultra=await page.evaluate(()=>{ const M=window.__seven; M.renderer.resize(); M.advance(0.3);
    const c=M.renderer.camera; return {a:+c.aspect.toFixed(2),
      h:+(2*Math.atan(Math.tan(c.fov*Math.PI/360)*c.aspect)*180/Math.PI).toFixed(0)}; });
  A(Math.abs(ultra.h-100)<=1,`horizontal FOV must hold across aspect ${ultra.a}, got ${ultra.h}`);
  // pause-menu grid: every row reachable, no two controls on the same row+col
- const grid=await page.evaluate(()=>{ const M=window.__mirage; M.act(M.ACTIONS.PAUSE);
+ const grid=await page.evaluate(()=>{ const M=window.__seven; M.act(M.ACTIONS.PAUSE);
    const els=[...document.querySelectorAll("#pauseLayer [data-row]")].filter(e=>e.offsetParent!==null);
    const seen={},dupes=[];
    els.forEach(e=>{const k=e.dataset.row+","+e.dataset.col; if(seen[k])dupes.push(k+" "+(e.id||e.textContent.trim())); seen[k]=1;});

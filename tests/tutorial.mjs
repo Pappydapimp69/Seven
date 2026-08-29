@@ -372,4 +372,4 @@ if (failures.length) {
   for (const f of failures) console.log("  ✗ " + f);
   process.exit(1);
 }
-console.log("mirage tutorial: OK");
+console.log("seven tutorial: OK");

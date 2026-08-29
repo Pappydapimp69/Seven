@@ -1,7 +1,7 @@
-// Perceptual-regression suite for MIRAGE's two hallucination tells: the monster
+// Perceptual-regression suite for SEVEN's two hallucination tells: the monster
 // flicker (a real companion briefly reading as something else while the LEAD is
 // under) and what a hallucinating COMPANION looks like from the outside.
-// Run: node mirage/tests/hallucination.test.mjs
+// Run: node tests/hallucination.test.mjs
 //
 // Why this file exists, separately from logic.test.mjs.
 //
@@ -558,7 +558,7 @@ check("a slip announces itself exactly as the long kind does", () => {
   eq(slipEv.kind, goneEv.kind, "a lapse is a different event kind — that is a tell");
 });
 
-console.log("mirage hallucination: OK");
+console.log("seven hallucination: OK");
 
 
 console.log(`\n${passed} passed, ${failures.length} failed`);

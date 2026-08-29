@@ -52,9 +52,7 @@ about a day you both lived through; a real account comes from the actual event
 log, a false one from the same log with one fact perturbed. If the wrong details
 ever come from a hand-written list, a player memorises them and the game is dead
 by run ten.
-
-
-
+<!-- brain:pointer v2 — managed by `brain link`/`sync`; edits here are overwritten -->
 ## Cognitive system: Brain (linked via `brain` CLI)
 This project is linked to the Brain cognitive system. Do not read the node
 repos directly — use the CLI.
@@ -78,7 +76,7 @@ reconciles with main. Keep session output minimal.
   the `local:` bucket, not just the shared counts.
 - **Re-query at each NEW sub-problem, not only at session start.** Every
   non-trivial bug or decision is its own retrieval trigger.
-- **Capture non-bugs too, not only bugs:** reusable pattern -> `ideas` kernel;
+- **Capture non-bugs too, not only bugs:** reusable pattern -> `ideas`;
   unresolved fork -> `tension`; experiment/synthesis -> `exploration`; a
   committed decision -> an ADR in the build (and if it generalizes, ALSO an
   `ideas` kernel). See `orchestration.md`'s write-back table.
@@ -87,10 +85,12 @@ reconciles with main. Keep session output minimal.
   `orchestration.md`.
 - **Surface any open (red/yellow) tension that touches your work to the user**
   before committing to that fork.
-- Schema: memory proposals use `## FULL ENTRY` + `## PROPOSED INDEX LINE`;
-  tensions/exploration use `### ` blocks. Malformed entries are held on `sync`.
+- **Never hand-write a proposal format.** `brain mine` prints the current
+  schema verbatim from the memory repo — follow it exactly. A format you
+  invent parses as an EMPTY entry and is held on every field at once.
+<!-- /brain:pointer -->
 
-### This project's history
+## This project's history
 SEVEN is a fork of `Pappydapimp69/mirage` at `mirage-0.12.0`, carrying its full
 history — `git log` before 2ddae20 is MIRAGE's, and the commit messages there
 are the best record of why things are shaped the way they are.
@@ -107,7 +107,7 @@ not just preemption), `#E15` (chain cohesion is not proximity), `#E16` (a guard
 that never failed is unmeasured). `brain query deduction` and `accusation` both
 return zero — that ground is uncovered, so there is no prior art to miss.
 
-### Inherited open item
+## Inherited open item
 `tests/balance.mjs` is RED: the `deceived` bot policy wins 17% of standard seeds
 against a 35% assertion, `deceived/bleak` 0%. This is a difficulty decision the
 owner has not made, not a bug — the structural bugs behind it were found and

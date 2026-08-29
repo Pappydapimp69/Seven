@@ -1,4 +1,4 @@
-// state.js — the MIRAGE simulation. Pure logic: no DOM, no Three, no audio.
+// state.js — the SEVEN simulation. Pure logic: no DOM, no Three, no audio.
 // The browser build and the Node test suite run this exact file.
 //
 // THE ONE IDEA
@@ -14,9 +14,9 @@
 // The sim's job is to keep an honest, testable record of what is TRUE; `percept.js`
 // is the only place allowed to lie about it.
 
-import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=mirage-0.12.0";
-import { makeRng } from "./rng.js?v=mirage-0.12.0";
-import { updateCompanions, companionRemark } from "./party.js?v=mirage-0.12.0";
+import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=seven-0.12.0";
+import { makeRng } from "./rng.js?v=seven-0.12.0";
+import { updateCompanions, companionRemark } from "./party.js?v=seven-0.12.0";
 
 export const PARTY_SIZE = 6; // you + 5 companions — the spec's five NPCs, plus the player
 export const MAX_LUCIDITY = 100;

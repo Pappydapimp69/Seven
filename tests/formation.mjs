@@ -235,4 +235,4 @@ if (failures.length) {
   console.error(`formation: ${failures.length} failed`);
   process.exit(1);
 }
-console.log("mirage formation: OK");
+console.log("seven formation: OK");

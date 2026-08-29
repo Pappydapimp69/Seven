@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the full MIRAGE test suite. Exits non-zero on any failure.
+# Run the full SEVEN test suite. Exits non-zero on any failure.
 #
 # The smoke test needs Playwright + Chromium. If they are absent it is SKIPPED
 # with a loud note rather than silently passing — a suite that quietly stops
@@ -9,6 +9,10 @@ cd "$(dirname "$0")/.."
 
 echo "== logic =="
 node tests/logic.test.mjs
+echo
+
+echo "== chronicle (can a player catch a fake by asking?) =="
+node tests/chronicle.test.mjs
 echo
 
 echo "== save/resume (pure) =="
@@ -83,4 +87,4 @@ else
 fi
 echo
 
-echo "ALL MIRAGE TESTS PASSED"
+echo "ALL SEVEN TESTS PASSED"

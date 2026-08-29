@@ -8,7 +8,7 @@
 // who lags, who starts narrating things that aren't there. Each rule below exists
 // to make an internal number legible from the outside without printing it.
 
-import { findPath, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, GRID } from "./world.js?v=mirage-0.12.0";
+import { findPath, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, GRID } from "./world.js?v=seven-0.12.0";
 import {
   BAND,
   bandOf,
@@ -23,7 +23,7 @@ import {
   activatePylon,
   updatePing, isAnswering, isReturning,
   PRIME_WINDOW,
-} from "./state.js?v=mirage-0.12.0";
+} from "./state.js?v=seven-0.12.0";
 
 // Higher band = worse. Lets a per-companion trait move the pylon-seeking
 // trigger EARLIER than the uniform BRITTLE tell everyone else gets, without
@@ -68,7 +68,7 @@ const CATCHUP_MAX = 9.2; // enough headroom to hold station through a lead's spr
 // --- and why holding station must not be free --------------------------------
 // Giving everyone that gear cost the game its pressure: over 24 seeds the party
 // went from 118 companion-seconds-lost per reckless run to 4, and the two runs
-// that ended in the dark stopped happening. Almost all of MIRAGE's difficulty
+// that ended in the dark stopped happening. Almost all of SEVEN's difficulty
 // was, without anyone designing it that way, a side effect of followers being
 // mechanically unable to keep up.
 //

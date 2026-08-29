@@ -17,9 +17,9 @@
 //     options (dbh#E4, wrong-sky#E2). And an ended run is never saved, so a
 //     "Resume" can't drop you back onto the frame you already lost.
 
-import { createRun } from "./state.js?v=mirage-0.12.0";
+import { createRun } from "./state.js?v=seven-0.12.0";
 
-export const SAVE_KEY = "mirage:run";
+export const SAVE_KEY = "seven:run";
 // Bumped whenever the shape below changes incompatibly. A save from an older
 // schema is discarded rather than half-read: a partially-applied snapshot is
 // far worse than starting fresh, because it looks like it worked.
@@ -395,7 +395,7 @@ export function describeSave(data) {
 // not also find their volume back at default. Keeping them in one blob would
 // tie the lifetime of "how loud is this" to the lifetime of "where was I",
 // which are unrelated questions.
-export const SETTINGS_KEY = "mirage:settings";
+export const SETTINGS_KEY = "seven:settings";
 
 // Tutorial progress lives HERE, in the settings payload, not as its own
 // localStorage key — brain: dog#E64, where a "seen once ever" bit kept outside
