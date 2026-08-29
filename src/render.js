@@ -6,9 +6,9 @@
 // list as the real ones.
 
 import * as THREE from "../lib/three.module.js";
-import { CELL, GRID, cellToWorld } from "./world.js?v=mirage-0.12.0";
-import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=mirage-0.12.0";
-import { PYLON_RADIUS } from "./state.js?v=mirage-0.12.0";
+import { CELL, GRID, cellToWorld } from "./world.js?v=mirage-0.12.1";
+import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=mirage-0.12.1";
+import { PYLON_RADIUS } from "./state.js?v=mirage-0.12.1";
 
 const PALETTE = {
   sky: 0x0a0f16,
@@ -77,7 +77,15 @@ export function createRenderer(canvas, sim) {
   // Fog density set against SIGHT_RANGE (38 units): at 0.021 a marker at the
   // edge of sighting range was ~47% fogged out, which made exploring feel like
   // guessing. 0.014 keeps the basin oppressive but legible.
-  scene.fog = new THREE.FogExp2(PALETTE.fog, 0.014);
+  // The CAMP is daylight, not a fogged basin at dusk. Same scene, different
+  // weather: thinner fog so you can see the length of the path and the cabins
+  // at the far end, and a warmer ground colour. Built without this the camp
+  // rendered as a near-black clearing — correct geometry, unreadable place.
+  const isCamp = !!sim.world.cellKind;
+  scene.fog = new THREE.FogExp2(isCamp ? 0x8fa2b4 : PALETTE.fog, isCamp ? 0.006 : 0.014);
+  // Without this the sky is the clear colour — black — so a daylit camp still
+  // read as night above the treeline.
+  if (isCamp) scene.background = new THREE.Color(0x8fa2b4);
 
   // FIELD OF VIEW IS HORIZONTAL-FIRST ("Hor+"), and this matters more than it
   // looks. Three's PerspectiveCamera takes a VERTICAL fov, and this shipped at
@@ -100,8 +108,10 @@ export function createRenderer(canvas, sim) {
   rig.add(camera);
   scene.add(rig);
 
-  scene.add(new THREE.HemisphereLight(0x5d708c, 0x1d2230, 1.05));
-  const sun = new THREE.DirectionalLight(0xbfd0e6, 0.55);
+  scene.add(isCamp
+    ? new THREE.HemisphereLight(0xcfe0f2, 0x6a6555, 1.5)
+    : new THREE.HemisphereLight(0x5d708c, 0x1d2230, 1.05));
+  const sun = new THREE.DirectionalLight(isCamp ? 0xfff0d8 : 0xbfd0e6, isCamp ? 1.15 : 0.55);
   sun.position.set(-40, 60, 30);
   scene.add(sun);
   // A single carried lamp — cheaper than one light per companion, and it makes
@@ -116,8 +126,9 @@ export function createRenderer(canvas, sim) {
   {
     const pos = groundGeo.attributes.position;
     const colors = new Float32Array(pos.count * 3);
-    const lo = new THREE.Color(PALETTE.ground);
-    const hi = new THREE.Color(PALETTE.groundHi);
+    // Grass in the camp, cold rock in a basin.
+    const lo = new THREE.Color(isCamp ? 0x3f5230 : PALETTE.ground);
+    const hi = new THREE.Color(isCamp ? 0x59703c : PALETTE.groundHi);
     const c = new THREE.Color();
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
@@ -140,10 +151,135 @@ export function createRenderer(canvas, sim) {
 
   const terrainHeight = (x, z) => sim.world.heightAt(x / CELL + GRID / 2, z / CELL + GRID / 2);
 
-  // ---- rock spires (one instanced mesh for every blocked cell) -------------
+  // ---- what a blocked cell LOOKS like --------------------------------------
+  // A basin has one answer: a rock spire. The camp has four, and it needs them —
+  // built without this, its cabins drew as rock, its treeline drew as rock, and
+  // its dirt path drew as nothing, so the whole map read as a rocky clearing and
+  // a player who pressed "Learn the walk" believed the tutorial had not loaded.
+  // Every geometry test passed the whole time; none of them can see.
+  //
+  // `cellKind` is camp-only. A world without it takes the original path below,
+  // unchanged.
+  const KIND = { NONE: 0, CABIN: 1, TREELINE: 2, WOOD: 3, PATH: 4 };
+  const kindAt = (cx, cz) => (sim.world.cellKind ? sim.world.cellKind[cz * GRID + cx] : KIND.NONE);
+  const isSpire = (cx, cz) => {
+    const i = cz * GRID + cx;
+    if (!sim.world.blocked[i]) return false;
+    return kindAt(cx, cz) === KIND.NONE;   // anything tagged draws as itself
+  };
+
+  if (sim.world.cellKind) buildCampScenery();
+
+  /** Cabins, trees and a dirt path — the camp's own vocabulary. */
+  function buildCampScenery() {
+    const timber = new THREE.MeshStandardMaterial({ color: 0x4a3a2c, roughness: 0.95, flatShading: true });
+    const roof = new THREE.MeshStandardMaterial({ color: 0x2e2620, roughness: 1, flatShading: true });
+    const trunkMat = new THREE.MeshStandardMaterial({ color: PALETTE.treeTrunk, roughness: 0.9 });
+    const leafMat = new THREE.MeshStandardMaterial({ color: PALETTE.treeLeaf, roughness: 0.85, flatShading: true });
+    // Well lighter than the grass. At 0x50432f the path was technically drawn
+    // and read as a slightly different green — a path you cannot see is not a path.
+    const dirtMat = new THREE.MeshStandardMaterial({ color: 0x9c7f55, roughness: 1 });
+
+    // CABINS. One box per tagged cell would read as a wall of cubes, so
+    // contiguous runs are merged into a single building per rectangle and only
+    // the run's first cell places geometry.
+    const seen = new Uint8Array(GRID * GRID);
+    for (let cz = 0; cz < GRID; cz++) {
+      for (let cx = 0; cx < GRID; cx++) {
+        if (kindAt(cx, cz) !== KIND.CABIN || seen[cz * GRID + cx]) continue;
+        let x1 = cx; while (x1 + 1 < GRID && kindAt(x1 + 1, cz) === KIND.CABIN) x1++;
+        let z1 = cz;
+        outer: while (z1 + 1 < GRID) {
+          for (let x = cx; x <= x1; x++) if (kindAt(x, z1 + 1) !== KIND.CABIN) break outer;
+          z1++;
+        }
+        for (let z = cz; z <= z1; z++) for (let x = cx; x <= x1; x++) seen[z * GRID + x] = 1;
+
+        const a = cellToWorld(cx, cz), b = cellToWorld(x1, z1);
+        const w = Math.abs(b.x - a.x) + CELL, d = Math.abs(b.z - a.z) + CELL;
+        const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
+        const ground = terrainHeight(mx, mz);
+        const H = 3.2;
+        const walls = new THREE.Mesh(new THREE.BoxGeometry(w * 0.92, H, d * 0.92), timber);
+        walls.position.set(mx, ground + H / 2, mz);
+        scene.add(walls);
+        // A pitched roof, so it reads as a building rather than a crate.
+        const cap = new THREE.Mesh(new THREE.ConeGeometry(Math.max(w, d) * 0.72, 1.9, 4), roof);
+        cap.position.set(mx, ground + H + 0.85, mz);
+        cap.rotation.y = Math.PI / 4;
+        scene.add(cap);
+      }
+    }
+
+    // TREES, for the perimeter wall and the thin wood inside it. Instanced —
+    // there are over a thousand.
+    let treeCount = 0;
+    for (let i = 0; i < sim.world.cellKind.length; i++) {
+      const k = sim.world.cellKind[i];
+      if (k === KIND.TREELINE || k === KIND.WOOD) treeCount++;
+    }
+    const trunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.22, 0.32, 3.4, 5), trunkMat, treeCount);
+    const crowns = new THREE.InstancedMesh(new THREE.ConeGeometry(1.5, 4.4, 6), leafMat, treeCount);
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion();
+    let n = 0;
+    for (let cz = 0; cz < GRID; cz++) {
+      for (let cx = 0; cx < GRID; cx++) {
+        const k = kindAt(cx, cz);
+        if (k !== KIND.TREELINE && k !== KIND.WOOD) continue;
+        const { x, z } = cellToWorld(cx, cz);
+        // Deterministic jitter from the cell index — the same camp every time,
+        // without touching the sim's rng.
+        const j = ((cx * 73856093) ^ (cz * 19349663)) >>> 0;
+        const ox = (((j % 100) / 100) - 0.5) * CELL * 0.55;
+        const oz = ((((j >>> 8) % 100) / 100) - 0.5) * CELL * 0.55;
+        const h = 0.82 + ((j >>> 16) % 100) / 100 * 0.7;
+        const g = terrainHeight(x + ox, z + oz);
+        q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), ((j >>> 5) % 360) * (Math.PI / 180));
+        m.compose(new THREE.Vector3(x + ox, g + 1.7 * h, z + oz), q, new THREE.Vector3(h, h, h));
+        trunks.setMatrixAt(n, m);
+        m.compose(new THREE.Vector3(x + ox, g + (3.4 + 2.2) * h, z + oz), q, new THREE.Vector3(h, h, h));
+        crowns.setMatrixAt(n, m);
+        n++;
+      }
+    }
+    trunks.instanceMatrix.needsUpdate = true;
+    crowns.instanceMatrix.needsUpdate = true;
+    scene.add(trunks, crowns);
+
+    // THE PATH. Flat quads just above the ground, so the route through the camp
+    // is legible as a route.
+    const pathGeo = new THREE.PlaneGeometry(CELL, CELL);
+    let pathCount = 0;
+    for (let i = 0; i < sim.world.cellKind.length; i++) if (sim.world.cellKind[i] === KIND.PATH) pathCount++;
+    const dirt = new THREE.InstancedMesh(pathGeo, dirtMat, pathCount);
+    let pn = 0;
+    for (let cz = 0; cz < GRID; cz++) {
+      for (let cx = 0; cx < GRID; cx++) {
+        if (kindAt(cx, cz) !== KIND.PATH) continue;
+        const { x, z } = cellToWorld(cx, cz);
+        m.makeRotationX(-Math.PI / 2);
+        // Sample the cell's CORNERS and clear the highest of them. Placing the
+        // quad at the cell-centre height buried it: the ground is an
+        // interpolated vertex-coloured plane, so between grid vertices the real
+        // surface can sit well above the centre sample, and the path vanished
+        // under the grass in exactly the places the ground rose.
+        const h = Math.max(
+          terrainHeight(x - CELL / 2, z - CELL / 2), terrainHeight(x + CELL / 2, z - CELL / 2),
+          terrainHeight(x - CELL / 2, z + CELL / 2), terrainHeight(x + CELL / 2, z + CELL / 2),
+          terrainHeight(x, z),
+        );
+        m.setPosition(x, h + 0.06, z);
+        dirt.setMatrixAt(pn++, m);
+      }
+    }
+    dirt.instanceMatrix.needsUpdate = true;
+    scene.add(dirt);
+  }
+
+  // ---- rock spires (one instanced mesh for every UNTAGGED blocked cell) -----
   {
     let count = 0;
-    for (let i = 0; i < sim.world.blocked.length; i++) if (sim.world.blocked[i]) count++;
+    for (let cz = 0; cz < GRID; cz++) for (let cx = 0; cx < GRID; cx++) if (isSpire(cx, cz)) count++;
     const rocks = new THREE.InstancedMesh(
       new THREE.ConeGeometry(CELL * 0.72, 1, 6),
       new THREE.MeshStandardMaterial({ color: PALETTE.rock, roughness: 1, flatShading: true }),
@@ -154,7 +290,7 @@ export function createRenderer(canvas, sim) {
     let n = 0;
     for (let cz = 0; cz < GRID; cz++) {
       for (let cx = 0; cx < GRID; cx++) {
-        if (!sim.world.blocked[cz * GRID + cx]) continue;
+        if (!isSpire(cx, cz)) continue;
         const { x, z } = cellToWorld(cx, cz);
         // Deterministic pseudo-variation from the cell index — no rng needed, and
         // it stays identical across reloads of the same seed.
@@ -435,10 +571,17 @@ export function createRenderer(canvas, sim) {
     camera.updateProjectionMatrix();
 
     // ---- fog / colour drift ----
-    tmpColor.set(PALETTE.fog).lerp(new THREE.Color(PALETTE.fogLost), dis);
+    // PER FRAME, from the basin palette — which silently undid the camp's
+    // daylight every single frame. Setting the fog once at build time was not
+    // enough; anything set at build must also be respected here or it lasts
+    // exactly one frame. The camp still drifts as the lead goes, just from its
+    // own colours and its own baseline density.
+    const baseFog = isCamp ? 0x8fa2b4 : PALETTE.fog;
+    const baseDensity = isCamp ? 0.006 : 0.014;
+    tmpColor.set(baseFog).lerp(new THREE.Color(PALETTE.fogLost), dis);
     scene.fog.color.copy(tmpColor);
     scene.background = tmpColor;
-    scene.fog.density = 0.014 + dis * 0.018; // the basin closes in as the lead goes
+    scene.fog.density = baseDensity + dis * 0.018; // it closes in as the lead goes
     lamp.intensity = 1.9 - dis * 0.6;
 
     // ---- markers ----
