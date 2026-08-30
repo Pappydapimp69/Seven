@@ -30,7 +30,8 @@
     border: 1px solid var(--line); border-radius: 3px; padding: .45rem .9rem;
     cursor: pointer; margin-top: .75rem;
   }
-  button:hover { border-color: var(--warm); color: var(--warm); }
+  button:hover:not(:disabled) { border-color: var(--warm); color: var(--warm); }
+  button:disabled { opacity: .4; cursor: default; }
   button.name { display: block; }
   .cols { display: grid; grid-template-columns: minmax(18rem, 1fr) minmax(18rem, 1.2fr); gap: 1.5rem; }
   @media (max-width: 46rem) { .cols { grid-template-columns: 1fr; } }
@@ -64,7 +65,10 @@
           <h3>What you remember</h3>
           <ul id="memory"></ul>
         </div>
+        <p class="count" id="hours"></p>
         <p class="count" id="asked"></p>
+        <button id="search"></button>
+        <p class="count" id="search-note"></p>
       </div>
       <div class="panel" id="who"></div>
     </div>

@@ -69,11 +69,17 @@ const A = (c, m) => { if (!c) fails.push(m); };
     A(!markup.toLowerCase().includes(`"${word}"`), `the page leaks "${word}" before the call`);
   }
 
-  // --- ask everyone
+  // --- the morning has a budget, and something else wants it
+  A((await page.textContent("#hours")).includes("5 of 5"), "the morning did not start full");
+  A(await page.isEnabled("#search"), "cannot go looking at the start of the morning");
+
+  // --- ask everyone: five people, five hours, and the walk is then unaffordable
   const asks = await page.$$("#who button.ask");
   A(asks.length === 5, `expected 5 people to ask, got ${asks.length}`);
   for (let i = 0; i < 5; i++) await (await page.$$("#who button.ask"))[0].click();
   A((await page.$$("#who button.ask")).length === 0, "someone could not be asked");
+  A((await page.textContent("#hours")).includes("0 of 5"), "the hours were not spent");
+  A(!(await page.isEnabled("#search")), "went looking on an empty morning");
   const accounts = await page.$$eval("#who .account", (ns) => ns.map((n) => n.children.length));
   A(accounts.length === 5, "not every account is on screen");
   A(accounts.every((n) => n === 7), `an account is not 7 lines: ${accounts.join(",")}`);
@@ -99,7 +105,27 @@ const A = (c, m) => { if (!c) fails.push(m); };
   A(reveal.length > 0, "the verdict never says who it was");
   A(names.some((n) => reveal.includes(n)), "the reveal names nobody");
 
+  // --- the other road: going out first, and winning without an accusation
+  await page.goto(`${base}?seed=3`, { waitUntil: "networkidle" });
+  await page.click("#sleep");
+  await page.click("#search");
+  A(await page.isVisible("#verdict"), "going out first did not end the run");
+  A((await page.textContent("#call")).includes("found them"),
+    `going out before asking should always find them: ${await page.textContent("#call")}`);
+  A(!(await page.textContent("#reveal")).includes("undefined"), "the rescue text is broken");
+
+  // --- and going out LAST is a different, worse bet
+  await page.goto(`${base}?seed=3`, { waitUntil: "networkidle" });
+  await page.click("#sleep");
+  await (await page.$$("#who button.ask"))[0].click();
+  await (await page.$$("#who button.ask"))[0].click();
+  A((await page.textContent("#hours")).includes("3 of 5"), "two questions did not cost two hours");
+  A(await page.isEnabled("#search"), "three hours should still buy the walk");
+
   // --- a different day is a different day
+  await page.goto(`${base}?seed=3`, { waitUntil: "networkidle" });
+  await page.click("#sleep");
+  await page.click("#who .person:nth-child(1) button.name");
   await page.click("#again");
   const next = await page.$$eval("#lived li", (ns) => ns.map((n) => n.textContent));
   A(next.join("|") !== lived.join("|"), "the next day is the same day");

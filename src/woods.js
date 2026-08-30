@@ -14,7 +14,8 @@
 
 import { buildDay, asLived } from "./day.js?v=seven-0.12.0";
 import { accountOf, accuse } from "./chronicle.js?v=seven-0.12.0";
-import { askAbout } from "./state.js?v=seven-0.12.0";
+import { askAbout, spendAsk, searchForMissing, canAsk, canSearch,
+         MORNING_HOURS, SEARCH_COST } from "./state.js?v=seven-0.12.0";
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -61,9 +62,11 @@ function drawMorning() {
       for (const s of acct.statements) ul.append(el("li", null, s.text));
       card.append(ul);
     } else {
-      const ask = el("button", "ask", "Ask about yesterday");
+      const ask = el("button", "ask", "Ask about yesterday  (1 hour)");
+      ask.disabled = !canAsk(run.sim);
       ask.onclick = () => {
-        run.accounts.set(c.id, askAbout(run.sim, c.id));
+        const got = spendAsk(run.sim, c.id);
+        if (got) run.accounts.set(c.id, got);
         drawMorning();
       };
       card.append(ask);
@@ -74,17 +77,46 @@ function drawMorning() {
     card.append(name);
     who.append(card);
   }
+  const h = run.sim.morning.hours;
+  $("hours").textContent = `${h} of ${MORNING_HOURS} hours of daylight left`;
   $("asked").textContent = `${run.accounts.size} of ${run.sim.companions.length} asked`;
+
+  // The other thing the morning can be spent on. No cost is a cost until
+  // something else wants the same hours.
+  const go = $("search");
+  go.disabled = !canSearch(run.sim);
+  go.textContent = run.sim.morning.searched
+    ? "You went out and came back alone."
+    : `Go looking for whoever wandered off  (${SEARCH_COST} hours)`;
+  go.onclick = () => {
+    const r = searchForMissing(run.sim);
+    if (r && r.found) return finish(null, "rescue");
+    drawMorning();
+  };
+  $("search-note").textContent = run.sim.morning.searched
+    ? "Nothing out there but the trees."
+    : "Every question you ask first is an hour they are further away.";
 }
 
-function finish(id) {
+function finish(id, how = "accusation") {
   const verdict = accuse(run.sim.companions, id);
   const taken = run.sim.companions.find((c) => c.id === verdict.actual);
-  $("call").textContent = verdict.correct ? "You were right." : "You were wrong.";
-  $("call").className = verdict.correct ? "right" : "wrong";
-  $("reveal").textContent = verdict.correct
-    ? `${taken.name} never walked back into camp.`
-    : `You named ${run.sim.companions.find((c) => c.id === id).name}. It was ${taken.name}.`;
+  if (how === "rescue") {
+    // You never identified anyone. You brought the real one home, which the
+    // design counts as the win it is: the score is who you saved, not what you
+    // worked out.
+    $("call").textContent = "You found them.";
+    $("call").className = "right";
+    $("reveal").textContent =
+      `${taken.name} walked back in with you. Whatever had been sitting at the ` +
+      `fire wearing that name was gone by the time you got there.`;
+  } else {
+    $("call").textContent = verdict.correct ? "You were right." : "You were wrong.";
+    $("call").className = verdict.correct ? "right" : "wrong";
+    $("reveal").textContent = verdict.correct
+      ? `${taken.name} never walked back into camp.`
+      : `You named ${run.sim.companions.find((c) => c.id === id).name}. It was ${taken.name}.`;
+  }
 
   // The debrief, and only here. `tell` is the mirror of checkIn's `truth`: it
   // exists for this screen and the tests, and reaching it mid-run would be the

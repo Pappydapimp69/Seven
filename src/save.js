@@ -35,7 +35,7 @@ export const SAVE_KEY = "seven:run";
 // so a v2 snapshot restored without it re-rolls on a different tick and the
 // resumed run silently forks — which is precisely how the divergence test
 // caught it.
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 
 const store = () => (typeof localStorage === "undefined" ? null : localStorage);
 
@@ -259,6 +259,11 @@ export function serializeRun(sim) {
     // The day's record. Entries are plain facts, so a shallow copy per entry
     // plus a fresh actors array is the whole of it.
     chronicle: sim.chronicle.map((e) => ({ ...e, actors: e.actors.slice() })),
+    // The morning's budget and the search roll. Both gate behaviour — the roll
+    // decides an outcome and the hours decide whether it can be reached — so
+    // both are save state by the same rule as the throttle countdowns above.
+    morning: { ...sim.morning, asked: sim.morning.asked.slice() },
+    searchRoll: sim.searchRoll,
     stats: { ...sim.stats },
     dissolveTimer: sim.dissolveTimer,
     gatherHold: { ...sim.gatherHold },
@@ -311,6 +316,8 @@ export function deserializeRun(data) {
   sim.doses = data.doses;
   sim.logEntries = data.logEntries.map((e) => ({ ...e }));
   sim.chronicle = (data.chronicle || []).map((e) => ({ ...e, actors: e.actors.slice() }));
+  if (data.morning) sim.morning = { ...data.morning, asked: data.morning.asked.slice() };
+  sim.searchRoll = data.searchRoll ?? 0;
   sim.stats = { ...data.stats };
   sim.dissolveTimer = data.dissolveTimer;
   sim.gatherHold = { ...data.gatherHold };
