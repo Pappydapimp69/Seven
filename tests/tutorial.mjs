@@ -78,7 +78,16 @@ check("no stage teaches a verb that the prompt resolver outranks at its site", (
   // duplicated, so re-ordering the resolver fails HERE instead of silently
   // starving a stage in play.
   const hud = readFileSync(new URL("../src/hud.js", import.meta.url), "utf8");
-  const block = hud.slice(hud.indexOf("function paintPrompt"), hud.indexOf("function paintPrompt") + 3000);
+  // Sliced to the END OF THE FUNCTION, not to a fixed character count. It was
+  // `+ 3000`, and adding a rung to the top of paintPrompt pushed the lower
+  // markers out of the window — so the parse silently found two verbs instead
+  // of five and this check reported a broken parse rather than the ladder it
+  // is actually about. A window measured in characters is a window that
+  // expires the next time anyone edits the function.
+  const from = hud.indexOf("function paintPrompt");
+  const rest = hud.slice(from + 1);
+  const nextFn = rest.search(/\n  function /);
+  const block = nextFn >= 0 ? hud.slice(from, from + 1 + nextFn) : hud.slice(from);
   const order = [];
   for (const [verb, marker] of [["pylon", "Set hands on the pylon"], ["pickup", "Pick up ${"], ["gather", "Hold to chop"], ["survey", "Survey ${"], ["strike", "strike ${"]]) {
     const at = block.indexOf(marker);

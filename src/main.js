@@ -6,18 +6,22 @@ import {
   possess, release, possessableCompanions, activatePylon, pylonAt,
   callCompanion, clearMoss, mossedAt,
   PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=mirage-0.13.0";
-import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=mirage-0.13.0";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=mirage-0.13.0";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=mirage-0.13.0";
-import { createRenderer } from "./render.js?v=mirage-0.13.0";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=mirage-0.13.0";
-import { createInput, ACTIONS } from "./input.js?v=mirage-0.13.0";
-import { createAudio } from "./audio.js?v=mirage-0.13.0";
-import { hashSeed } from "./rng.js?v=mirage-0.13.0";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings } from "./save.js?v=mirage-0.13.0";
+} from "./state.js?v=seven-0.1.0";
+import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.1.0";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.1.0";
+import {
+  attachSites, startDay, beatAt, briefFor, canWork, workBeat, fallNight, ask, accuse,
+  BEATS, PHASE, ASKS_ALLOWED,
+} from "./woods.js?v=seven-0.1.0";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=seven-0.1.0";
+import { createRenderer } from "./render.js?v=seven-0.1.0";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.1.0";
+import { createInput, ACTIONS } from "./input.js?v=seven-0.1.0";
+import { createAudio } from "./audio.js?v=seven-0.1.0";
+import { hashSeed, makeRng } from "./rng.js?v=seven-0.1.0";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings } from "./save.js?v=seven-0.1.0";
 
-const BUILD = "mirage-0.13.0";
+const BUILD = "seven-0.1.0";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -175,6 +179,15 @@ function refreshTitleSave() {
     start.textContent = hasSaveNow ? "New run" : "Walk in";
     start.classList.remove("confirm-new");
   }
+  // The woods button arms the same way and has to be un-armed the same way. It
+  // was missed once and the button kept saying "press again" after the save
+  // had already gone, which is a prompt that lies about what the press does.
+  const woodsBtn = el("woodsBtn");
+  if (woodsBtn) {
+    woodsBtn.textContent = "The woods";
+    woodsBtn.appendChild(Object.assign(document.createElement("span"), { id: "woodsDetail", className: "resume-detail" }));
+    woodsBtn.classList.remove("confirm-new");
+  }
   const btn = el("continueBtn");
   if (!btn) return;
   btn.classList.toggle("show", hasSaveNow);
@@ -182,8 +195,11 @@ function refreshTitleSave() {
     const d = describeSave(data);
     const mm = String(d.minutes).padStart(2, "0");
     const ss = String(d.seconds).padStart(2, "0");
-    el("continueDetail").textContent =
-      `basin ${d.level} of ${d.campaignLength} · ${mm}:${ss} in · ${DIFFICULTY[d.difficulty]?.label || d.difficulty} · seed ${d.seed}`;
+    el("continueDetail").textContent = d.woods
+      ? (d.woods.phase === "morning"
+          ? `the woods · the morning after · ${d.woods.asksLeft} questions left`
+          : `the woods · day one · ${d.woods.beat} of ${BEATS.length} done`)
+      : `basin ${d.level} of ${d.campaignLength} · ${mm}:${ss} in · ${DIFFICULTY[d.difficulty]?.label || d.difficulty} · seed ${d.seed}`;
   }
   // The menu grid changes shape when Resume appears/disappears, so re-seat
   // focus or a controller can be left pointing at a row that no longer exists.
@@ -237,6 +253,216 @@ function startTutorial(index = 0) {
   tut = { index, stage: obj, done: false, beats: [] };
   enterObjective(index, sim);
   return r;
+}
+
+// ---------------------------------------------------------------------------
+// THE WOODS — one day, one night, one morning.
+// ---------------------------------------------------------------------------
+//
+// The alpha of docs/IDEAS.md's design note. All of the day's LOGIC is in
+// woods.js and is tested without a browser; everything here is wiring — which
+// screen is up, which key does what, and keeping the named hand walking to the
+// right place.
+
+let woodsUi = null; // { panel } while a morning panel is open; null otherwise
+
+/** Start a day. Same camp the tutorial uses, plus the four worksites. */
+function startWoods(seedText) {
+  const world = attachSites(buildCamp());
+  const sim = createRun({ seed: CAMP_SEED, difficulty: "gentle", level: 1, campaignLength: 1, world });
+  // Nobody's mind moves during the alpha. The question being tested is whether
+  // ASKING is fun; a decay meter running underneath would change what the
+  // player is paying attention to and would make a failed run ambiguous
+  // between "I could not tell" and "I ran out of time".
+  sim.noDrain = true;
+  sim.canClearMoss = false;
+  sim.callUnlocked = true;
+  sim.trainer = null;
+
+  // ONE SEED, and it is the day's only source of anything. `sim.rng` is the
+  // simulation's stream and is consumed by walking; the day is drawn off a
+  // separate generator derived from the same seed so that what happens tonight
+  // does not depend on how far the player wandered today.
+  const seed = seedText ? hashSeed(String(seedText)) : (Math.random() * 0xffffffff) >>> 0;
+  sim.woodsSeed = seed;
+  sim.woods = startDay(sim, makeRng(seed), sim.companions.map((c) => c.id));
+  for (const c of sim.companions) c.name = sim.woods.nameById[c.id];
+
+  campParty(sim, world);
+  const r = mountRun(sim, "First light. Seven things to get done before dark.");
+  tut = null;
+  enterBeat(sim);
+  return r;
+}
+
+/**
+ * Open the current beat: set the objective line, light the site, and send the
+ * named hand walking to it.
+ *
+ * The hand walks THEMSELVES. They are not summoned and not following — they
+ * have a job and they know where it is, which is both truer to the fiction and
+ * the only way seven beats can be worked without fighting the CALL cooldown
+ * the cohesion system deliberately imposes.
+ */
+function enterBeat(sim = run.sim) {
+  const w = sim.woods;
+  if (!w) return;
+  for (const c of sim.companions) c.jobSite = null;
+  if (w.phase !== PHASE.DAY) { w.activeSiteId = null; setObjective(null); return; }
+  const b = beatAt(w);
+  if (!b) { w.activeSiteId = null; return; }
+  const site = sim.world.sites.find((s) => s.id === b.site);
+  w.activeSiteId = site.id;
+  const hand = sim.companions.find((c) => c.id === w.assign[b.id]);
+  if (hand && site) hand.jobSite = { x: site.x, z: site.z, id: site.id };
+  setObjective(`${w.beat + 1}/${BEATS.length}  The ${site.label}`, briefFor(w));
+}
+
+/** The interact key, at a worksite. */
+function woodsWork(sim) {
+  const w = sim.woods;
+  if (!w || w.phase !== PHASE.DAY) return false;
+  if (!canWork(sim, w).ok) return false;
+  const before = w.beat;
+  workBeat(sim, w, emitToHud);
+  if (w.beat === before) return false;
+  if (w.phase === PHASE.NIGHT) woodsSleep(sim);
+  else enterBeat(sim);
+  return true;
+}
+
+/** state.js's emit signature, routed into the subtitle line. */
+function emitToHud(sim, kind, text, opts = {}) {
+  sim.events.push({ ...opts, kind, text, t: sim.time });
+  hudSay(text);
+}
+
+function woodsSleep(sim) {
+  const w = sim.woods;
+  fallNight(sim, w, makeRng, emitToHud);
+  for (const c of sim.companions) c.jobSite = null;
+  w.activeSiteId = null;
+  // Everyone is up and around the ash. Standing them in a ring means the
+  // player wakes to a party that is THERE, which is what makes the morning
+  // about who they are rather than about finding them.
+  const fire = sim.world.sites.find((s) => s.id === "fire");
+  sim.companions.forEach((c, i) => {
+    const a = (i / sim.companions.length) * Math.PI * 2;
+    c.x = fire.x + Math.cos(a) * 4.5;
+    c.z = fire.z + Math.sin(a) * 4.5;
+    c.wanderUntil = Infinity;
+    c.pingAt = Infinity;
+  });
+  sim.player.x = fire.x;
+  sim.player.z = fire.z + 6;
+  paintMorning(sim);
+}
+
+function paintMorning(sim) {
+  const w = sim.woods;
+  if (!w) return;
+  setObjective(
+    "The morning",
+    `Ask about yesterday — pick a name (1–5) and check in. ${w.asksLeft} of ${ASKS_ALLOWED} left. ` +
+    "When you are ready, press B to name somebody.",
+  );
+}
+
+/** Ask one of them about yesterday. */
+function woodsAsk(sim, id) {
+  const w = sim.woods;
+  const acc = ask(sim, w, id);
+  if (!acc) {
+    // A refusal has to say WHY, or it reads as the key not working. The one
+    // thing it may never say is anything about who is who.
+    hudSay(w.asked.includes(id) ? "You already asked them." : "No time. You have asked enough for one morning.");
+    return;
+  }
+  showAccount(acc, w);
+  paintMorning(sim);
+}
+
+function showAccount(acc, w) {
+  el("accountName").textContent = acc.name;
+  el("accountWeather").textContent = acc.weather;
+  const list = el("accountLines");
+  list.innerHTML = "";
+  for (const line of acc.lines) {
+    const li = document.createElement("li");
+    li.textContent = line;
+    list.appendChild(li);
+  }
+  el("asksLeft").textContent = `${w.asksLeft} of ${ASKS_ALLOWED} questions left`;
+  openWoodsPanel("accountPanel");
+}
+
+function openWoodsPanel(id) {
+  el("woodsLayer").classList.remove("hidden");
+  for (const p of ["accountPanel", "accusePanel", "verdictPanel"]) {
+    el(p).classList.toggle("hidden", p !== id);
+  }
+  woodsUi = { panel: id };
+}
+
+function closeWoodsPanel() {
+  el("woodsLayer").classList.add("hidden");
+  woodsUi = null;
+}
+
+function openAccuse(sim) {
+  const w = sim.woods;
+  if (!w || w.phase !== PHASE.MORNING) return;
+  const row = el("accuseRow");
+  row.innerHTML = "";
+  sim.companions.forEach((c, i) => {
+    const b = document.createElement("button");
+    b.className = "diff";
+    b.textContent = c.name;
+    b.dataset.row = "0";
+    b.dataset.col = String(i);
+    b.addEventListener("click", () => woodsAccuse(sim, c.id));
+    row.appendChild(b);
+  });
+  openWoodsPanel("accusePanel");
+}
+
+function woodsAccuse(sim, id) {
+  const w = sim.woods;
+  const v = accuse(sim, w, id);
+  if (!v) return;
+  el("verdictHead").textContent = v.correct ? "You were right." : "You were wrong.";
+  el("verdictHead").className = `woods-who ${v.correct ? "woods-right" : "woods-wrong"}`;
+  el("verdictBody").textContent = v.correct
+    ? `${v.taken} went out into the trees in the night. Whatever came back to the fire wearing that name is still standing there.`
+    : `${v.accused} was here the whole time. It was ${v.taken}.`;
+  el("verdictTell").textContent = tellText(w, sim);
+  openWoodsPanel("verdictPanel");
+  // The run is over. Drop the slot so "Resume" cannot hand back a finished
+  // morning — the same rule the basin debrief follows.
+  clearSave();
+}
+
+/**
+ * What they got wrong, said plainly, AFTER the answer. Derived from the
+ * perturbation, so it describes whatever actually happened rather than reading
+ * from a list — which is also why it is worth showing: a player who missed it
+ * learns what KIND of thing to listen for next time without being handed a
+ * catalogue of tells.
+ */
+function tellText(w, sim) {
+  const p = w.perturbation;
+  if (!p) return "";
+  const nameOf = (id) => w.nameById[id] || id;
+  const f = w.chronicle.facts[p.at];
+  switch (p.kind) {
+    case "order": return `They told it out of order — the ${f.place} and the ${w.chronicle.facts[p.at + 1].place} the wrong way round.`;
+    case "actor": return `They put ${nameOf(p.to)} on a job that was ${nameOf(f.actor)}'s.`;
+    case "place": return `They put it at the ${p.to}. It was the ${f.place}.`;
+    case "object": return `They said ${p.to}. It was the ${f.object}.`;
+    case "weather": return `They had the weather wrong.`;
+    case "name": return `They had a name almost right: ${p.to}, for ${nameOf(f.actor)}.`;
+    default: return "";
+  }
 }
 
 /**
@@ -325,7 +551,34 @@ function resumeRun() {
   const sim = data && deserializeRun(data);
   if (!sim) return null;
   campaignSeed = sim.seed;
+  // A day in the woods resumes as a day in the woods, not as basin 1 of 1.
+  // The line matters as much as the wiring: waking up to "Basin 1 of 1" after
+  // a night in the trees is the game telling the player they are somewhere
+  // they are not.
+  if (sim.woods) {
+    const r = mountRun(sim, sim.woods.phase === PHASE.MORNING
+      ? "Grey light. The fire is down to ash and everyone is up."
+      : "You pick the day back up where you left it.");
+    resumeWoodsUi(sim);
+    return r;
+  }
   return mountRun(sim, `Basin ${sim.level} of ${sim.campaignLength}. You pick up where you stopped.`);
+}
+
+/**
+ * Put the day's UI back after a reload. The DAY state itself came out of the
+ * save; this only re-derives what is on screen from it — which site is lit,
+ * who is walking where, which banner is showing.
+ */
+function resumeWoodsUi(sim) {
+  tut = null;
+  closeWoodsPanel();
+  const w = sim.woods;
+  if (w.phase === PHASE.DAY) { enterBeat(sim); return; }
+  w.activeSiteId = null;
+  for (const c of sim.companions) c.jobSite = null;
+  if (w.phase === PHASE.MORNING) paintMorning(sim);
+  else setObjective(null);
 }
 
 /** Everything a run needs on screen, shared by a fresh start and a resume. */
@@ -472,6 +725,29 @@ function handleAction(action, arg, player = run.players[0]) {
   const actor = player.eye;
   const percept = player.percept;
   if (sim.status !== "playing") return;
+  // THE WOODS intercepts three keys and nothing else. Placed here rather than
+  // inside each case so the interception is in ONE place and readable as a
+  // list: the interact key works a beat, check-in asks about yesterday, and
+  // give names somebody. Everything else falls through to the basin game
+  // untouched, which is what keeps this a layer rather than a fork of the
+  // input handling.
+  if (sim.woods) {
+    if (action === ACTIONS.SURVEY && sim.woods.phase === PHASE.DAY) {
+      if (woodsWork(sim)) return;
+    }
+    if (sim.woods.phase === PHASE.MORNING) {
+      if (action === ACTIONS.CHECK_IN) {
+        if (typeof arg === "number") player.selected = arg;
+        const target = sim.companions[player.selected];
+        if (target) woodsAsk(sim, target.id);
+        return;
+      }
+      if (action === ACTIONS.OFFER_ITEM) { openAccuse(sim); return; }
+      if (action === ACTIONS.SURVEY && woodsUi) { closeWoodsPanel(); return; }
+    }
+    if (sim.woods.phase === PHASE.VERDICT && action !== ACTIONS.PAUSE) return;
+  }
+
   switch (action) {
     case ACTIONS.SURVEY: {
       // A pickup takes priority over a survey when both are in reach — items
@@ -681,6 +957,11 @@ function handleAction(action, arg, player = run.players[0]) {
       break;
     }
     case ACTIONS.PAUSE:
+      // Escape closes an open account or the name list before it reaches the
+      // pause menu. Reading somebody's account and wanting out of it is the
+      // commonest press in the morning, and having it dump the player into a
+      // settings screen instead would read as the panel being stuck.
+      if (woodsUi) { closeWoodsPanel(); break; }
       togglePause();
       break;
     default:
@@ -1045,6 +1326,28 @@ function boot() {
   el("continueBtn").addEventListener("click", () => {
     if (!resumeRun()) refreshTitleSave(); // the save vanished or was unreadable — re-sync the button
   });
+  el("woodsBtn").addEventListener("click", () => {
+    // Same discard guard as "Walk in": a day is a fresh run and a fresh run
+    // drops the save slot, so a player with a campaign in progress has to
+    // press twice to lose it.
+    if (hasSaveNow && !newRunArmed) {
+      newRunArmed = true;
+      const b = el("woodsBtn");
+      b.textContent = "Discard saved run — press again";
+      b.classList.add("confirm-new");
+      return;
+    }
+    const raw = el("seedInput").value.trim();
+    startWoods(raw || null);
+  });
+  el("verdictDone")?.addEventListener("click", () => {
+    closeWoodsPanel();
+    run = null;
+    paused = false;
+    setObjective(null);
+    screens("title");
+    refreshTitleSave();
+  });
   el("learnBtn").addEventListener("click", () => {
     const p = tutorialProgress();
     // Resume where they stopped; a finished tutorial restarts from the top
@@ -1126,6 +1429,25 @@ if (typeof window !== "undefined") {
     debugMouseLook(dx, dy) { return input.debugLook(dx, dy); },
     /** Start a tutorial stage by index — the same path the title button takes. */
     startStage(i) { return startTutorial(i); },
+    // THE WOODS, driven the way the title button drives it. The browser test
+    // walks the real player to the real sites and presses the real interact
+    // key; nothing below shortcuts the day, it only WALKS.
+    startWoods(seed) { return startWoods(seed); },
+    get woods() { return run?.sim?.woods ?? null; },
+    get woodsPanel() { return woodsUi?.panel ?? null; },
+    /** Put the lead and the beat's named hand at the current site, as if they had walked. */
+    debugWalkToBeat() {
+      const sim = run?.sim; const w = sim?.woods;
+      if (!w || w.phase !== PHASE.DAY) return null;
+      const b = beatAt(w);
+      const site = sim.world.sites.find((s) => s.id === b.site);
+      sim.player.x = site.x; sim.player.z = site.z;
+      const hand = sim.companions.find((c) => c.id === w.assign[b.id]);
+      hand.x = site.x + 1; hand.z = site.z + 1;
+      return { beat: b.id, site: site.id, hand: hand.name };
+    },
+    woodsAccuse(id) { const sim = run?.sim; return sim && woodsAccuse(sim, id); },
+    woodsOpenAccuse() { const sim = run?.sim; return sim && openAccuse(sim); },
     enterObjective(i) { return enterObjective(i); },
     /** Which stages are recorded done, for the browser tutorial test. */
     tutorialDone() { return tutorialProgress().done.slice(); },

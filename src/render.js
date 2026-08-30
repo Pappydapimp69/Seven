@@ -6,9 +6,9 @@
 // list as the real ones.
 
 import * as THREE from "../lib/three.module.js";
-import { CELL, GRID, cellToWorld } from "./world.js?v=mirage-0.13.0";
-import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=mirage-0.13.0";
-import { PYLON_RADIUS } from "./state.js?v=mirage-0.13.0";
+import { CELL, GRID, cellToWorld } from "./world.js?v=seven-0.1.0";
+import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=seven-0.1.0";
+import { PYLON_RADIUS } from "./state.js?v=seven-0.1.0";
 
 const PALETTE = {
   sky: 0x0a0f16,
@@ -387,7 +387,7 @@ export function createRenderer(canvas, sim) {
   // ---- monoliths, pylons, figures: pooled and rebuilt from perception ------
   const monolithGeo = new THREE.BoxGeometry(1.5, 7.4, 1.1);
   const ringGeo = new THREE.TorusGeometry(PYLON_RADIUS, 0.09, 6, 40);
-  const pool = { monoliths: new Map(), pylons: new Map(), figures: new Map(), items: new Map(), trees: new Map(), stones: new Map() };
+  const pool = { monoliths: new Map(), pylons: new Map(), figures: new Map(), items: new Map(), trees: new Map(), stones: new Map(), sites: new Map() };
 
   function makeMonolith() {
     const g = new THREE.Group();
@@ -528,6 +528,43 @@ export function createRenderer(canvas, sim) {
     // A slow pulse, so it reads as lit rather than as a decal.
     const t = performance.now() / 1000;
     trainerMark.userData.lamp.scale.setScalar(1 + Math.sin(t * 1.7) * 0.12);
+  }
+
+  /**
+   * A worksite: a cairn with a pole in it. Camp only, and only in THE WOODS.
+   *
+   * It is a PLACE MARKER, not a prompt — it stands there all day whether or
+   * not the current beat happens here, because the player has to be able to
+   * learn where the creek is before they are sent to it. The ACTIVE one is lit;
+   * the rest are unlit stone. That difference is the only thing the renderer
+   * says about the day, and it says it in the world rather than on the HUD.
+   */
+  function makeSite() {
+    const g = new THREE.Group();
+    const cairn = new THREE.Mesh(
+      new THREE.ConeGeometry(0.62, 0.9, 5),
+      new THREE.MeshStandardMaterial({ color: 0x6d6a63, roughness: 0.95, flatShading: true }),
+    );
+    cairn.position.y = 0.45;
+    g.add(cairn);
+    const pole = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.05, 0.06, 2.1, 5),
+      new THREE.MeshStandardMaterial({ color: 0x3a3128, roughness: 0.9 }),
+    );
+    pole.position.y = 1.5;
+    g.add(pole);
+    const lamp = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.22, 0),
+      new THREE.MeshBasicMaterial({ color: 0xffd489 }),
+    );
+    lamp.position.y = 2.5;
+    g.add(lamp);
+    const glow = new THREE.PointLight(0xffc879, 0, 14, 2);
+    glow.position.y = 2.5;
+    g.add(glow);
+    g.userData = { lamp, glow };
+    scene.add(g);
+    return g;
   }
 
   function makeItem() {
@@ -730,6 +767,20 @@ export function createRenderer(canvas, sim) {
 
     // The trainer's lantern. Camp only — `sim.trainer` exists nowhere else.
     ensureTrainerMark(sim.trainer && !sim.reachedTrainer ? sim.trainer : null);
+
+    // The day's worksites. Camp only, and only once a day has been started —
+    // `world.sites` exists nowhere else and `sim.woods` gates the lighting.
+    syncPool(pool.sites, sim.world.sites || [], makeSite);
+    const activeSite = sim.woods?.activeSiteId || null;
+    for (const obj of pool.sites.values()) {
+      if (!obj.visible) continue;
+      const site = obj.userData.item;
+      obj.position.set(site.x, terrainHeight(site.x, site.z), site.z);
+      const lit = site.id === activeSite;
+      obj.userData.glow.intensity = lit ? 1.5 : 0;
+      obj.userData.lamp.material.color.set(lit ? 0xffd489 : 0x4a4a48);
+      obj.userData.lamp.scale.setScalar(lit ? 1 + Math.sin(elapsed * 1.7) * 0.14 : 0.85);
+    }
 
     // ---- companions (real and otherwise) ----
     syncPool(pool.figures, perceivedCompanions(percept, sim), makeFigure);

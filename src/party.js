@@ -8,7 +8,7 @@
 // who lags, who starts narrating things that aren't there. Each rule below exists
 // to make an internal number legible from the outside without printing it.
 
-import { findPath, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, GRID } from "./world.js?v=mirage-0.13.0";
+import { findPath, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, GRID } from "./world.js?v=seven-0.1.0";
 import {
   BAND,
   bandOf,
@@ -23,7 +23,7 @@ import {
   activatePylon,
   updatePing, isAnswering, isReturning,
   PRIME_WINDOW,
-} from "./state.js?v=mirage-0.13.0";
+} from "./state.js?v=seven-0.1.0";
 
 // Higher band = worse. Lets a per-companion trait move the pylon-seeking
 // trigger EARLIER than the uniform BRITTLE tell everyone else gets, without
@@ -595,7 +595,7 @@ export function updateCompanions(sim, dt) {
     // and "X comes back over" fires forever. This used to exclude "follow"; the
     // default is "wander" now, and leaving the old exclusion in place made
     // every companion permanently, silently away.
-    if (c.goalKind && !["follow", "wander", "resting", "regrouping"].includes(c.goalKind)) {
+    if (c.goalKind && !["follow", "wander", "resting", "regrouping", "job"].includes(c.goalKind)) {
       c.wasAway = c.goalKind;
     }
     // Somebody in the party has set hands on a pylon and is waiting for a
@@ -661,6 +661,24 @@ export function updateCompanions(sim, dt) {
     // moment, pick again. Radius scales with this companion's own `wander`
     // trait, so the restless ones really do get further away and the homebodies
     // stay close — one of the behavioural tells the player is meant to learn.
+    // ---- on a job --------------------------------------------------------
+    // THE WOODS gives one member a place to be: the beat's named hand knows
+    // where the saw has to go and walks there without being called. It is not
+    // a leash and it is not a summons — they are going somewhere of their own,
+    // and the player still has to be standing there when they arrive.
+    //
+    // Placed BEFORE the wander branch and after every other impulse, so a job
+    // never overrides being called, being pinged, or a pylon that needs a
+    // second pair of hands. `wanderRoll` above was already drawn; skipping it
+    // here costs nothing, because it is drawn unconditionally either way.
+    if (c.jobSite) {
+      c.goalKind = "job";
+      const d = Math.hypot(c.jobSite.x - c.x, c.jobSite.z - c.z);
+      if (d > FOLLOW_SLACK * 2) stepToward(sim, c, c.jobSite, followSpeed(d, band), dt);
+      else c.facing = Math.atan2(sim.player.x - c.x, sim.player.z - c.z);
+      continue;
+    }
+
     c.goalKind = "wander";
     if (sim.time >= (c.wanderUntil || 0) || !c.wanderGoal) {
       // Uses the values drawn unconditionally at the top of this iteration.

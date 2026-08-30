@@ -12,7 +12,13 @@
 // relative import inside src/*.js. One command, no build step, still a plain
 // static site.
 //
-// Usage: node tools/stamp-version.mjs 0.7.4
+// Usage: node tools/stamp-version.mjs 0.7.4        -> seven-0.7.4
+//        node tools/stamp-version.mjs seven-0.7.4  -> seven-0.7.4
+//        node tools/stamp-version.mjs mirage-0.13.0 -> mirage-0.13.0 (kept verbatim)
+//
+// SEVEN is a fork, so the prefix had to stop being hard-coded: two deployments
+// stamping each other's token would make "is my fix live?" unanswerable, and
+// verify-deploy.mjs compares the token it finds against the one it expects.
 
 import fs from "fs";
 import path from "path";
@@ -24,7 +30,7 @@ if (!raw) {
   console.error("usage: node tools/stamp-version.mjs <version>   (e.g. 0.7.4)");
   process.exit(1);
 }
-const version = raw.startsWith("mirage-") ? raw : `mirage-${raw}`;
+const version = /^[a-z]+-/.test(raw) ? raw : `seven-${raw}`;
 
 // A relative import/export specifier, with or without an existing ?v= stamp.
 const SPECIFIER = /(from\s+")(\.\/[A-Za-z0-9_\-.]+\.js)(?:\?v=[^"]*)?(")/g;

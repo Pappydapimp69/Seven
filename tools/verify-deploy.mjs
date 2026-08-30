@@ -17,7 +17,7 @@
 // Usage: node tools/verify-deploy.mjs [baseUrl]
 //   defaults to the project's GitHub Pages url.
 
-const BASE = (process.argv[2] || "https://pappydapimp69.github.io/mirage/").replace(/\/?$/, "/");
+const BASE = (process.argv[2] || "https://pappydapimp69.github.io/seven/").replace(/\/?$/, "/");
 
 const problems = [];
 const note = (m) => problems.push(m);

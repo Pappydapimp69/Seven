@@ -3384,7 +3384,14 @@ check("standing at a false claim while lucid offers the strike", () => {
 // panel never says what it BUYS).
 check("the help panel explains what checking in actually buys you", () => {
   const html = fsReadFileSync(new URL("../index.html", import.meta.url), "utf8");
-  const panel = html.slice(html.indexOf('id="howto"'), html.indexOf('id="howto"') + 4000);
+  // Sliced to the panel's own closing tag, not to a fixed character count. It
+  // was `+ 4000`, and adding a section to the TOP of the panel pushed the
+  // sentences this check is about out of the window — so it reported "a bound
+  // verb with no explanation" about text that was sitting right there. A window
+  // measured in characters expires the next time anyone edits the document.
+  const from = html.indexOf('id="howto"');
+  const end = html.indexOf("</div>", from);
+  const panel = html.slice(from, end > 0 ? end : undefined);
   const prose = panel.replace(/<p class="keys"[\s\S]*?<\/p>/g, "").replace(/<[^>]+>/g, " ");
   for (const claim of [/check\s*in/i, /record/i, /thrown out|discredit/i, /strike/i]) {
     assert(claim.test(prose), `the help panel never mentions ${claim} — a bound verb with no explanation`);

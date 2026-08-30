@@ -14,6 +14,8 @@ import {
   serializeRun, deserializeRun, saveRun, loadSave, clearSave, hasSave,
   describeSave, SAVE_KEY, SAVE_VERSION, loadSettings, saveSettings, SETTINGS_KEY,
 } from "../src/save.js";
+import { buildCamp, CAMP_SEED } from "../src/camp.js";
+import { attachSites, startDay, PHASE } from "../src/woods.js";
 
 let passed = 0;
 const failures = [];
@@ -341,6 +343,44 @@ check("corrupt or absent preference storage reads as defaults", () => {
   // And with no storage at all (the Node default here).
   eq(loadSettings().difficulty, "standard", "missing storage should read as defaults");
   eq(saveSettings({ volume: 0.1 }), false, "saveSettings should report failure with no storage");
+});
+
+// --- the camp is not a seed ----------------------------------------------
+
+check("a run saved on the camp resumes ON THE CAMP", () => {
+  // The world is a pure function of the seed for every BASIN, and this file is
+  // built on that. The camp is the exception: it is authored, and the sentinel
+  // seed regenerates as a perfectly valid basin instead. A resume therefore
+  // used to drop the player into a randomly generated map with their camp
+  // positions pasted on — no error anywhere, and nothing in the save tests
+  // looked, because every one of them used a basin.
+  const world = attachSites(buildCamp());
+  const sim = createRun({ seed: CAMP_SEED, world });
+  const back = deserializeRun(serializeRun(sim));
+  assert(back, "a camp save did not restore at all");
+  eq(back.world.blocked.length, world.blocked.length, "grid size changed");
+  let same = true;
+  for (let i = 0; i < world.blocked.length; i++) if (back.world.blocked[i] !== world.blocked[i]) { same = false; break; }
+  assert(same, "the resumed world is not the camp — a basin was generated from the sentinel seed");
+  assert(back.world.sites && back.world.sites.length === 4, "the resumed camp lost its sites");
+  assert(back.world.trainer && back.trainer, "the resumed camp lost the trainer");
+});
+
+check("the day survives a save, names and all", () => {
+  const world = attachSites(buildCamp());
+  const sim = createRun({ seed: CAMP_SEED, world });
+  sim.noDrain = true;
+  sim.woods = startDay(sim, makeRng(77), sim.companions.map((c) => c.id));
+  for (const c of sim.companions) c.name = sim.woods.nameById[c.id];
+  const back = deserializeRun(serializeRun(sim));
+  assert(back.woods, "the day was not saved");
+  eq(back.woods.taken, sim.woods.taken, "a different person was taken after the reload");
+  eq(back.woods.phase, PHASE.DAY, "the phase changed");
+  eq(JSON.stringify(back.woods.assign), JSON.stringify(sim.woods.assign), "the beats were reassigned");
+  eq(back.noDrain, true, "noDrain did not survive — a whole class of per-tick draws would restart");
+  for (const c of back.companions) {
+    eq(c.name, sim.woods.nameById[c.id], `${c.id} came back under a different name`);
+  }
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed`);

@@ -31,7 +31,7 @@ for; the value of this file is that writing in it costs nothing.
 
 ---
 
-## 2026-08-28 — THE WOODS: full design note  [building — forked to its own repo]
+## 2026-08-28 — THE WOODS: full design note  [building — the ALPHA slice is built; see docs/adr/0002-the-woods-alpha.md]
 
 Worked out in conversation. This supersedes the two entries below it, which are
 kept because they show how it got here. Everything here is design, not code.
@@ -214,7 +214,17 @@ Deduction erodes under repetition. Per-run party generation and log-derived
 tells are what protect it. If the tells ever become a hand-written set, the game
 is dead by run ten. Decide this early — it shapes how investigation is built.
 
-### The alpha to build first
+### The alpha to build first  [BUILT — 2026-08-30]
+
+Built as described below. `src/woods.js` (the day), `src/chronicle.js` (the
+account and the one wrong thing in it), `src/names.js` (composed names).
+Guarded by `tests/woods.mjs`, `tests/chronicle.mjs`, `tests/names.mjs` and a
+whole-day browser playthrough in `tests/woods-play.mjs`. The decision record is
+`docs/adr/0002-the-woods-alpha.md`.
+
+What is NOT built, still, and on purpose: the map, crafting, day/night, pylons,
+recruitment, skills, meta-progression, the keystone morning, the ending.
+
 
 Everything above except one part is known-good machinery from other games. The
 unproven claim is: CAN A PLAYER CATCH A FAKE BY ASKING ABOUT A SHARED DAY, AND

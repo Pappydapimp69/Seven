@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the full MIRAGE test suite. Exits non-zero on any failure.
+# Run the full SEVEN test suite (THE WOODS + the MIRAGE bones underneath). Exits non-zero on any failure.
 #
 # The smoke test needs Playwright + Chromium. If they are absent it is SKIPPED
 # with a loud note rather than silently passing — a suite that quietly stops
@@ -35,16 +35,24 @@ echo "== tutorial (step pinning, starvation, meter leaks) =="
 node tests/tutorial.mjs
 echo
 
+echo "== woods names (composed, sayable, reproducible) =="
+node tests/names.mjs
+echo
+
+echo "== woods chronicle (the account, and the one thing wrong with it) =="
+node tests/chronicle.mjs
+echo
+
+echo "== woods day (the day, the night, the morning) =="
+node tests/woods.mjs
+echo
+
 echo "== stress (invariants, hostile input, save/restore lockstep) =="
 node tests/stress.mjs "${STRESS_SEEDS:-16}"
 echo
 
 echo "== formation (is the party ever actually in frame?) =="
 node tests/formation.mjs "${FORMATION_SEEDS:-6}"
-echo
-
-echo "== balance (whole runs to a terminal state) =="
-node tests/balance.mjs "${BALANCE_SEEDS:-12}"
 echo
 
 if [ -d /opt/pw-browsers ] && node -e 'require("/opt/node22/lib/node_modules/playwright")' 2>/dev/null; then
@@ -77,10 +85,34 @@ if [ -d /opt/pw-browsers ] && node -e 'require("/opt/node22/lib/node_modules/pla
   echo
   echo "== tutorial play (real browser, stages start and steps fire) =="
   node tests/tutorial-play.mjs
+  echo
+  echo "== the woods (real browser, a whole day to a verdict) =="
+  node tests/woods-play.mjs
 else
   echo "== smoke + gamepad: SKIPPED — Playwright/Chromium not available here =="
   echo "   (the 3D layer was NOT exercised in this run)"
 fi
 echo
 
-echo "ALL MIRAGE TESTS PASSED"
+# BALANCE RUNS LAST, AND DOES NOT BLOCK WHAT FOLLOWS IT.
+#
+# `set -e` plus a known-red test in the middle of the file meant the entire
+# browser tier below it never ran — one long-standing difficulty question was
+# silently switching off the 3D layer, the tutorial playthrough and the whole of
+# THE WOODS for anyone running the suite. The `deceived` row is a difficulty
+# DECISION the owner has not made, not a defect, so it is reported loudly at the
+# end and its exit code is carried to the end rather than short-circuiting.
+echo "== balance (whole runs to a terminal state) =="
+set +e
+node tests/balance.mjs "${BALANCE_SEEDS:-12}"
+BALANCE=$?
+set -e
+echo
+
+if [ "$BALANCE" -ne 0 ]; then
+  echo "ALL SEVEN TESTS PASSED — except balance, which is the known open difficulty question"
+  echo "  (the deceived bot's win rate is a decision, not a bug; see CLAUDE.md 'Inherited open item')"
+  exit 1
+fi
+
+echo "ALL SEVEN TESTS PASSED"

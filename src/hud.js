@@ -6,10 +6,11 @@
 // the one hallucinating. The only place a real number is ever printed is the
 // debrief, after the run is over.
 
-import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds } from "./percept.js?v=mirage-0.13.0";
+import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds } from "./percept.js?v=seven-0.1.0";
+import { canWork, beatAt, PHASE } from "./woods.js?v=seven-0.1.0";
 import { LOG_RADIUS, PYLON_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, gatherTarget, GATHER_HOLD_TIME, previewCraft, claimedEntryAt, pylonAt,
   mossedAt,
-} from "./state.js?v=mirage-0.13.0";
+} from "./state.js?v=seven-0.1.0";
 
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 
@@ -272,8 +273,46 @@ export function createHud(sim, percept, opts = {}) {
     return null;
   }
 
+  /** What the interact key does at a worksite, said as the job rather than as a verb. */
+  function workPrompt(beat, who) {
+    switch (beat.verb) {
+      case "gathered": return `Load the ${beat.object} with ${who}`;
+      case "fetched": return `Fill the cans with ${who}`;
+      case "cut": return `Steady the birch while ${who} saws`;
+      case "pitched": return `Get the ${beat.object} up with ${who}`;
+      case "lit": return `Hold the kindling while ${who} lights it`;
+      case "heard": return `Stop and listen with ${who}`;
+      case "watched": return `Turn in — ${who} has first watch`;
+      default: return `Work with ${who}`;
+    }
+  }
+
   function paintPrompt(els, viewer, actor, hold) {
     if (!els.prompt) return;
+    // THE WOODS sits at the very top of the ladder, above even the moss.
+    // The camp has two mossed pylons standing in it and a beat's site can be
+    // anywhere; if a worksite ever shared ground with one of those, the prompt
+    // would show the moss forever and the day would simply never advance, with
+    // nothing erroring — the same silent starvation VERB_PRIORITY was written
+    // for. A worksite outranks everything because during THE WOODS it is the
+    // only verb the day is about.
+    if (sim.woods && sim.woods.phase === PHASE.DAY && actor === sim.player) {
+      const w = canWork(sim, sim.woods);
+      const beat = beatAt(sim.woods);
+      if (w.ok) {
+        const who = sim.companions.find((c) => c.id === sim.woods.assign[beat.id]);
+        els.text.textContent = workPrompt(beat, who?.name || "");
+        els.prompt.classList.add("show");
+        els.fill.style.width = "0%";
+        return;
+      }
+      if (w.why) {
+        els.text.textContent = w.why;
+        els.prompt.classList.add("show");
+        els.fill.style.width = "0%";
+        return;
+      }
+    }
     const pickup = nearestPickupItem(viewer, actor);
     const gatherable = gatherTarget(sim, actor);
     const near = nearestUnloggedName(viewer, actor);

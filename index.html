@@ -4,9 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <meta name="theme-color" content="#0a0f16" />
-  <title>MIRAGE — five minds and yours</title>
+  <title>SEVEN — the woods, and who walks out</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230a0f16'/%3E%3Cpath d='M4 22h24' stroke='%23596579' stroke-width='2'/%3E%3Crect x='9' y='8' width='4' height='14' fill='%2374e0ff'/%3E%3Crect x='19' y='11' width='4' height='11' fill='%23b06a72'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="css/style.css?v=mirage-0.13.0" />
+  <link rel="stylesheet" href="css/style.css?v=seven-0.1.0" />
 </head>
 <body>
   <canvas id="gl"></canvas>
@@ -21,11 +21,11 @@
   <!-- TITLE -->
   <div id="title" class="screen">
     <div class="title-card">
-      <h1 class="logo">MIRAGE</h1>
+      <h1 class="logo">SEVEN</h1>
       <p class="tagline">
-        Survey the basin with five companions. Every one of you carries a meter
-        you cannot see, and it only counts down. At zero, a mind starts inventing
-        the world — theirs, or yours.
+        You set out to walk a trail through the woods and come out the other
+        side. That is all this is about. What it turns out to be about is who
+        walks out with you.
       </p>
 
       <div class="row">
@@ -63,15 +63,50 @@
            obvious top button and was dropped straight into a basin with no idea
            the tutorial existed. Ordering is the whole fix; refreshLearnLabel()
            demotes it once the walk in is done. -->
-      <button id="learnBtn" class="big-btn" data-row="3" data-col="0">
+      <!-- THE WOODS is the game this fork exists to build, so it is the
+           obvious button. "Learn the walk" and "Walk in" are the basin game
+           these bones came from; they still run, and they are still where the
+           verbs are taught. -->
+      <button id="woodsBtn" class="big-btn" data-row="3" data-col="0">
+        The woods<span id="woodsDetail" class="resume-detail"></span>
+      </button>
+      <button id="learnBtn" class="big-btn" data-row="4" data-col="0">
         Learn the walk<span id="learnDetail" class="resume-detail"></span>
       </button>
-      <button id="startBtn" class="big-btn" data-row="4" data-col="0">Walk in</button>
-      <button id="howBtn" class="text-btn" data-row="5" data-col="0">How to play</button>
+      <button id="startBtn" class="big-btn" data-row="5" data-col="0">Walk in</button>
+      <button id="howBtn" class="text-btn" data-row="6" data-col="0">How to play</button>
 
       <p id="menuHints" class="menu-hints"></p>
 
       <div id="howto" class="howto hidden">
+        <p><b>THE WOODS — one day, one night, one morning.</b></p>
+        <p>You and five others are walking a trail through the woods. Day one is
+        work: firewood from the deadfall, water from the creek, a leaning birch
+        on the ridge that has to come down, a tent, a fire, a walk along the
+        ridge line, and then somebody takes first watch. <b>Seven jobs, and you
+        are standing there for every one of them.</b></p>
+        <p><b>Each job is one named person.</b> The banner says who. Walk to the
+        lit cairn; they are already on their way there, because it is their job.
+        When you are both there, press <b>E</b>. Watch what happens and watch
+        who does it — that is the whole thing you are being asked to remember.</p>
+        <p><b>Overnight, one of them is replaced.</b> Same name. Same skills.
+        Nothing is announced, nothing looks wrong, and nobody else finds it
+        strange. There is no bar, no icon and no sound.</p>
+        <p><b>In the morning you get three questions.</b> Pick a name
+        (<b>1</b>–<b>5</b>) and check in to hear their account of yesterday.
+        Everyone who was really there tells it the same way, word for word. The
+        one who was not gets <b>exactly one thing wrong</b> — a wrong place, the
+        wrong pair of hands, two things in the wrong order, the weather, or a
+        name a letter off.</p>
+        <p><b>Three questions, five people.</b> You cannot ask everybody, so you
+        cannot lay them side by side and read off the odd one out. The evidence
+        is your memory of a day you played.</p>
+        <p>When you are ready, press <b>B</b> and name somebody. That is the
+        run.</p>
+        <hr />
+        <p><b>MIRAGE — the game underneath.</b> "Walk in" and "Learn the walk"
+        run the original: a survey party of six crossing a fogged basin while
+        their minds come apart. Everything below is about that.</p>
         <p><b>Goal.</b> Find and survey all six markers, then get back to camp
         with at least two companions still walking with you.</p>
         <p><b>The meters are invisible.</b> Nobody has a bar. You read your party
@@ -154,12 +189,41 @@
         controller presses Start mid-run to take over a companion — split
         screen, and each of you hallucinates on your own. They can drop back
         out with Select; the party AI simply resumes that mind.</p>
+        <p class="howto-keys"><b>In the woods:</b> WASD move · mouse look ·
+        <b>E</b> work the job / close a panel · <b>1–5</b> ask about yesterday ·
+        <b>B</b> name somebody · <b>Esc</b> pause</p>
         <p class="howto-keys">WASD move · Shift run · mouse look · <b>E</b> survey/pick up, hold to gather ·
         <b>Z</b> cycle item · <b>X</b> use item · <b>V</b> drop · <b>C</b> craft ·
         <b>B</b> give · <b>1–5</b> check in · <b>Shift+1–5</b> dose · <b>Q/R</b> select · <b>Esc</b> pause</p>
       </div>
 
-      <p class="build">MIRAGE <span id="buildLabel">—</span></p>
+      <p class="build">SEVEN <span id="buildLabel">—</span></p>
+    </div>
+  </div>
+
+  <!-- THE MORNING. Three panels, one at a time, all inside the run: asking is
+       not a menu the game pauses for, it is the thing you spend the morning on.
+       Hidden entirely outside THE WOODS. -->
+  <div id="woodsLayer" class="woods-layer hidden">
+    <div id="accountPanel" class="woods-panel hidden">
+      <p class="woods-who"><span id="accountName">—</span> <span class="woods-sub">on yesterday</span></p>
+      <p id="accountWeather" class="woods-weather"></p>
+      <ul id="accountLines" class="woods-lines"></ul>
+      <p class="woods-foot"><span id="asksLeft">—</span> · <b>Esc</b> or <b>E</b> to step away</p>
+    </div>
+
+    <div id="accusePanel" class="woods-panel hidden">
+      <p class="woods-who">One of them was not here yesterday.</p>
+      <p class="woods-sub">Name them. You get one answer, and it is the last thing that happens.</p>
+      <div id="accuseRow" class="woods-names"></div>
+      <p class="woods-foot"><b>Esc</b> to go back</p>
+    </div>
+
+    <div id="verdictPanel" class="woods-panel hidden">
+      <p id="verdictHead" class="woods-who">—</p>
+      <p id="verdictBody" class="woods-sub"></p>
+      <p id="verdictTell" class="woods-tell"></p>
+      <button id="verdictDone" class="big-btn" data-row="0" data-col="0">Back to the trailhead</button>
     </div>
   </div>
 
@@ -263,7 +327,7 @@
   <!-- DEBRIEF -->
   <div id="debriefLayer" class="screen hidden"></div>
 
-  <script type="module" src="src/main.js?v=mirage-0.13.0"></script>
-  <noscript><p style="color:#ccd">MIRAGE needs JavaScript and WebGL.</p></noscript>
+  <script type="module" src="src/main.js?v=seven-0.1.0"></script>
+  <noscript><p style="color:#ccd">SEVEN needs JavaScript and WebGL.</p></noscript>
 </body>
 </html>

@@ -1,15 +1,43 @@
-# MIRAGE
+# SEVEN
 
-A real-time 3D exploration game: you lead a survey party of six through a
-fogged basin. Every mind in the party — yours included — carries a hidden
-meter that only counts down, and at zero, that mind starts hallucinating.
+> **Play it: https://pappydapimp69.github.io/seven/**
 
-> Status: **0.7.x**, playable end to end — title, run, debrief, and a
-> campaign you can put down and pick up again. Started life as
-> a build inside [Opticon](https://github.com/Pappydapimp69/Opticon) and was
-> pulled out into its own repo once it stood on its own (see `docs/adr/`).
+Two games on one set of bones.
 
-## The idea
+**THE WOODS** is what this repo is for. You walk a trail through the woods with
+five companions and get one day's work done — firewood, water, a tree that has
+to come down, a tent, a fire. You are standing there for all of it. Overnight,
+one of them is replaced by something wearing their name and their skills, and
+nothing announces it. In the morning you get **three questions** to ask about a
+day you all lived through, and then you name somebody.
+
+A real account is the day, told correctly. A false one is the same day with
+exactly **one fact bent** — a wrong place, a wrong pair of hands, the order
+swapped, a name a letter off. The wrong detail is always DERIVED from what
+actually happened, never picked from a list, so there is nothing to memorise.
+The only copy of the truth that the game cannot reach is your memory of having
+been there.
+
+This is the ALPHA of a much larger design (`docs/IDEAS.md`, "THE WOODS: full
+design note"), built to answer one question and nothing else: *can a player
+catch a fake by asking about a day they both lived through, and does it feel
+like deduction rather than a coin flip?*
+
+**MIRAGE** is the game underneath — a survey party of six crossing a fogged
+basin while their minds come apart. It still runs, from the title screen, and
+it is where every verb THE WOODS uses was built and taught. Everything below
+describes it.
+
+> SEVEN is a fork of [MIRAGE](https://github.com/Pappydapimp69/mirage), which
+> was itself pulled out of [Opticon](https://github.com/Pappydapimp69/Opticon)
+> once it stood on its own (see `docs/adr/`). The two are not expected to merge
+> back.
+
+---
+
+## MIRAGE — the bones
+
+### The idea
 
 You lead a survey party of six into a fogged basin: yourself and five companions.
 Each of you carries a hidden **lucidity** meter. It only counts down. When one

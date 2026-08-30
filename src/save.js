@@ -17,7 +17,9 @@
 //     options (dbh#E4, wrong-sky#E2). And an ended run is never saved, so a
 //     "Resume" can't drop you back onto the frame you already lost.
 
-import { createRun } from "./state.js?v=mirage-0.13.0";
+import { createRun } from "./state.js?v=seven-0.1.0";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.1.0";
+import { attachSites, serializeWoods, deserializeWoods } from "./woods.js?v=seven-0.1.0";
 
 export const SAVE_KEY = "mirage:run";
 // Bumped whenever the shape below changes incompatibly. A save from an older
@@ -29,13 +31,21 @@ export const SAVE_KEY = "mirage:run";
 // two keys, and the first `sim.stats.falseCrafts += 1` would write NaN — which
 // then rides silently into the debrief. Adding a counter to a serialised bag of
 // counters is a schema change even though nothing was renamed or removed.
+// v4: the camp is a world, not a seed, and THE WOODS is a day.
+// Two changes, one version. The camp's world cannot be regenerated from a seed
+// — it is authored — so a save taken on it now records that and rebuilds
+// through buildCamp(); before this, resuming a camp run silently handed the
+// player a BASIN generated from the sentinel seed, with their camp positions
+// pasted onto it. And `woods` is the day itself: the record of what happened,
+// who was taken, and what they will get wrong. All of it gates a branch.
+//
 // v3: cohesion. Following was replaced by a chain, a periodic ping and a CALL
 // verb, all of which keep per-character deadlines (wanderUntil, pingAt/Until,
 // summonBy/Until, the two call cadences). `wanderUntil` gates three rng draws,
 // so a v2 snapshot restored without it re-rolls on a different tick and the
 // resumed run silently forks — which is precisely how the divergence test
 // caught it.
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 const store = () => (typeof localStorage === "undefined" ? null : localStorage);
 
@@ -95,6 +105,10 @@ function packCharacter(c) {
     // movement rather than draws, but they decide where somebody IS, which
     // decides what they encounter, which decides everything downstream.
     wanderGoal: c.wanderGoal ? { x: c.wanderGoal.x, z: c.wanderGoal.z } : null,
+    // Where this companion is headed on their own errand. Same class as
+    // wanderGoal: it decides which branch of the party update runs, and the
+    // wander branch it displaces is the one that draws.
+    jobSite: c.jobSite ? { x: c.jobSite.x, z: c.jobSite.z, id: c.jobSite.id ?? null } : null,
     wanderUntil: c.wanderUntil ?? 0,
     pingAt: c.pingAt ?? 0,
     pingUntil: c.pingUntil ?? 0,
@@ -180,6 +194,7 @@ function applyCharacter(c, s) {
     c.facing = s.facing ?? 0;
     c.path = s.path ? s.path.map((n) => ({ cx: n.cx, cz: n.cz })) : null;
     c.wanderGoal = s.wanderGoal ? { x: s.wanderGoal.x, z: s.wanderGoal.z } : null;
+    c.jobSite = s.jobSite ? { x: s.jobSite.x, z: s.jobSite.z, id: s.jobSite.id ?? null } : null;
     c.wanderUntil = s.wanderUntil ?? 0;
     c.pingAt = s.pingAt ?? 0;
     c.pingUntil = s.pingUntil ?? 0;
@@ -257,6 +272,14 @@ export function serializeRun(sim) {
     // re-phases every sighting roll after a resume.
     sightTimer: sim.sightTimer ?? 0,
     lastDt: sim.lastDt ?? 0,
+    // Camp-only flags. They are not cosmetic: `noDrain` decides whether a
+    // whole class of per-tick rng draws happens at all, and the other three
+    // decide which verbs the prompt resolver will even offer.
+    noDrain: !!sim.noDrain,
+    canClearMoss: !!sim.canClearMoss,
+    callUnlocked: sim.callUnlocked !== false,
+    reachedTrainer: !!sim.reachedTrainer,
+    woods: serializeWoods(sim.woods),
   };
 }
 
@@ -268,12 +291,33 @@ export function serializeRun(sim) {
  */
 export function deserializeRun(data) {
   if (!data || data.v !== SAVE_VERSION) return null;
+  // THE CAMP IS NOT A SEED. Every basin is a pure function of its seed and
+  // regenerates exactly; the camp is hand-placed and regenerates as nothing at
+  // all. Passing the sentinel through to generateWorld produced a perfectly
+  // valid BASIN and pasted the saved camp positions onto it — no error, no
+  // warning, just a resume into somewhere the player had never been. The seed
+  // is the routing key because it is already in every payload at every
+  // version, which is exactly what camp.js said it was for.
+  const camp = data.seed === CAMP_SEED;
+  const world = camp ? attachSites(buildCamp()) : null;
   const sim = createRun({
     seed: data.seed,
     difficulty: data.difficulty,
     level: data.level,
     campaignLength: data.campaignLength,
+    world,
   });
+  if (camp) {
+    sim.trainer = world.trainer;
+    sim.noDrain = !!data.noDrain;
+    sim.canClearMoss = !!data.canClearMoss;
+    sim.callUnlocked = data.callUnlocked !== false;
+    sim.reachedTrainer = !!data.reachedTrainer;
+    sim.woods = deserializeWoods(data.woods);
+    if (sim.woods) {
+      for (const c of sim.companions) c.name = sim.woods.nameById[c.id] || c.name;
+    }
+  }
 
   const byId = new Map(sim.party.map((c) => [c.id, c]));
   for (const s of data.party) {
@@ -384,6 +428,11 @@ export function describeSave(data) {
     minutes: Math.floor(data.time / 60),
     seconds: Math.floor(data.time % 60),
     party: walking,
+    // What KIND of run this is. The resume button used to describe every save
+    // as "basin N of M"; a day in the woods has no basins, and being told you
+    // are one basin into a campaign you never started is the menu lying about
+    // where you are.
+    woods: data.woods ? { phase: data.woods.phase, beat: data.woods.beat, asksLeft: data.woods.asksLeft } : null,
   };
 }
 

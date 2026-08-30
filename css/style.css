@@ -655,3 +655,86 @@ body[data-coop="2"] .item-bar.p2 { display: flex; }
 }
 .objective-text { font-size: 0.9rem; color: var(--ink); line-height: 1.4; }
 .big-btn.quiet { background: transparent; border-color: var(--edge); }
+
+/* --- the morning ---------------------------------------------------------
+   An account is TEXT the player reads carefully and compares against their own
+   memory, so it is set larger and looser than anything else in the HUD, with
+   real leading. Everything here is rem, so it keeps its share of the screen
+   under Windows display scaling like the rest.
+
+   Deliberately NOT a pause menu: the run keeps running underneath. Asking is
+   what the morning is spent on, so it has to cost something that feels like
+   time passing rather than time stopping. */
+.woods-layer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 5;
+}
+.woods-layer.hidden { display: none; }
+
+.woods-panel {
+  pointer-events: auto;
+  width: min(92vw, 40rem);
+  max-height: 82vh;
+  overflow-y: auto;
+  padding: 1.4rem 1.6rem;
+  background: rgba(6, 10, 15, 0.93);
+  border: 1px solid var(--edge);
+  border-radius: 0.5rem;
+  box-shadow: 0 1.5rem 4rem rgba(0, 0, 0, 0.6);
+}
+.woods-panel.hidden { display: none; }
+
+.woods-who {
+  font-size: 1.25rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink);
+  margin: 0 0 0.35rem;
+}
+.woods-sub { font-size: 0.95rem; color: var(--dim); margin: 0 0 1rem; line-height: 1.5; }
+.woods-weather {
+  font-size: 1rem;
+  color: var(--warm);
+  margin: 0 0 0.9rem;
+  padding-bottom: 0.7rem;
+  border-bottom: 1px solid var(--edge);
+  line-height: 1.5;
+}
+.woods-lines { list-style: none; margin: 0 0 1.1rem; padding: 0; }
+/* Each line is one thing that happened, and the player is reading them AS AN
+   ORDER — so they are numbered, spaced, and never allowed to reflow into a
+   paragraph. An order swap is only visible if the order is visible. */
+.woods-lines li {
+  font-size: 1rem;
+  line-height: 1.55;
+  color: var(--ink);
+  padding: 0.4rem 0 0.4rem 2.2rem;
+  position: relative;
+  counter-increment: woods-line;
+}
+.woods-lines { counter-reset: woods-line; }
+.woods-lines li::before {
+  content: counter(woods-line);
+  position: absolute;
+  left: 0;
+  top: 0.4rem;
+  width: 1.5rem;
+  text-align: right;
+  color: var(--dim);
+  font-size: 0.85rem;
+}
+.woods-foot { font-size: 0.85rem; color: var(--dim); margin: 0; }
+
+.woods-names { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-bottom: 1.1rem; }
+.woods-names .diff { flex: 1 1 8rem; }
+.woods-tell { font-size: 0.9rem; color: var(--dim); line-height: 1.5; margin: 0.8rem 0 1.2rem; }
+.woods-right { color: var(--good); }
+.woods-wrong { color: var(--bad); }
+
+/* The one line the day gives you, under the objective banner. */
+.woods-waiting { color: var(--warm); }
