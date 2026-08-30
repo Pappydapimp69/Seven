@@ -6,11 +6,11 @@
 // the one hallucinating. The only place a real number is ever printed is the
 // debrief, after the run is over.
 
-import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds } from "./percept.js?v=seven-0.16.0";
-import { canWork, beatAt, PHASE } from "./woods.js?v=seven-0.16.0";
+import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds } from "./percept.js?v=seven-0.17.0";
+import { canWork, beatAt, holdFraction, PHASE } from "./woods.js?v=seven-0.17.0";
 import { LOG_RADIUS, PYLON_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, gatherTarget, GATHER_HOLD_TIME, previewCraft, claimedEntryAt, pylonAt,
   mossedAt,
-} from "./state.js?v=seven-0.16.0";
+} from "./state.js?v=seven-0.17.0";
 
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 
@@ -276,14 +276,14 @@ export function createHud(sim, percept, opts = {}) {
   /** What the interact key does at a worksite, said as the job rather than as a verb. */
   function workPrompt(beat, who) {
     switch (beat.verb) {
-      case "gathered": return `Load the ${beat.object} with ${who}`;
-      case "fetched": return `Fill the cans with ${who}`;
-      case "cut": return `Steady the birch while ${who} saws`;
-      case "pitched": return `Get the ${beat.object} up with ${who}`;
+      case "gathered": return `Hold to load the ${beat.object} with ${who}`;
+      case "fetched": return `Hold to fill the cans with ${who}`;
+      case "cut": return `Hold to steady the birch while ${who} saws`;
+      case "pitched": return `Hold to get the ${beat.object} up with ${who}`;
       case "lit": return `Hold the kindling while ${who} lights it`;
-      case "heard": return `Stop and listen with ${who}`;
-      case "watched": return `Turn in — ${who} has first watch`;
-      default: return `Work with ${who}`;
+      case "heard": return `Hold still and listen with ${who}`;
+      case "watched": return `Hold to turn in — ${who} has first watch`;
+      default: return `Hold to work with ${who}`;
     }
   }
 
@@ -303,7 +303,7 @@ export function createHud(sim, percept, opts = {}) {
         const who = sim.companions.find((c) => c.id === sim.woods.assign[beat.id]);
         els.text.textContent = workPrompt(beat, who?.name || "");
         els.prompt.classList.add("show");
-        els.fill.style.width = "0%";
+        els.fill.style.width = `${(holdFraction(sim.woods) * 100).toFixed(0)}%`;
         return;
       }
       if (w.why) {

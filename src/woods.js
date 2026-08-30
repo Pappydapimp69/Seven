@@ -27,9 +27,9 @@
 //      saveable, resumable and reproducible, and every draw below is taken
 //      unconditionally so the draw count cannot depend on the branch.
 
-import { CELL, GRID, cellToWorld } from "./world.js?v=seven-0.16.0";
-import { makeChronicle, record, fact, account, pickPerturbation, WEATHERS } from "./chronicle.js?v=seven-0.16.0";
-import { makeRoster, nearMiss } from "./names.js?v=seven-0.16.0";
+import { CELL, GRID, cellToWorld } from "./world.js?v=seven-0.17.0";
+import { makeChronicle, record, fact, account, pickPerturbation, WEATHERS } from "./chronicle.js?v=seven-0.17.0";
+import { makeRoster, nearMiss } from "./names.js?v=seven-0.17.0";
 
 /**
  * The four places the day happens in, as camp cells.
@@ -53,6 +53,20 @@ export const SITES = Object.freeze([
 export const SITE_RADIUS = 5.5;   // how close the player stands to work a site
 export const HELPER_RADIUS = 9;   // how close the named hand has to be
 export const ASKS_ALLOWED = 3;    // daylight, expressed as questions
+
+/**
+ * How long a pair of hands takes over a job.
+ *
+ * A beat used to resolve on the press. It worked, and it was nothing: the
+ * player arrived, tapped a key, and read a subtitle about something they had
+ * not watched. The whole design rests on their MEMORY of a day being the
+ * evidence, and a memory needs something to be a memory OF — so a beat is a
+ * hold, the two of them are working while it runs, and the player is looking
+ * at the person whose name they are going to have to remember.
+ *
+ * Long enough to be a moment, short enough that seven of them is not a chore.
+ */
+export const WORK_HOLD_TIME = 1.7;
 
 /** Camp-only, like `world.trainer`. Consumers that do not know about it ignore it. */
 export function attachSites(world) {
@@ -140,6 +154,7 @@ export function startDay(sim, rng, partyIds) {
     chronicle: makeChronicle(weather),
     perturbation: null,     // drawn at dusk, from a SEPARATE derived stream
     perturbSeed: (rng() * 0xffffffff) >>> 0,
+    hold: { beatId: null, progress: 0 },
     asked: [],
     answers: {},          // what each asked person said, kept verbatim
     asksLeft: ASKS_ALLOWED,
@@ -174,6 +189,44 @@ export function canWork(sim, woods) {
   const handNear = Math.hypot(hand.x - site.x, hand.z - site.z) <= HELPER_RADIUS;
   if (!handNear) return { ok: false, why: `Waiting on ${hand.name}.`, site, hand };
   return { ok: true, why: null, site, hand };
+}
+
+/**
+ * Advance (or reset) the hold on the current beat.
+ *
+ * Same shape as the gather hold this borrows from, and the same rule: a hold
+ * is a commitment to ONE beat, not a meter to bank. Walking out of the site,
+ * letting go, or the named hand wandering off all put it back to zero — you
+ * cannot help with half a job.
+ *
+ * Returns true on the tick it completes, so the caller can do the rest.
+ */
+export function updateWorkHold(sim, woods, dt, holding) {
+  const h = woods.hold || (woods.hold = { beatId: null, progress: 0 });
+  const b = beatAt(woods);
+  const ok = holding && b && canWork(sim, woods).ok;
+  if (!ok) {
+    h.beatId = null;
+    h.progress = 0;
+    return false;
+  }
+  if (h.beatId !== b.id) {
+    h.beatId = b.id;
+    h.progress = 0;
+  }
+  h.progress += dt;
+  if (h.progress < WORK_HOLD_TIME) return false;
+  h.beatId = null;
+  h.progress = 0;
+  return true;
+}
+
+/** How far through the current beat, 0..1, for the prompt fill. */
+export function holdFraction(woods) {
+  const b = beatAt(woods);
+  const h = woods.hold;
+  if (!b || !h || h.beatId !== b.id) return 0;
+  return Math.max(0, Math.min(1, h.progress / WORK_HOLD_TIME));
 }
 
 /**
@@ -312,6 +365,7 @@ export function serializeWoods(woods) {
     taken: woods.taken, perturbSeed: woods.perturbSeed,
     perturbation: woods.perturbation ? { ...woods.perturbation } : null,
     chronicle: { weather: woods.chronicle.weather, facts: woods.chronicle.facts.map((f) => ({ ...f })) },
+    hold: { beatId: woods.hold?.beatId ?? null, progress: woods.hold?.progress ?? 0 },
     asked: woods.asked.slice(), asksLeft: woods.asksLeft,
     // The words themselves, not just who was asked. A reload that regenerated
     // them would be safe today — the perturbation is fixed and the renderer is
@@ -330,6 +384,7 @@ export function deserializeWoods(d) {
     taken: d.taken, perturbSeed: d.perturbSeed,
     perturbation: d.perturbation ? { ...d.perturbation } : null,
     chronicle: { weather: d.chronicle.weather, facts: d.chronicle.facts.map((f) => ({ ...f, withWhom: (f.withWhom || []).slice() })) },
+    hold: { beatId: d.hold?.beatId ?? null, progress: d.hold?.progress ?? 0 },
     asked: (d.asked || []).slice(), asksLeft: d.asksLeft,
     answers: Object.fromEntries(Object.entries(d.answers || {}).map(([k, v]) => [k, { weather: v.weather, lines: (v.lines || []).slice() }])),
     accused: d.accused ?? null, correct: d.correct ?? null,

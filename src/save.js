@@ -17,9 +17,9 @@
 //     options (dbh#E4, wrong-sky#E2). And an ended run is never saved, so a
 //     "Resume" can't drop you back onto the frame you already lost.
 
-import { createRun } from "./state.js?v=seven-0.16.0";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.16.0";
-import { attachSites, serializeWoods, deserializeWoods } from "./woods.js?v=seven-0.16.0";
+import { createRun } from "./state.js?v=seven-0.17.0";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.17.0";
+import { attachSites, serializeWoods, deserializeWoods } from "./woods.js?v=seven-0.17.0";
 
 // SEVEN'S OWN KEYS, and this is not cosmetic. GitHub Pages serves every project
 // of one account from ONE origin — `pappydapimp69.github.io` — so /mirage/ and

@@ -93,7 +93,7 @@ const A = (c, m) => { if (!c) fails.push(m); };
     void beat;
     return out;
   });
-  A(!prompts.awayShown || !prompts.awayFromSite.includes("Load"),
+  A(!prompts.awayShown || !/^Hold/.test(prompts.awayFromSite),
     `the work prompt shows from across the camp: "${prompts.awayFromSite}"`);
   A(prompts.aloneShown && /Waiting on/.test(prompts.alone),
     `standing at the site alone said "${prompts.alone}" instead of naming who is missing`);
@@ -112,13 +112,32 @@ const A = (c, m) => { if (!c) fails.push(m); };
     // game produces.
     for (const c of sim.companions) { c.x = sim.world.spawn.x; c.z = sim.world.spawn.z + (c.index || 0); }
     const before = Math.hypot(hand.x - site.x, hand.z - site.z);
-    for (let i = 0; i < 900; i++) M.advance(0.1);
+    for (let i = 0; i < 450; i++) M.advance(0.1);   // 45 sim-seconds is a long walk on an 83m map
     const after = Math.hypot(hand.x - site.x, hand.z - site.z);
     return { before, after, name: hand.name, goal: hand.goalKind, site: site.id };
   });
   A(walked.after < walked.before,
     `${walked.name} did not walk to their job (${walked.before.toFixed(1)}m -> ${walked.after.toFixed(1)}m, goal "${walked.goal}")`);
-  A(walked.after < 10, `${walked.name} never got to the ${walked.site} — still ${walked.after.toFixed(1)}m out after 90s`);
+  A(walked.after < 10, `${walked.name} never got to the ${walked.site} — still ${walked.after.toFixed(1)}m out after 45s`);
+
+  // --- a beat is a HOLD, and a tap is not one ----------------------------
+  const tap = await page.evaluate(() => {
+    const M = window.__seven;
+    M.debugWalkToBeat();
+    M.advance(0.2);
+    const before = M.woods.beat;
+    M.act(M.ACTIONS.SURVEY);            // a tap
+    M.advance(0.4);                     // ...and a moment with nothing held
+    const afterTap = M.woods.beat;
+    M.advance(0.9, { interact: true }); // held, but let go too early
+    M.advance(0.4);
+    const afterShort = M.woods.beat;
+    const fillMid = document.getElementById("actionPromptFill").style.width;
+    return { before, afterTap, afterShort, fillMid };
+  });
+  A(tap.afterTap === tap.before, "a tap finished a job that is supposed to take a moment");
+  A(tap.afterShort === tap.before, "letting go early still finished the job");
+  A(tap.fillMid === "0%" || tap.fillMid === "", `the fill should reset when the hold is dropped, got "${tap.fillMid}"`);
 
   // --- play the whole day with the real key ------------------------------
   const day = await page.evaluate(() => {
@@ -128,9 +147,11 @@ const A = (c, m) => { if (!c) fails.push(m); };
       const at = M.debugWalkToBeat();
       M.advance(0.2);
       const shown = document.getElementById("actionPromptText").textContent;
-      M.act(M.ACTIONS.SURVEY);          // the real interact key
+      M.advance(0.9, { interact: true });
+      const fill = document.getElementById("actionPromptFill").style.width;
+      M.advance(1.2, { interact: true });   // through WORK_HOLD_TIME
       M.advance(0.2);
-      seen.push({ ...at, prompt: shown });
+      seen.push({ ...at, prompt: shown, fill });
     }
     return {
       seen,
@@ -147,19 +168,34 @@ const A = (c, m) => { if (!c) fails.push(m); };
   // stalls in a backgrounded tab.
   A(day.blackout, "the night passed with no blackout at all — the morning is a teleport");
   A(day.facts === 7, `expected seven things to have happened, got ${day.facts}`);
-  A(day.seen.every((x) => x.prompt && x.prompt.length > 4), `a beat offered no prompt: ${JSON.stringify(day.seen)}`);
+  A(day.seen.every((x) => x.prompt && /^Hold/.test(x.prompt)), `a beat did not read as a hold: ${JSON.stringify(day.seen.map(x=>x.prompt))}`);
+  A(day.seen.every((x) => parseFloat(x.fill) > 10 && parseFloat(x.fill) < 100),
+    `the hold gave no partial fill to watch: ${JSON.stringify(day.seen.map(x=>x.fill))}`);
   A(!day.lit, "a worksite is still lit in the morning");
   A(/Ask about yesterday/.test(day.objective), `the morning does not tell you what to do: "${day.objective}"`);
 
+  // --- the night, without sitting through it -----------------------------
+  // That the night HAPPENED is asserted above (day.blackout). Sitting through
+  // it is not worth doing: the blackout is timed off the wall clock so it does
+  // not stretch on a slow machine, and this page runs at a few frames a second
+  // under software GL, where the timestamps rAF hands out lag the real clock.
+  // So check the two things that matter — the screen really is closed, and
+  // input really is being swallowed behind it — and then cut it short.
+  const night = await page.evaluate(() => {
+    const M = window.__seven;
+    const before = M.woods.asksLeft;
+    M.act(M.ACTIONS.CHECK_IN, 0);          // a press made at a black screen
+    M.advance(0.1);
+    const after = M.woods.asksLeft;
+    const closed = M.nightBlackout;
+    M.debugEndNight();
+    return { before, after, closed, cls: document.getElementById("nightfall").className };
+  });
+  A(night.closed, "the screen was not actually black after the last beat");
+  A(night.after === night.before, "a question was spent on a press made at a black screen");
+  A(/hidden/.test(night.cls), `the night did not clear: "${night.cls}"`);
+
   // --- asking -------------------------------------------------------------
-  // Wait the night out first. Input is deliberately swallowed while the screen
-  // is black, so pressing through it is not something a player can do either —
-  // and a test that could would be testing a path the game does not have.
-  await page.waitForFunction(
-    () => document.getElementById("nightfall").classList.contains("lifting")
-       || document.getElementById("nightfall").classList.contains("hidden"),
-    null, { timeout: 15000 },
-  );
   const asked = await page.evaluate(() => {
     const M = window.__seven;
     const out = { accounts: [], taken: M.woods.taken };
@@ -248,19 +284,33 @@ const A = (c, m) => { if (!c) fails.push(m); };
   A(verdict.saveGone, "a finished morning is still in the save slot — Resume would hand it back");
 
   // --- and a day picked back up after a reload ---------------------------
+  // A SECOND PAGE in the same context, not page.reload(). Same effect — a cold
+  // module load reading the same origin's localStorage — and it does not ask a
+  // page that has already mounted two runs under software GL to survive a
+  // navigation. Reloading this one times out even waiting only for "commit".
   await page.evaluate(() => {
     const M = window.__seven;
     M.toTitle();
     M.startWoods("reload-test");
-    M.debugWalkToBeat(); M.act(M.ACTIONS.SURVEY); M.advance(0.2);
-    M.debugWalkToBeat(); M.act(M.ACTIONS.SURVEY); M.advance(0.2);
+    M.debugWalkToBeat(); M.advance(2.1, { interact: true }); M.advance(0.2);
+    M.debugWalkToBeat(); M.advance(2.1, { interact: true }); M.advance(0.2);
     // The REAL autosave, not a test-only writer: it fires on the sim clock
     // every AUTOSAVE_EVERY seconds, so six seconds of standing still is what a
     // player quitting mid-day would actually have left behind.
     M.advance(6);
   });
-  await page.reload({ waitUntil: "networkidle" });
-  const resumed = await page.evaluate(() => {
+  // PARK THE PAGE FIRST, then come back to it. By this point it holds a live
+  // WebGL context and a frame loop with two mounted runs behind it, and under
+  // software GL that is enough to wedge the whole browser: neither a reload
+  // nor a second page could reach "commit" inside thirty seconds, and the
+  // page's own timers were running hundreds of milliseconds behind the wall
+  // clock. about:blank drops the context and the loop; localStorage is scoped
+  // to the ORIGIN and survives the round trip, which is the whole point.
+  await page.goto("about:blank", { waitUntil: "commit", timeout: 90000 });
+  const page2 = page;
+  await page2.goto(url, { waitUntil: "commit", timeout: 90000 });
+  await page2.waitForFunction(() => !!window.__seven, null, { timeout: 20000, polling: 200 });
+  const resumed = await page2.evaluate(() => {
     document.getElementById("continueBtn").click();
     const M = window.__seven;
     M.advance(0.3);
@@ -279,6 +329,7 @@ const A = (c, m) => { if (!c) fails.push(m); };
   A(resumed.sites === 4, `a resumed day has ${resumed.sites} worksites`);
   A(resumed.beat === 2 && resumed.facts === 2, `the resumed day is at beat ${resumed.beat} with ${resumed.facts} facts, expected 2/2`);
   A(resumed.lit, "the resumed day lit no worksite");
+  A(/the woods/.test(resumed.detail), `the Resume button describes a woods day as "${resumed.detail}"`);
   A(resumed.names.every((n) => /^[A-Z]{4,8}$/.test(n)), `the party came back under different names: ${resumed.names.join(",")}`);
 
   A(errs.length === 0, `page errors: ${JSON.stringify(errs.slice(0, 3))}`);

@@ -6,22 +6,22 @@ import {
   possess, release, possessableCompanions, activatePylon, pylonAt,
   callCompanion, clearMoss, mossedAt,
   PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=seven-0.16.0";
-import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.16.0";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.16.0";
+} from "./state.js?v=seven-0.17.0";
+import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.17.0";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.17.0";
 import {
   attachSites, startDay, beatAt, briefFor, canWork, workBeat, fallNight, ask, accuse,
-  BEATS, PHASE, ASKS_ALLOWED,
-} from "./woods.js?v=seven-0.16.0";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=seven-0.16.0";
-import { createRenderer } from "./render.js?v=seven-0.16.0";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.16.0";
-import { createInput, ACTIONS } from "./input.js?v=seven-0.16.0";
-import { createAudio } from "./audio.js?v=seven-0.16.0";
-import { hashSeed, makeRng } from "./rng.js?v=seven-0.16.0";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings } from "./save.js?v=seven-0.16.0";
+  updateWorkHold, BEATS, PHASE, ASKS_ALLOWED,
+} from "./woods.js?v=seven-0.17.0";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=seven-0.17.0";
+import { createRenderer } from "./render.js?v=seven-0.17.0";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.17.0";
+import { createInput, ACTIONS } from "./input.js?v=seven-0.17.0";
+import { createAudio } from "./audio.js?v=seven-0.17.0";
+import { hashSeed, makeRng } from "./rng.js?v=seven-0.17.0";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings } from "./save.js?v=seven-0.17.0";
 
-const BUILD = "seven-0.16.0";
+const BUILD = "seven-0.17.0";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -361,8 +361,10 @@ function emitToHud(sim, kind, text, opts = {}) {
  * because the whole design rests on nobody finding anything strange — a line
  * here would be the game pointing, and there would be nothing left to deduce.
  */
-const NIGHT_HOLD_MS = 4200;   // fall + hold; long enough that a night passed
+const NIGHT_HOLD = 4.2;       // seconds of black: fall + hold
+const NIGHT_LIFT = 3.3;       // seconds of opening again
 let nightBlackout = false;    // true only while the screen is covered
+let nightAt = -1;             // performance.now() when the screen closed; -1 when idle
 
 /**
  * PURELY PRESENTATIONAL. The model has already moved on — the night resolved,
@@ -380,17 +382,54 @@ function playNightfall() {
   const layer = el("nightfall");
   if (!layer) return;
   nightBlackout = true;
+  nightAt = performance.now();
   el("nightfallText").textContent = "You put the fire down and turn in.";
   layer.classList.remove("hidden", "lifting");
   void layer.offsetWidth;
   layer.classList.add("show");
-  setTimeout(() => {
+}
+
+/**
+ * Ticked from the frame loop, NOT from setTimeout.
+ *
+ * A browser throttles timers hard in a hidden or backgrounded tab — down to
+ * once a minute — so a multi-second sequence built out of nested setTimeouts
+ * can stall for as long as the player is looking at something else, and come
+ * back to a screen that is still black. rAF stops cleanly instead and resumes
+ * where it was, which is the behaviour this actually wants: the night should
+ * pause with the game, not run without it.
+ *
+ * (It is also the difference between a headless test that passes and one that
+ * hangs, which is how this was noticed.)
+ */
+function updateNightfall() {
+  if (nightAt < 0) return;
+  const layer = el("nightfall");
+  if (!layer) { nightAt = -1; return; }
+  // WALL CLOCK, not the frame loop's dt. The loop caps dt at 0.1s so a slow or
+  // backgrounded frame cannot teleport the simulation — which is right for the
+  // sim and wrong here: under heavy throttling the accumulated dt runs at a
+  // fraction of real time and a four-second fade stretches to fifteen. This is
+  // presentation and belongs on the real clock. It still stops with the loop,
+  // which is the property setTimeout does not have.
+  // performance.now() AT CALL TIME, not the frame timestamp rAF hands in. A
+  // rAF timestamp is the time the frame was scheduled for, and under heavy
+  // throttling it is delivered well BEHIND the current clock — measured here at
+  // ~200ms in the past, persistently, which made the elapsed time negative on
+  // every frame and the fade never end. The frame timestamp is right for
+  // simulation deltas and wrong for "how long has this been on screen".
+  const t = (performance.now() - nightAt) / 1000;
+  if (nightBlackout && t >= NIGHT_HOLD) {
     nightBlackout = false;
     el("nightfallText").textContent = "";
     layer.classList.add("lifting");
     layer.classList.remove("show");
-    setTimeout(() => layer.classList.add("hidden"), 3300);
-  }, NIGHT_HOLD_MS);
+  }
+  if (!nightBlackout && t >= NIGHT_HOLD + NIGHT_LIFT) {
+    layer.classList.add("hidden");
+    layer.classList.remove("lifting");
+    nightAt = -1;
+  }
 }
 
 function woodsSleep(sim) {
@@ -665,6 +704,18 @@ function resumeWoodsUi(sim) {
 
 /** Everything a run needs on screen, shared by a fresh start and a resume. */
 function mountRun(sim, openingLine) {
+  // DROP THE PREVIOUS RUN'S RENDERER FIRST.
+  //
+  // Every mount builds a fresh scene, a fresh geometry set and a fresh WebGL
+  // context on the same canvas, and until now nothing ever let the old one go.
+  // It was survivable while a session mounted two or three runs in its whole
+  // life; THE WOODS put "walk another day" one press away from the verdict, so
+  // a player settling in for six runs was stacking six live contexts and six
+  // scenes on one canvas — and a browser hard-caps live WebGL contexts and
+  // starts discarding the oldest, which is a black screen with nothing in the
+  // console. A headless page found it first by wedging so completely it could
+  // not navigate to about:blank.
+  run?.renderer?.dispose?.();
   const seedValue = sim.seed;
   const percept = createPercept(sim.player);
   const renderer = createRenderer(canvas, sim);
@@ -823,9 +874,12 @@ function handleAction(action, arg, player = run.players[0]) {
   if (sim.woods) {
     // Nothing lands while the screen is black. See playNightfall.
     if (nightBlackout && action !== ACTIONS.PAUSE) return;
-    if (action === ACTIONS.SURVEY && sim.woods.phase === PHASE.DAY) {
-      if (woodsWork(sim)) return;
-    }
+    // A beat is a HOLD, not a press (see woods.js WORK_HOLD_TIME), so the
+    // interact ACTION does nothing here — the hold is driven from step() off
+    // the raw interact flag, exactly like gathering. Swallowed rather than
+    // fallen through, or a tap at a worksite would go to the basin verbs
+    // underneath and survey a marker that is not there.
+    if (action === ACTIONS.SURVEY && sim.woods.phase === PHASE.DAY) return;
     if (sim.woods.phase === PHASE.MORNING) {
       if (action === ACTIONS.CHECK_IN) {
         if (typeof arg === "number") player.selected = arg;
@@ -1152,6 +1206,13 @@ function step(dt, intent) {
     z: -intent.move.x * sin + intent.move.z * cos,
   };
 
+  // THE DAY'S HOLD, before the queue. It reads the raw interact flag rather
+  // than a queued action because it is a hold: the queue carries edges, and an
+  // edge cannot tell you that a key is still down.
+  if (sim.woods && sim.woods.phase === PHASE.DAY && !nightBlackout) {
+    if (updateWorkHold(sim, sim.woods, dt, !!intent.interact)) woodsWork(sim);
+  }
+
   for (const { action, arg } of intent.queue) handleAction(action, arg);
   // handleAction() (pickup/use/craft/gather/log/dose) emits into sim.events —
   // but tick()'s own first line wipes that array clean for ITS OWN internal
@@ -1348,6 +1409,10 @@ function frame(now) {
   // returns the movement intent the sim step needs. Scheme-change UI updates
   // are pushed via the onScheme callback (refreshSchemeUI), not polled here.
   const intent = input.poll(dt);
+  // Before the early return: the night has to finish opening even on the
+  // frames where there is nothing to step — a paused game or a run that has
+  // ended must not leave the screen black.
+  updateNightfall();
   if (!run || paused || run.sim.status !== "playing" || !intent) return;
   pollCoopJoin();
   step(dt, intent);
@@ -1546,6 +1611,27 @@ if (typeof window !== "undefined") {
       return { beat: b.id, site: site.id, hand: hand.name };
     },
     woodsAccuse(id) { const sim = run?.sim; return sim && woodsAccuse(sim, id); },
+    /**
+     * Cut the night short. A TEST SEAM, and only that.
+     *
+     * The blackout is timed off the wall clock so it does not stretch when
+     * frames are slow — which is right for a player and unusable in a headless
+     * page under software GL, where the frame loop is throttled to a few
+     * frames a second and the timestamps rAF hands out lag the real clock. A
+     * browser test can assert that the night HAPPENED (the screen closed, the
+     * phase moved, input was swallowed) without also sitting through it.
+     */
+    debugEndNight() {
+      nightAt = -1;
+      nightBlackout = false;
+      const layer = el("nightfall");
+      if (!layer) return false;
+      el("nightfallText").textContent = "";
+      layer.classList.remove("show", "lifting");
+      layer.classList.add("hidden");
+      return true;
+    },
+    get nightBlackout() { return nightBlackout; },
     woodsOpenAccuse() { const sim = run?.sim; return sim && openAccuse(sim); },
     enterObjective(i) { return enterObjective(i); },
     /** Which stages are recorded done, for the browser tutorial test. */
