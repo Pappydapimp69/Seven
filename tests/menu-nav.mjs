@@ -21,10 +21,10 @@ const fails=[];const A=(c,m)=>{if(!c)fails.push(m)};
  const page=await b.newPage({viewport:{width:1280,height:800}});
  await page.goto(`http://localhost:${s.address().port}/index.html`,{waitUntil:"networkidle"});
  // create a save, return to title
- await page.evaluate(()=>{const M=window.__mirage;M.startRun({seed:99});M.sim.time=300;M.advance(8);M.toTitle();});
+ await page.evaluate(()=>{const M=window.__seven;M.startRun({seed:99});M.sim.time=300;M.advance(8);M.toTitle();});
  // walk the menu grid down from the top and collect what focus lands on
  const seen = await page.evaluate(()=>{
-   const M=window.__mirage; const out=[];
+   const M=window.__seven; const out=[];
    for(let i=0;i<6;i++){ const f=document.querySelector("#title .gpfocus");
      out.push(f? (f.id||f.dataset.diff||f.dataset.coopOpt||f.tagName) : null); M.menuDown(); }
    return out;

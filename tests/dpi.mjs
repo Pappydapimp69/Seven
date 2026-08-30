@@ -64,13 +64,13 @@ for (const c of CASES) {
   const ctx = await browser.newContext({ viewport: { width: c.width, height: c.height }, deviceScaleFactor: c.deviceScaleFactor });
   const page = await ctx.newPage();
   await page.goto(`http://127.0.0.1:${PORT}/index.html`, { waitUntil: "load" });
-  await page.waitForFunction(() => !!window.__mirage, null, { timeout: 20000 });
-  await page.evaluate(() => window.__mirage.startRun({ difficulty: "standard", seed: 4242 }));
-  await page.waitForFunction(() => !!window.__mirage.sim, null, { timeout: 15000 });
+  await page.waitForFunction(() => !!window.__seven, null, { timeout: 20000 });
+  await page.evaluate(() => window.__seven.startRun({ difficulty: "standard", seed: 4242 }));
+  await page.waitForFunction(() => !!window.__seven.sim, null, { timeout: 15000 });
   await page.waitForTimeout(600);
 
   const r = await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     const cam = M.renderer.camera;
     const canvas = document.querySelector("canvas");
     const probe = document.getElementById("subtitles") || document.body;
@@ -96,7 +96,7 @@ for (const c of CASES) {
   // mouse would report, so that is what the synthetic event carries.
   const PHYSICAL_DEVICE_PX = 400;
   const yaw = await page.evaluate((devicePx) => {
-    const M = window.__mirage;
+    const M = window.__seven;
     const cssPx = devicePx / window.devicePixelRatio;
     return M.debugMouseLook(cssPx, 0);
   }, PHYSICAL_DEVICE_PX);

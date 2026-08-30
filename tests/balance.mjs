@@ -1,5 +1,5 @@
-// Balance harness: plays complete MIRAGE runs headlessly with a scripted lead and
-// reports the outcome distribution. Run: node mirage/tests/balance.mjs [seeds]
+// Balance harness: plays complete SEVEN runs headlessly with a scripted lead and
+// reports the outcome distribution. Run: node tests/balance.mjs [seeds]
 //
 // Why whole runs and not step assertions: reachability/outcome is a distinct test
 // axis from step-correctness. A sim can be right at every step and still produce a
@@ -82,7 +82,7 @@ function playRun(seed, policy, difficulty = "standard") {
 
   // --- the handicap ---------------------------------------------------------
   // careful/reckless read sim.monoliths, sim.pylons and c.lucidity directly.
-  // That makes them completability oracles and NOTHING else: MIRAGE's entire
+  // That makes them completability oracles and NOTHING else: SEVEN's entire
   // difficulty is the gap between what is true and what you are shown, and a
   // bot with the answer key never opens that gap. Raising the drain rate until
   // an omniscient bot loses sets the difficulty for a player who cannot be
@@ -139,7 +139,7 @@ function playRun(seed, policy, difficulty = "standard") {
         ].filter((p) => (cooldown.get(p.id) || 0) < sim.time);
         if (apparent.length) {
           const p = apparent.reduce((a, b) => (dist(a, sim.player) < dist(b, sim.player) ? a : b));
-          return { target: p, kind: p.phantom ? "mirage" : "pylon" };
+          return { target: p, kind: p.phantom ? "seven" : "pylon" };
         }
       }
       // A pylon we have just finished using is on cooldown. Without this the bot
@@ -366,7 +366,7 @@ function summarise(label, reports) {
   return { n, wins, dissolved, dark, winRate: wins / n };
 }
 
-console.log(`MIRAGE balance — ${SEEDS} seeds per policy\n`);
+console.log(`SEVEN balance — ${SEEDS} seeds per policy\n`);
 
 const careful = [];
 const reckless = [];
@@ -459,4 +459,4 @@ if (problems.length) {
   for (const p of problems) console.log("  ✗ " + p);
   process.exit(1);
 }
-console.log("\nmirage balance: OK");
+console.log("\nseven balance: OK");

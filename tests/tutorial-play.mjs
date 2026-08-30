@@ -42,7 +42,7 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const consoleErrors = [];
 page.on("pageerror", (e) => consoleErrors.push(String(e)));
 await page.goto(`http://127.0.0.1:${PORT}/index.html`, { waitUntil: "load" });
-await page.waitForFunction(() => !!window.__mirage, null, { timeout: 20000 });
+await page.waitForFunction(() => !!window.__seven, null, { timeout: 20000 });
 
 // --- the entry point --------------------------------------------------------
 {
@@ -68,7 +68,7 @@ await page.waitForFunction(() => !!window.__mirage, null, { timeout: 20000 });
 {
   // FIRST, before the playthrough — sampling after it finishes measures the
   // title screen it returns to, which is dark and scored 21/255 with no green.
-  await page.evaluate(() => { window.__mirage.startStage(0); });
+  await page.evaluate(() => { window.__seven.startStage(0); });
   await page.waitForTimeout(1500);
 
   // Screenshot, then read the PIXELS BACK THROUGH AN <img>. Drawing the WebGL
@@ -101,7 +101,7 @@ await page.waitForFunction(() => !!window.__mirage, null, { timeout: 20000 });
 // --- the whole walk in, one session, start to finish ------------------------
 {
   const r = await page.evaluate(async () => {
-    const M = window.__mirage;
+    const M = window.__seven;
     const out = { steps: [] };
     const done = () => M.tutorialDone();
     const note = (k, v) => out.steps.push([k, v]);
@@ -266,7 +266,7 @@ await page.waitForFunction(() => !!window.__mirage, null, { timeout: 20000 });
 
 // --- progress persists --------------------------------------------------------
 {
-  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("mirage:settings") || "{}"));
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("seven:settings") || "{}"));
   assert(Array.isArray(stored.tutorial?.done), "tutorial progress is not in the settings payload");
   assert(stored.tutorial.done.length >= 5, `only ${stored.tutorial?.done?.length} objectives recorded as done`);
   const keys = await page.evaluate(() => Object.keys(localStorage));

@@ -24,7 +24,7 @@ const fails=[];const A=(c,m)=>{if(!c)fails.push(m)};
  await page.click('[data-diff="bleak"]');
  await page.click('[data-coop-opt="couch"]');
  await page.evaluate(()=>{ document.querySelector('[data-vol="0.35"]').click(); });
- const stored = await page.evaluate(()=>JSON.parse(localStorage.getItem("mirage:settings")||"null"));
+ const stored = await page.evaluate(()=>JSON.parse(localStorage.getItem("seven:settings")||"null"));
  A(stored && stored.difficulty==="bleak", `pressure not stored: ${JSON.stringify(stored)}`);
  A(stored && stored.coop==="couch", `party not stored: ${JSON.stringify(stored)}`);
  A(stored && stored.volume===0.35, `volume not stored: ${JSON.stringify(stored)}`);
@@ -34,14 +34,14 @@ const fails=[];const A=(c,m)=>{if(!c)fails.push(m)};
    diffSel: document.querySelector('[data-diff].sel')?.dataset.diff,
    coopSel: document.querySelector('[data-coop-opt].sel')?.dataset.coopOpt,
    volSel: document.querySelector('[data-vol].sel')?.dataset.vol,
-   coopArmed: window.__mirage.coopAllowed,
+   coopArmed: window.__seven.coopAllowed,
  }));
  A(after.diffSel==="bleak", `pressure not restored on reload: ${after.diffSel}`);
  A(after.coopSel==="couch", `party not restored on reload: ${after.coopSel}`);
  A(after.volSel==="0.35", `volume button not restored on reload: ${after.volSel}`);
  A(after.coopArmed===true, "restored party preference did not arm the join poll");
  // the run it starts must honour the restored pressure
- const started = await page.evaluate(()=>{ document.getElementById("startBtn").click(); return window.__mirage.sim.difficulty; });
+ const started = await page.evaluate(()=>{ document.getElementById("startBtn").click(); return window.__seven.sim.difficulty; });
  A(started==="bleak", `the run ignored the restored pressure: ${started}`);
  A(errs.length===0,`page errors: ${JSON.stringify(errs.slice(0,2))}`);
  await b.close(); s.close();

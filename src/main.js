@@ -6,22 +6,22 @@ import {
   possess, release, possessableCompanions, activatePylon, pylonAt,
   callCompanion, clearMoss, mossedAt,
   PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=seven-0.1.0";
-import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.1.0";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.1.0";
+} from "./state.js?v=seven-0.14.0";
+import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.14.0";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.14.0";
 import {
   attachSites, startDay, beatAt, briefFor, canWork, workBeat, fallNight, ask, accuse,
   BEATS, PHASE, ASKS_ALLOWED,
-} from "./woods.js?v=seven-0.1.0";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=seven-0.1.0";
-import { createRenderer } from "./render.js?v=seven-0.1.0";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.1.0";
-import { createInput, ACTIONS } from "./input.js?v=seven-0.1.0";
-import { createAudio } from "./audio.js?v=seven-0.1.0";
-import { hashSeed, makeRng } from "./rng.js?v=seven-0.1.0";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings } from "./save.js?v=seven-0.1.0";
+} from "./woods.js?v=seven-0.14.0";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=seven-0.14.0";
+import { createRenderer } from "./render.js?v=seven-0.14.0";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.14.0";
+import { createInput, ACTIONS } from "./input.js?v=seven-0.14.0";
+import { createAudio } from "./audio.js?v=seven-0.14.0";
+import { hashSeed, makeRng } from "./rng.js?v=seven-0.14.0";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings } from "./save.js?v=seven-0.14.0";
 
-const BUILD = "seven-0.1.0";
+const BUILD = "seven-0.14.0";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -605,7 +605,7 @@ function mountRun(sim, openingLine) {
   // would either no-op or flash a browser permission prompt for nothing.
   if (input.activeScheme !== "gamepad") input.requestLock();
   lastFrame = 0;
-  // No assignment to window.__mirage here: `sim`, `percept` and `renderer` are
+  // No assignment to window.__seven here: `sim`, `percept` and `renderer` are
   // getters over the live `run`, so they already follow this new run. Writing to
   // them throws in strict mode (ES modules are always strict), which is exactly
   // what the smoke test caught.
@@ -1406,7 +1406,7 @@ function boot() {
 // elapsed seconds is a known source of false failures. Everything the tests
 // need to observe is reachable from here.
 if (typeof window !== "undefined") {
-  window.__mirage = {
+  window.__seven = {
     build: BUILD,
     startRun,
     get sim() { return run?.sim ?? null; },

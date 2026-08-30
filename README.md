@@ -243,7 +243,7 @@ Built around two lessons:
 - **No assertion is phrased in wall-clock seconds.** Headless rAF runs at a
   fraction of real time (measured at 8–10 fps under software GL), so
   "wait 3s, expect 3s of drain" is a flake. Tests drive the sim's own clock
-  through `window.__mirage.advance(seconds)` and assert on `sim.time`.
+  through `window.__seven.advance(seconds)` and assert on `sim.time`.
 - **"It loaded and nothing threw" is a false green for 3D.** Software GL will
   happily load a scene that draws nothing, so the smoke test asserts on Three's
   own draw-call and triangle counters — and reports SKIP, not PASS, when the

@@ -66,7 +66,7 @@ const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, L3: 10, START:
   });
 
   await page.goto(`http://localhost:${PORT}/index.html`, { waitUntil: "networkidle" });
-  await page.waitForFunction(() => !!window.__mirage, null, { timeout: 15000 });
+  await page.waitForFunction(() => !!window.__seven, null, { timeout: 15000 });
 
   // Hold/settle durations are generous on purpose. The game's own poll loop is
   // rAF-driven, and measured elsewhere in this repo at 8-10 fps under headless
@@ -166,19 +166,19 @@ const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, L3: 10, START:
   assert((await rowNow()) === "1", `one row below difficulty should be Party, got row ${await rowNow()}`);
   await tap(BTN.RIGHT);
   await tap(BTN.A);
-  assert(await page.evaluate(() => window.__mirage.coopAllowed === true),
+  assert(await page.evaluate(() => window.__seven.coopAllowed === true),
     "gamepad-only couch co-op pick failed");
   await tap(BTN.LEFT);
   await tap(BTN.A);
-  assert(await page.evaluate(() => window.__mirage.coopAllowed === false),
+  assert(await page.evaluate(() => window.__seven.coopAllowed === false),
     "gamepad-only return to Solo failed");
   assert(await walkTo("startBtn"), `could not walk back down to Start, stopped at ${await focusNow()}`);
   await tap(BTN.A);
-  await page.waitForFunction(() => !!window.__mirage.sim, null, { timeout: 10000 });
+  await page.waitForFunction(() => !!window.__seven.sim, null, { timeout: 10000 });
   const started = await page.evaluate(() => ({
-    difficulty: window.__mirage.sim.difficulty,
-    seed: window.__mirage.sim.seed,
-    camp: !!window.__mirage.sim.world.cellKind,
+    difficulty: window.__seven.sim.difficulty,
+    seed: window.__seven.sim.seed,
+    camp: !!window.__seven.sim.world.cellKind,
     hudVisible: !document.getElementById("hudLayer").classList.contains("hidden"),
   }));
   // Names the RUN as well as the setting: "wrong difficulty" was the symptom
@@ -193,12 +193,12 @@ const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, L3: 10, START:
   assert(/A/.test(hint) && /X/.test(hint) && /Y/.test(hint), `in-run hint missing gamepad badges: ${JSON.stringify(hint)}`);
 
   // Left stick moves the player (through the real rAF loop this time, not
-  // window.__mirage.advance(), so this exercises input.poll() end to end).
-  const before = await page.evaluate(() => ({ x: window.__mirage.sim.player.x, z: window.__mirage.sim.player.z }));
+  // window.__seven.advance(), so this exercises input.poll() end to end).
+  const before = await page.evaluate(() => ({ x: window.__seven.sim.player.x, z: window.__seven.sim.player.z }));
   await page.evaluate(() => { window.__pad.axes[1] = -1; }); // stick forward
   await page.waitForTimeout(900);
   await page.evaluate(() => { window.__pad.axes[1] = 0; });
-  const after = await page.evaluate(() => ({ x: window.__mirage.sim.player.x, z: window.__mirage.sim.player.z }));
+  const after = await page.evaluate(() => ({ x: window.__seven.sim.player.x, z: window.__seven.sim.player.z }));
   const moved = Math.hypot(after.x - before.x, after.z - before.z);
   assert(moved > 0.4, `left stick did not move the player through the real frame loop (moved ${moved.toFixed(2)})`);
 
@@ -208,38 +208,38 @@ const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, L3: 10, START:
   // keyboard digit presses, never from LB/RB).
   await tap(BTN.RB);
   await tap(BTN.RB);
-  const selAfterCycle = await page.evaluate(() => window.__mirage.selected);
+  const selAfterCycle = await page.evaluate(() => window.__seven.selected);
   assert(selAfterCycle === 2, `RB x2 should select companion index 2, got ${selAfterCycle}`);
   const subtitlesBefore = await page.evaluate(() => document.getElementById("subtitles").innerText);
   await tap(BTN.X);
   const subtitlesAfter = await page.evaluate(() => document.getElementById("subtitles").innerText);
-  const companionName = await page.evaluate(() => window.__mirage.sim.companions[2].name);
+  const companionName = await page.evaluate(() => window.__seven.sim.companions[2].name);
   assert(
     subtitlesAfter !== subtitlesBefore && subtitlesAfter.includes(companionName),
     `X (check-in) did not report on the RB-selected companion (${companionName}): ${JSON.stringify(subtitlesAfter)}`,
   );
 
   // Y spends a dose on that same selection.
-  const dosesBefore = await page.evaluate(() => window.__mirage.sim.doses);
+  const dosesBefore = await page.evaluate(() => window.__seven.sim.doses);
   await tap(BTN.Y);
-  const dosesAfter = await page.evaluate(() => window.__mirage.sim.doses);
+  const dosesAfter = await page.evaluate(() => window.__seven.sim.doses);
   assert(dosesAfter === dosesBefore - 1, `Y (dose) did not spend a dose (before ${dosesBefore}, after ${dosesAfter})`);
 
   // ---- items: A is the same contextual pickup verb as SURVEY, RT cycles, B uses
   await page.evaluate(() => {
-    const s = window.__mirage.sim;
+    const s = window.__seven.sim;
     const it = s.items.find((x) => !x.taken);
     // Loud, and it names WHICH RUN it is looking at. When the menu walk above
     // started the wrong game this threw a bare "cannot set property of
     // undefined", which says nothing about the actual cause.
     if (!it) throw new Error(`no item to pick up — seed ${s.seed}, camp ${!!s.world.cellKind}, ${s.items.length} items`);
     it.discovered = true;
-    window.__mirage.teleport(it.x, it.z);
+    window.__seven.teleport(it.x, it.z);
   });
-  const invBefore = await page.evaluate(() => window.__mirage.sim.inventory.length);
+  const invBefore = await page.evaluate(() => window.__seven.sim.inventory.length);
   await tap(BTN.A); // pickup takes priority over marker-survey when both are in reach
   const afterPickup = await page.evaluate(() => ({
-    inv: window.__mirage.sim.inventory.length,
+    inv: window.__seven.sim.inventory.length,
     bar: document.getElementById("itemBar").innerText,
   }));
   assert(afterPickup.inv === invBefore + 1, `[A] did not pick up the item in reach (${invBefore} -> ${afterPickup.inv})`);
@@ -248,18 +248,18 @@ const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, L3: 10, START:
   // Push a second, known-real flare directly so RT/B have a deterministic
   // target regardless of what kind the world roll actually handed us.
   await page.evaluate(() => {
-    window.__mirage.sim.inventory.push({ id: "gp-flare", real: true, kind: "flare", claimedKind: null });
+    window.__seven.sim.inventory.push({ id: "gp-flare", real: true, kind: "flare", claimedKind: null });
   });
   await tap(BTN.RT);
-  const selectedAfterCycle = await page.evaluate(() => window.__mirage.selectedItem);
+  const selectedAfterCycle = await page.evaluate(() => window.__seven.selectedItem);
   assert(selectedAfterCycle === 1, `[RT] did not cycle to the second inventory slot, got ${selectedAfterCycle}`);
 
-  const invBeforeUse = await page.evaluate(() => window.__mirage.sim.inventory.length);
-  const usedBefore = await page.evaluate(() => window.__mirage.sim.stats.itemsUsed + window.__mirage.sim.stats.phantomItemsUsed);
+  const invBeforeUse = await page.evaluate(() => window.__seven.sim.inventory.length);
+  const usedBefore = await page.evaluate(() => window.__seven.sim.stats.itemsUsed + window.__seven.sim.stats.phantomItemsUsed);
   await tap(BTN.B);
   const afterUse = await page.evaluate(() => ({
-    inv: window.__mirage.sim.inventory.length,
-    used: window.__mirage.sim.stats.itemsUsed + window.__mirage.sim.stats.phantomItemsUsed,
+    inv: window.__seven.sim.inventory.length,
+    used: window.__seven.sim.stats.itemsUsed + window.__seven.sim.stats.phantomItemsUsed,
   }));
   assert(afterUse.inv === invBeforeUse - 1, `[B] did not consume the used slot (${invBeforeUse} -> ${afterUse.inv})`);
   assert(afterUse.used === usedBefore + 1, "using an item via [B] was not recorded in stats");
@@ -267,15 +267,15 @@ const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, L3: 10, START:
   // ---- crafting: D-pad Up combines two real items, same edges[12] the title
   // screen's menu nav already exercised — this time in "game" mode.
   await page.evaluate(() => {
-    const s = window.__mirage.sim;
+    const s = window.__seven.sim;
     s.inventory.length = 0;
     s.inventory.push({ id: "gp-craft-a", real: true, kind: "lens", claimedKind: null });
     s.inventory.push({ id: "gp-craft-b", real: true, kind: "tether", claimedKind: null });
   });
   await tap(BTN.UP);
   const afterCraft = await page.evaluate(() => ({
-    inventory: window.__mirage.sim.inventory.map((slot) => slot.kind),
-    crafted: window.__mirage.sim.stats.itemsCrafted,
+    inventory: window.__seven.sim.inventory.map((slot) => slot.kind),
+    crafted: window.__seven.sim.stats.itemsCrafted,
   }));
   assert(
     afterCraft.inventory.length === 1 && afterCraft.inventory[0] === "ward",
@@ -286,14 +286,14 @@ const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, L3: 10, START:
   // ---- gathering: [A] is the same contextual verb, one priority step below
   // an item pickup and above a marker survey — but it's a HOLD, not a tap.
   await page.evaluate(() => {
-    const s = window.__mirage.sim;
+    const s = window.__seven.sim;
     const t = s.trees.find((x) => !x.chopped);
     t.discovered = true;
-    window.__mirage.teleport(t.x, t.z);
+    window.__seven.teleport(t.x, t.z);
   });
-  const woodBefore = await page.evaluate(() => window.__mirage.sim.wood);
+  const woodBefore = await page.evaluate(() => window.__seven.sim.wood);
   await tap(BTN.A); // a bare tap must not chop
-  const woodAfterTap = await page.evaluate(() => window.__mirage.sim.wood);
+  const woodAfterTap = await page.evaluate(() => window.__seven.sim.wood);
   assert(woodAfterTap === woodBefore, `a bare [A] tap should not gather (${woodBefore} -> ${woodAfterTap})`);
   // A HOLD cannot be expressed as a fixed wall-clock press here, and that is
   // not a tuning detail — it is this file's own lesson. The sim advances at
@@ -312,7 +312,7 @@ const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, L3: 10, START:
   let woodAfter = woodBefore;
   for (let i = 0; i < 150 && woodAfter === woodBefore; i++) {
     await page.waitForTimeout(100);
-    woodAfter = await page.evaluate(() => window.__mirage.sim.wood);
+    woodAfter = await page.evaluate(() => window.__seven.sim.wood);
   }
   await page.evaluate((i) => { window.__pad.buttons[i].pressed = false; }, BTN.A);
   await page.waitForTimeout(150);
@@ -324,7 +324,7 @@ const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, L3: 10, START:
   // Start pauses, and the pause screen is itself gamepad-navigable.
   await tap(BTN.START);
   const pausedState = await page.evaluate(() => ({
-    paused: window.__mirage.paused,
+    paused: window.__seven.paused,
     pauseVisible: !document.getElementById("pauseLayer").classList.contains("hidden"),
   }));
   assert(pausedState.paused && pausedState.pauseVisible, "Start did not open the pause screen via gamepad");
@@ -340,7 +340,7 @@ const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, L3: 10, START:
   // B on the pause screen should resume, same as Escape/Resume button.
   await tap(BTN.B);
   const resumedState = await page.evaluate(() => ({
-    paused: window.__mirage.paused,
+    paused: window.__seven.paused,
     hudVisible: !document.getElementById("hudLayer").classList.contains("hidden"),
   }));
   assert(!resumedState.paused && resumedState.hudVisible, "B on the pause screen did not resume play");
@@ -349,14 +349,14 @@ const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, L3: 10, START:
   // Force a fast finish so the debrief screen actually appears: drop every
   // companion (dissolution) rather than waiting out a real run.
   await page.evaluate(() => {
-    const s = window.__mirage.sim;
+    const s = window.__seven.sim;
     for (const c of s.party) c.lucidity = 0;
   });
   // advance(11) drives ~330 sim steps synchronously in-page, each with a full
   // Three.js render pass — under this sandbox's occasional heavy load that can
   // itself take real wall-clock seconds, so the wait below gets real headroom
   // rather than a tight timeout that reads as "broken" when it is just "slow".
-  await page.evaluate(() => window.__mirage.advance(11)); // > DISSOLVE_TIME
+  await page.evaluate(() => window.__seven.advance(11)); // > DISSOLVE_TIME
   // A manual Node-side poll, not page.waitForFunction(): that helper's default
   // "raf" polling mode runs ITS check via requestAnimationFrame inside the page,
   // which can be starved for many seconds behind the backlog `advance()` just
@@ -396,7 +396,7 @@ const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, L3: 10, START:
     for (const f of failures) console.log("  ✗ " + f);
     process.exit(1);
   }
-  console.log("mirage gamepad: OK");
+  console.log("seven gamepad: OK");
 })().catch((e) => {
   console.error("GAMEPAD TEST CRASHED:", e);
   process.exit(1);

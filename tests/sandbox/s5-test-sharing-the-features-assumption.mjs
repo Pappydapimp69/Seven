@@ -1,7 +1,7 @@
 // Sandbox: can a test that shares its feature's assumption detect a defect in
 // that assumption? Modelled by construction rather than argued.
 //
-// The real case (mirage#E11): observe() accumulated a multi-event tally on the
+// The real case (seven#E11): observe() accumulated a multi-event tally on the
 // `progress` object it was handed. The unit test held ONE progress object
 // across all three calls. The real caller rebuilt it every frame from storage.
 // The tally therefore never survived in play — and the test passed, because it

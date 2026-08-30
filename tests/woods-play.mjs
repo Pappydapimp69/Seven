@@ -50,7 +50,7 @@ const A = (c, m) => { if (!c) fails.push(m); };
 
   // --- the day starts -----------------------------------------------------
   const start = await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     M.startWoods("woods-test");
     M.advance(0.3);
     const w = M.woods;
@@ -75,7 +75,7 @@ const A = (c, m) => { if (!c) fails.push(m); };
 
   // --- the prompt appears where the work is, and nowhere else ------------
   const prompts = await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     const out = {};
     M.advance(0.2);
     out.awayFromSite = document.getElementById("actionPromptText").textContent;
@@ -104,7 +104,7 @@ const A = (c, m) => { if (!c) fails.push(m); };
   // not come, every beat needs a CALL, and CALL_PERSONAL is 120 seconds, so a
   // seven-beat day would spend most of itself waiting.
   const walked = await page.evaluate(async () => {
-    const M = window.__mirage; const sim = M.sim; const w = M.woods;
+    const M = window.__seven; const sim = M.sim; const w = M.woods;
     const site = sim.world.sites.find((x) => x.id === w.activeSiteId);
     const hand = sim.companions.find((c) => c.jobSite);
     // Put everyone back on the map first — the prompt probe above deliberately
@@ -122,7 +122,7 @@ const A = (c, m) => { if (!c) fails.push(m); };
 
   // --- play the whole day with the real key ------------------------------
   const day = await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     const seen = [];
     for (let i = 0; i < 12 && M.woods.phase === "day"; i++) {
       const at = M.debugWalkToBeat();
@@ -148,7 +148,7 @@ const A = (c, m) => { if (!c) fails.push(m); };
 
   // --- asking -------------------------------------------------------------
   const asked = await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     const out = { accounts: [], taken: M.woods.taken };
     for (let i = 0; i < 3; i++) {
       M.act(M.ACTIONS.CHECK_IN, i);
@@ -183,7 +183,7 @@ const A = (c, m) => { if (!c) fails.push(m); };
 
   // --- naming somebody ----------------------------------------------------
   const verdict = await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     M.act(M.ACTIONS.OFFER_ITEM);        // the real "name them" key
     M.advance(0.1);
     const names = [...document.querySelectorAll("#accuseRow button")].map((x) => x.textContent);
@@ -199,7 +199,7 @@ const A = (c, m) => { if (!c) fails.push(m); };
       tell: document.getElementById("verdictTell").textContent,
       correct: M.woods.correct,
       phase: M.woods.phase,
-      saveGone: localStorage.getItem("mirage:run") === null,
+      saveGone: localStorage.getItem("seven:run") === null,
     };
   });
   A(verdict.panelBefore === "accusePanel", `the name list did not open (got "${verdict.panelBefore}")`);
@@ -212,7 +212,7 @@ const A = (c, m) => { if (!c) fails.push(m); };
 
   // --- and a day picked back up after a reload ---------------------------
   await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     M.toTitle();
     M.startWoods("reload-test");
     M.debugWalkToBeat(); M.act(M.ACTIONS.SURVEY); M.advance(0.2);
@@ -225,7 +225,7 @@ const A = (c, m) => { if (!c) fails.push(m); };
   await page.reload({ waitUntil: "networkidle" });
   const resumed = await page.evaluate(() => {
     document.getElementById("continueBtn").click();
-    const M = window.__mirage;
+    const M = window.__seven;
     M.advance(0.3);
     return {
       phase: M.woods?.phase ?? null,

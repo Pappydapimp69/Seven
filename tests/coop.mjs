@@ -5,11 +5,11 @@
 //
 // Same two lessons as smoke.mjs apply and are followed here: no assertion is
 // phrased in wall-clock seconds (the sim is driven through its own clock via
-// window.__mirage.advance), and "it loaded and nothing threw" is not accepted
+// window.__seven.advance), and "it loaded and nothing threw" is not accepted
 // as proof that anything was drawn — the split-screen assertions read Three's
 // own draw-call counter and the actual scissor rectangle.
 //
-// Joining is driven through window.__mirage.debugJoin rather than a synthetic
+// Joining is driven through window.__seven.debugJoin rather than a synthetic
 // Gamepad: gamepad.mjs already proves the real pad path end to end, and what
 // is under test here is the co-op wiring (possession, percepts, viewports),
 // not device enumeration.
@@ -59,24 +59,24 @@ function assert(cond, msg) { if (!cond) failures.push(msg); }
   page.on("pageerror", (e) => errors.push("PAGEERROR: " + e.message));
 
   await page.goto(`http://localhost:${PORT}/index.html`, { waitUntil: "networkidle" });
-  await page.waitForFunction(() => !!window.__mirage, null, { timeout: 15000 });
+  await page.waitForFunction(() => !!window.__seven, null, { timeout: 15000 });
   // Co-op is an explicit title-screen OPTION, default solo — assert the
   // default, then opt in the way a couch player would.
-  assert(await page.evaluate(() => window.__mirage.coopAllowed === false),
+  assert(await page.evaluate(() => window.__seven.coopAllowed === false),
     "co-op must default OFF");
   assert(await page.evaluate(() => document.querySelector('[data-coop-opt="solo"]').classList.contains("sel")),
     "the title screen should show Solo selected by default");
   await page.click('[data-coop-opt="couch"]');
-  assert(await page.evaluate(() => window.__mirage.coopAllowed === true),
+  assert(await page.evaluate(() => window.__seven.coopAllowed === true),
     "picking Couch co-op should arm the join poll");
   await page.click('[data-diff="standard"]');
   await page.fill("#seedInput", "4242");
   await page.click("#startBtn");
-  await page.waitForFunction(() => !!window.__mirage.sim, null, { timeout: 10000 });
+  await page.waitForFunction(() => !!window.__seven.sim, null, { timeout: 10000 });
 
   // ---- solo baseline -------------------------------------------------------
   const solo = await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     M.advance(1);
     return {
       players: M.players.length,
@@ -91,7 +91,7 @@ function assert(cond, msg) { if (!cond) failures.push(msg); }
 
   // ---- player two joins ----------------------------------------------------
   const joined = await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     const partyBefore = M.sim.party.length;
     const slot = M.debugJoin();
     M.advance(1);
@@ -129,7 +129,7 @@ function assert(cond, msg) { if (!cond) failures.push(msg); }
 
   // ---- the screen actually splits -----------------------------------------
   const split = await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     const r = M.renderer.renderer;
     M.advance(0.2);
     // Read the ACTUAL GL state rather than our own bookkeeping — this is the
@@ -164,7 +164,7 @@ function assert(cond, msg) { if (!cond) failures.push(msg); }
   // This is the whole point of the mode: send ONLY player two under, and the
   // lead's screen must stay honest while player two's starts lying.
   const asym = await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     const p2 = M.players[1];
     // Past LUCIDITY_GRACE first — the same fix smoke.mjs's hallucination-path
     // block already carries. distortion() deliberately returns 0 for the first
@@ -205,7 +205,7 @@ function assert(cond, msg) { if (!cond) failures.push(msg); }
 
   // ---- player two gets their own prompt, with their own hold progress ------
   const prompt2 = await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     const s = M.sim;
     const p2 = M.players[1].eye;
     // Park the LEAD away from everything; stand P2 at a discovered tree.
@@ -241,7 +241,7 @@ function assert(cond, msg) { if (!cond) failures.push(msg); }
   // truthfully, with no "show" or "give" action at all — the existing
   // per-percept split already does it.
   const shared = await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     const s = M.sim;
     const p2 = M.players[1];
     s.inventory.length = 0;
@@ -261,7 +261,7 @@ function assert(cond, msg) { if (!cond) failures.push(msg); }
 
   // ---- dropping out hands the mind back to the AI --------------------------
   const dropped = await page.evaluate(() => {
-    const M = window.__mirage;
+    const M = window.__seven;
     const who = M.players[1].eye;
     const before = { x: who.x, z: who.z, lucidity: who.lucidity };
     M.debugDrop(1);
@@ -298,7 +298,7 @@ function assert(cond, msg) { if (!cond) failures.push(msg); }
     for (const f of failures) console.log("  ✗ " + f);
     process.exit(1);
   }
-  console.log("mirage coop: OK");
+  console.log("seven coop: OK");
 })().catch((e) => {
   console.error("COOP CRASHED:", e);
   process.exit(1);

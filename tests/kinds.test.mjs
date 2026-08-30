@@ -1,6 +1,6 @@
 // Perceptual-regression suite for the FOUR hallucination kinds that used to be
 // inert: WRONG_WAY, FALSE_ANCHOR, CHORUS and DOUBLED_PARTY.
-// Run: node mirage/tests/kinds.test.mjs
+// Run: node tests/kinds.test.mjs
 //
 // Why this file exists.
 //
@@ -1144,4 +1144,4 @@ if (failures.length) {
   for (const f of failures) console.log("  ✗ " + f);
   process.exit(1);
 }
-console.log("mirage kinds: OK");
+console.log("seven kinds: OK");

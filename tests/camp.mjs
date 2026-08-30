@@ -171,4 +171,4 @@ check("the camp is smaller than a basin but not cramped", () => {
 console.log(`\n${passed} passed, ${failures.length} failed`);
 for (const f of failures) console.log("  ✗ " + f);
 if (failures.length) process.exit(1);
-console.log("mirage camp: OK");
+console.log("seven camp: OK");

@@ -147,7 +147,7 @@ notes.push(`${terminated}/${SEEDS} hostile runs terminated · endings ${[...endi
 
 // ---------------------------------------------------------------------------
 // 2. Save/restore at an ARBITRARY moment, then keep going in lockstep.
-// Brain (mirage#E-rng): the stream position is state, and every field that
+// Brain (seven#E-rng): the stream position is state, and every field that
 // gates a draw is too. A round trip that agrees with itself proves nothing —
 // both sides have to keep agreeing for a long time afterwards.
 // ---------------------------------------------------------------------------
@@ -335,4 +335,4 @@ if (failures.length) {
   for (const f of failures) console.log("  ✗ " + f);
   process.exit(1);
 }
-console.log("mirage stress: OK");
+console.log("seven stress: OK");

@@ -17,11 +17,18 @@
 //     options (dbh#E4, wrong-sky#E2). And an ended run is never saved, so a
 //     "Resume" can't drop you back onto the frame you already lost.
 
-import { createRun } from "./state.js?v=seven-0.1.0";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.1.0";
-import { attachSites, serializeWoods, deserializeWoods } from "./woods.js?v=seven-0.1.0";
+import { createRun } from "./state.js?v=seven-0.14.0";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.14.0";
+import { attachSites, serializeWoods, deserializeWoods } from "./woods.js?v=seven-0.14.0";
 
-export const SAVE_KEY = "mirage:run";
+// SEVEN'S OWN KEYS, and this is not cosmetic. GitHub Pages serves every project
+// of one account from ONE origin — `pappydapimp69.github.io` — so /mirage/ and
+// /seven/ share a single localStorage. Under the inherited key names the two
+// games would read and overwrite each other's save slot and settings, and each
+// would find the other's payload at a schema version it refuses, silently
+// discard it, and report "no save" to a player who had one. Same for the
+// tutorial progress that rides inside the settings blob.
+export const SAVE_KEY = "seven:run";
 // Bumped whenever the shape below changes incompatibly. A save from an older
 // schema is discarded rather than half-read: a partially-applied snapshot is
 // far worse than starting fresh, because it looks like it worked.
@@ -444,7 +451,7 @@ export function describeSave(data) {
 // not also find their volume back at default. Keeping them in one blob would
 // tie the lifetime of "how loud is this" to the lifetime of "where was I",
 // which are unrelated questions.
-export const SETTINGS_KEY = "mirage:settings";
+export const SETTINGS_KEY = "seven:settings";
 
 // Tutorial progress lives HERE, in the settings payload, not as its own
 // localStorage key — brain: dog#E64, where a "seen once ever" bit kept outside

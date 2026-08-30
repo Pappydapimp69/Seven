@@ -3,7 +3,7 @@
 // safe rather than a trap: "New run" cannot discard a save in one press, and
 // an ENDED run never leaves a save behind (Brain: wrong-sky#E2).
 //
-// Everything here drives the sim's own clock via __mirage.advance(); no
+// Everything here drives the sim's own clock via __seven.advance(); no
 // assertion is phrased in wall-clock seconds.
 import { createRequire } from "module";
 import http from "http"; import fs from "fs"; import path from "path";
@@ -34,19 +34,19 @@ const fails=[]; const A=(c,m)=>{ if(!c) fails.push(m); };
 
   // 2. Play a bit, make distinctive progress, let autosave fire
   const played = await page.evaluate(()=>{
-    const M=window.__mirage; M.startRun({seed:4321});
+    const M=window.__seven; M.startRun({seed:4321});
     M.sim.time = 300;              // past grace
     M.advance(12);                 // > AUTOSAVE_EVERY
     M.sim.wood = 7; M.sim.doses = 1;
     M.sim.monoliths[0].discovered = true; M.sim.monoliths[0].logged = true;
     M.advance(6);                  // force another autosave with those values
     return { wood:M.sim.wood, doses:M.sim.doses, time:M.sim.time, seed:M.sim.seed,
-             saved: !!localStorage.getItem("mirage:run") };
+             saved: !!localStorage.getItem("seven:run") };
   });
   A(played.saved, "autosave never wrote to localStorage during play");
 
   // 3. Back to title -> Resume visible and labelled
-  await page.evaluate(()=>window.__mirage.toTitle());
+  await page.evaluate(()=>window.__seven.toTitle());
   s = await page.evaluate(()=>({
     shown: document.getElementById("continueBtn").classList.contains("show"),
     detail: document.getElementById("continueDetail").textContent,
@@ -61,7 +61,7 @@ const fails=[]; const A=(c,m)=>{ if(!c) fails.push(m); };
   // 4. Resume -> same run restored
   const resumed = await page.evaluate(()=>{
     document.getElementById("continueBtn").click();
-    const M=window.__mirage;
+    const M=window.__seven;
     return { wood:M.sim.wood, doses:M.sim.doses, time:M.sim.time, seed:M.sim.seed,
              logged:M.sim.monoliths[0].logged, onHud:!document.getElementById("hudLayer").classList.contains("hidden") };
   });
@@ -73,11 +73,11 @@ const fails=[]; const A=(c,m)=>{ if(!c) fails.push(m); };
   A(Math.abs(resumed.time-played.time)<6, `resumed clock too far off: ${resumed.time} vs ${played.time}`);
 
   // 5. "New run" needs two presses while a save exists
-  await page.evaluate(()=>window.__mirage.toTitle());
+  await page.evaluate(()=>window.__seven.toTitle());
   const arm = await page.evaluate(()=>{
     const btn=document.getElementById("startBtn"); btn.click();
     return { text:btn.textContent.trim(), stillTitle:!document.getElementById("title").classList.contains("hidden"),
-             saveStill: !!localStorage.getItem("mirage:run") };
+             saveStill: !!localStorage.getItem("seven:run") };
   });
   A(arm.stillTitle, "first press of New run should NOT start a run while a save exists");
   A(arm.saveStill, "first press of New run must not delete the save");
@@ -85,20 +85,20 @@ const fails=[]; const A=(c,m)=>{ if(!c) fails.push(m); };
   const confirmed = await page.evaluate(()=>{
     document.getElementById("startBtn").click();
     return { onHud:!document.getElementById("hudLayer").classList.contains("hidden"),
-             wood:window.__mirage.sim.wood };
+             wood:window.__seven.sim.wood };
   });
   A(confirmed.onHud, "second press of New run should start a run");
   A(confirmed.wood===0, `New run should be a fresh basin, wood was ${confirmed.wood}`);
 
   // 6. An ended run clears the slot
   const ended = await page.evaluate(()=>{
-    const M=window.__mirage; M.sim.time=300; M.advance(6);
-    const before = !!localStorage.getItem("mirage:run");
+    const M=window.__seven; M.sim.time=300; M.advance(6);
+    const before = !!localStorage.getItem("seven:run");
     // A REAL loss, driven through tick()/checkEndings rather than by forcing
     // sim.status: step() early-returns on a non-playing status, so a forced
     // status would skip finish() in a way ordinary play never does.
     M.sim.time = 895; M.advance(10); // past TIME_LIMIT -> darkness
-    return { before, status: M.sim.status, after: !!localStorage.getItem("mirage:run") };
+    return { before, status: M.sim.status, after: !!localStorage.getItem("seven:run") };
   });
   A(ended.before, "test setup: expected a save before ending the run");
   A(ended.status!=="playing", `test setup: expected the run to end, status was ${ended.status}`);
@@ -107,5 +107,5 @@ const fails=[]; const A=(c,m)=>{ if(!c) fails.push(m); };
   A(errors.length===0, `page errors: ${JSON.stringify(errors.slice(0,3))}`);
   await b.close(); server.close();
   if(fails.length){ console.log(`\n${fails.length} failed:`); fails.forEach(f=>console.log("  ✗ "+f)); process.exit(1); }
-  console.log("mirage resume (browser): OK");
+  console.log("seven resume (browser): OK");
 })().catch(e=>{ console.error("CRASHED:",e); process.exit(1); });
