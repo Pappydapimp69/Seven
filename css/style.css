@@ -738,3 +738,36 @@ body[data-coop="2"] .item-bar.p2 { display: flex; }
 
 /* The one line the day gives you, under the objective banner. */
 .woods-waiting { color: var(--warm); }
+
+/* --- the night ------------------------------------------------------------
+   A slow close and a slower open. The timing is doing narrative work: the
+   player has to feel a night pass, and they have to arrive in the morning
+   without a cut to point at. Everything about it is silent on WHAT happened —
+   the whole design rests on nobody announcing the swap. */
+.nightfall {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 40;
+  transition: opacity 2.4s ease-in;
+}
+.nightfall.hidden { display: none; }
+.nightfall.show { opacity: 1; }
+.nightfall.lifting { transition: opacity 3.2s ease-out; opacity: 0; }
+.nightfall p {
+  font-size: 1.1rem;
+  letter-spacing: 0.08em;
+  color: #6b7280;
+  opacity: 0;
+  transition: opacity 1.2s ease-in 1.2s;
+  margin: 0;
+  padding: 0 2rem;
+  text-align: center;
+}
+.nightfall.show p { opacity: 1; }
+.nightfall.lifting p { opacity: 0; transition: opacity 0.6s ease-out; }

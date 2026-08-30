@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0a0f16" />
   <title>SEVEN — the woods, and who walks out</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230a0f16'/%3E%3Cpath d='M4 22h24' stroke='%23596579' stroke-width='2'/%3E%3Crect x='9' y='8' width='4' height='14' fill='%2374e0ff'/%3E%3Crect x='19' y='11' width='4' height='11' fill='%23b06a72'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="css/style.css?v=seven-0.14.0" />
+  <link rel="stylesheet" href="css/style.css?v=seven-0.15.0" />
 </head>
 <body>
   <canvas id="gl"></canvas>
@@ -201,6 +201,13 @@
     </div>
   </div>
 
+  <!-- THE NIGHT. A full-screen blackout with the day's last line on it. Not
+       decoration: without it the night is a teleport — the party jumps to a
+       ring around the fire and the player is standing somewhere else a frame
+       later, which reads as a glitch rather than as time passing. The one thing
+       it must never do is say anything about what happened in it. -->
+  <div id="nightfall" class="nightfall hidden"><p id="nightfallText"></p></div>
+
   <!-- THE MORNING. Three panels, one at a time, all inside the run: asking is
        not a menu the game pauses for, it is the thing you spend the morning on.
        Hidden entirely outside THE WOODS. -->
@@ -223,7 +230,13 @@
       <p id="verdictHead" class="woods-who">—</p>
       <p id="verdictBody" class="woods-sub"></p>
       <p id="verdictTell" class="woods-tell"></p>
-      <button id="verdictDone" class="big-btn" data-row="0" data-col="0">Back to the trailhead</button>
+      <p id="verdictCost" class="woods-foot"></p>
+      <!-- ANOTHER DAY FIRST, and it is the default focus. The question the
+           alpha exists to answer is not "was that fun once" but "does it hold
+           up by run five" — deduction erodes under repetition and the only way
+           to find out is to make the next run one press away. -->
+      <button id="verdictAgain" class="big-btn" data-row="0" data-col="0">Walk another day</button>
+      <button id="verdictDone" class="text-btn" data-row="1" data-col="0">Back to the trailhead</button>
     </div>
   </div>
 
@@ -327,7 +340,7 @@
   <!-- DEBRIEF -->
   <div id="debriefLayer" class="screen hidden"></div>
 
-  <script type="module" src="src/main.js?v=seven-0.14.0"></script>
+  <script type="module" src="src/main.js?v=seven-0.15.0"></script>
   <noscript><p style="color:#ccd">SEVEN needs JavaScript and WebGL.</p></noscript>
 </body>
 </html>

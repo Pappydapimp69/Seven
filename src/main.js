@@ -6,22 +6,22 @@ import {
   possess, release, possessableCompanions, activatePylon, pylonAt,
   callCompanion, clearMoss, mossedAt,
   PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=seven-0.14.0";
-import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.14.0";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.14.0";
+} from "./state.js?v=seven-0.15.0";
+import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.15.0";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.15.0";
 import {
   attachSites, startDay, beatAt, briefFor, canWork, workBeat, fallNight, ask, accuse,
   BEATS, PHASE, ASKS_ALLOWED,
-} from "./woods.js?v=seven-0.14.0";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=seven-0.14.0";
-import { createRenderer } from "./render.js?v=seven-0.14.0";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.14.0";
-import { createInput, ACTIONS } from "./input.js?v=seven-0.14.0";
-import { createAudio } from "./audio.js?v=seven-0.14.0";
-import { hashSeed, makeRng } from "./rng.js?v=seven-0.14.0";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings } from "./save.js?v=seven-0.14.0";
+} from "./woods.js?v=seven-0.15.0";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=seven-0.15.0";
+import { createRenderer } from "./render.js?v=seven-0.15.0";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.15.0";
+import { createInput, ACTIONS } from "./input.js?v=seven-0.15.0";
+import { createAudio } from "./audio.js?v=seven-0.15.0";
+import { hashSeed, makeRng } from "./rng.js?v=seven-0.15.0";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings } from "./save.js?v=seven-0.15.0";
 
-const BUILD = "seven-0.14.0";
+const BUILD = "seven-0.15.0";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -69,7 +69,14 @@ function screens(show) {
 // button GRID per screen, not a flat list, so no direction can ever wander
 // into the wrong control (Brain: a flat single-axis focus list over visually
 // distinct groups lets any direction leak into the wrong group).
-const ROOT_SELECTOR = { title: "#title", pauseLayer: "#pauseLayer", debriefLayer: "#debriefLayer" };
+// The morning's two panels are menus like any other, and they join the same
+// grid rather than growing their own key handling. Naming somebody is the most
+// consequential press in the game; it must not be the one control that a pad
+// or a keyboard cannot reach.
+const ROOT_SELECTOR = {
+  title: "#title", pauseLayer: "#pauseLayer", debriefLayer: "#debriefLayer",
+  accusePanel: "#accusePanel", verdictPanel: "#verdictPanel",
+};
 const menu = { root: null, row: 0, col: 0 };
 
 function menuElements() {
@@ -122,6 +129,10 @@ function menuConfirm() {
 }
 function menuCancel() {
   if (menu.root === "pauseLayer") togglePause(); // B backs out to resume, same as Escape
+  // Backing out of the name list returns to the morning rather than to a
+  // settings screen. Backing out of the VERDICT does nothing: the run is over
+  // and the only way on is the button.
+  else if (menu.root === "accusePanel") closeWoodsPanel();
 }
 function setupMenuFocus(root) {
   const prevRoot = menu.root;
@@ -326,7 +337,7 @@ function woodsWork(sim) {
   const before = w.beat;
   workBeat(sim, w, emitToHud);
   if (w.beat === before) return false;
-  if (w.phase === PHASE.NIGHT) woodsSleep(sim);
+  if (w.phase === PHASE.NIGHT) woodsTurnIn(sim);
   else enterBeat(sim);
   return true;
 }
@@ -335,6 +346,51 @@ function woodsWork(sim) {
 function emitToHud(sim, kind, text, opts = {}) {
   sim.events.push({ ...opts, kind, text, t: sim.time });
   hudSay(text);
+}
+
+/**
+ * The night, on screen.
+ *
+ * Two phases with real time between them, because the night is the ONE thing
+ * in this game that has to be felt rather than read. Without it the day ends
+ * and the morning starts on the next frame: the party snaps to a ring around
+ * the fire and the player is standing somewhere they were not, which reads as
+ * a glitch and not as a night. The swap happens behind the black.
+ *
+ * The text on it is about the fire and the cold. It says nothing about anyone,
+ * because the whole design rests on nobody finding anything strange — a line
+ * here would be the game pointing, and there would be nothing left to deduce.
+ */
+const NIGHT_HOLD_MS = 4200;   // fall + hold; long enough that a night passed
+let nightBlackout = false;    // true only while the screen is covered
+
+/**
+ * PURELY PRESENTATIONAL. The model has already moved on — the night resolved,
+ * the phase is the morning, everyone is around the ash — and this only covers
+ * the moment of it. Deliberately not the other way round: making the phase
+ * change wait on a wall-clock timer would put a real state transition on a
+ * clock, which is untestable, pauses badly, and is exactly the sort of thing
+ * that goes wrong in a backgrounded tab.
+ *
+ * Input is swallowed while it is up. Not because anything would break, but
+ * because a player pressing keys at a black screen and having them silently
+ * count is worse than having them silently not.
+ */
+function playNightfall() {
+  const layer = el("nightfall");
+  if (!layer) return;
+  nightBlackout = true;
+  el("nightfallText").textContent = "You put the fire down and turn in.";
+  layer.classList.remove("hidden", "lifting");
+  void layer.offsetWidth;
+  layer.classList.add("show");
+  setTimeout(() => {
+    nightBlackout = false;
+    el("nightfallText").textContent = "";
+    layer.classList.add("lifting");
+    layer.classList.remove("show");
+    setTimeout(() => layer.classList.add("hidden"), 3300);
+  }, NIGHT_HOLD_MS);
 }
 
 function woodsSleep(sim) {
@@ -356,6 +412,12 @@ function woodsSleep(sim) {
   sim.player.x = fire.x;
   sim.player.z = fire.z + 6;
   paintMorning(sim);
+}
+
+/** Called from workBeat's caller once the last beat lands. */
+function woodsTurnIn(sim) {
+  woodsSleep(sim);
+  playNightfall();
 }
 
 function paintMorning(sim) {
@@ -402,11 +464,19 @@ function openWoodsPanel(id) {
     el(p).classList.toggle("hidden", p !== id);
   }
   woodsUi = { panel: id };
+  // The two panels with buttons in them join the shared focus grid; the
+  // account panel has none and leaves the grid alone.
+  if (ROOT_SELECTOR[id]) setupMenuFocus(id);
 }
 
 function closeWoodsPanel() {
   el("woodsLayer").classList.add("hidden");
+  const had = woodsUi?.panel;
   woodsUi = null;
+  // Hand the grid back, or a pad is left driving a menu that is no longer on
+  // screen — the failure mode setupMenuFocus already exists to prevent when
+  // the title's shape changes.
+  if (ROOT_SELECTOR[had]) input.setMenuHandlers(null, null, null, null);
 }
 
 function openAccuse(sim) {
@@ -436,6 +506,14 @@ function woodsAccuse(sim, id) {
     ? `${v.taken} went out into the trees in the night. Whatever came back to the fire wearing that name is still standing there.`
     : `${v.accused} was here the whole time. It was ${v.taken}.`;
   el("verdictTell").textContent = tellText(w, sim);
+  // The economy, stated once, at the end. A player who spent one question and
+  // guessed right should see that they did; a player who spent all three and
+  // guessed wrong should see that too. It is the only place the cost of asking
+  // is ever named as a number.
+  const spent = ASKS_ALLOWED - w.asksLeft;
+  el("verdictCost").textContent =
+    `You asked ${spent === 0 ? "nobody" : spent === 1 ? "one of them" : `${spent} of them`}` +
+    `${spent < ASKS_ALLOWED ? `, with ${ASKS_ALLOWED - spent} question${ASKS_ALLOWED - spent === 1 ? "" : "s"} left.` : ", which was all of them."}`;
   openWoodsPanel("verdictPanel");
   // The run is over. Drop the slot so "Resume" cannot hand back a finished
   // morning — the same rule the basin debrief follows.
@@ -732,6 +810,8 @@ function handleAction(action, arg, player = run.players[0]) {
   // untouched, which is what keeps this a layer rather than a fork of the
   // input handling.
   if (sim.woods) {
+    // Nothing lands while the screen is black. See playNightfall.
+    if (nightBlackout && action !== ACTIONS.PAUSE) return;
     if (action === ACTIONS.SURVEY && sim.woods.phase === PHASE.DAY) {
       if (woodsWork(sim)) return;
     }
@@ -1339,6 +1419,14 @@ function boot() {
     }
     const raw = el("seedInput").value.trim();
     startWoods(raw || null);
+  });
+  el("verdictAgain")?.addEventListener("click", () => {
+    // A NEW day, not the same one again. The seed box is for a day somebody
+    // wants to share or re-walk deliberately; the button beside the verdict is
+    // for the next one, and re-running the day whose answer you have just been
+    // told is the one thing it must not do.
+    closeWoodsPanel();
+    startWoods(null);
   });
   el("verdictDone")?.addEventListener("click", () => {
     closeWoodsPanel();

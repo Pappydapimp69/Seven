@@ -137,16 +137,29 @@ const A = (c, m) => { if (!c) fails.push(m); };
       phase: M.woods.phase,
       facts: M.woods.chronicle.facts.length,
       lit: M.woods.activeSiteId,
+      blackout: !document.getElementById("nightfall").classList.contains("hidden"),
       objective: document.getElementById("objectiveText").textContent,
     };
   });
   A(day.phase === "morning", `the day did not reach the morning: stuck in "${day.phase}" after ${day.seen.length} presses`);
+  // The nightfall is PRESENTATIONAL and the model must not wait on it: a phase
+  // change parked on a wall-clock timer cannot be tested, pauses badly, and
+  // stalls in a backgrounded tab.
+  A(day.blackout, "the night passed with no blackout at all — the morning is a teleport");
   A(day.facts === 7, `expected seven things to have happened, got ${day.facts}`);
   A(day.seen.every((x) => x.prompt && x.prompt.length > 4), `a beat offered no prompt: ${JSON.stringify(day.seen)}`);
   A(!day.lit, "a worksite is still lit in the morning");
   A(/Ask about yesterday/.test(day.objective), `the morning does not tell you what to do: "${day.objective}"`);
 
   // --- asking -------------------------------------------------------------
+  // Wait the night out first. Input is deliberately swallowed while the screen
+  // is black, so pressing through it is not something a player can do either —
+  // and a test that could would be testing a path the game does not have.
+  await page.waitForFunction(
+    () => document.getElementById("nightfall").classList.contains("lifting")
+       || document.getElementById("nightfall").classList.contains("hidden"),
+    null, { timeout: 15000 },
+  );
   const asked = await page.evaluate(() => {
     const M = window.__seven;
     const out = { accounts: [], taken: M.woods.taken };
@@ -188,13 +201,17 @@ const A = (c, m) => { if (!c) fails.push(m); };
     M.advance(0.1);
     const names = [...document.querySelectorAll("#accuseRow button")].map((x) => x.textContent);
     const panelBefore = M.woodsPanel;
+    const accuseFocus = document.querySelector("#accusePanel .gpfocus")?.textContent || null;
     const taken = M.woods.taken;
     M.woodsAccuse(taken);
     M.advance(0.1);
     return {
-      panelBefore, names,
+      panelBefore, names, accuseFocus,
       panel: M.woodsPanel,
       head: document.getElementById("verdictHead").textContent,
+      cost: document.getElementById("verdictCost").textContent,
+      again: !!document.getElementById("verdictAgain"),
+      focus: document.querySelector("#verdictPanel .gpfocus")?.id || null,
       body: document.getElementById("verdictBody").textContent,
       tell: document.getElementById("verdictTell").textContent,
       correct: M.woods.correct,
@@ -204,9 +221,15 @@ const A = (c, m) => { if (!c) fails.push(m); };
   });
   A(verdict.panelBefore === "accusePanel", `the name list did not open (got "${verdict.panelBefore}")`);
   A(verdict.names.length === 5, `the name list offered ${verdict.names.length} people`);
+  // The most consequential press in the game must be reachable without a
+  // mouse. It is a menu like any other and joins the same focus grid.
+  A(verdict.accuseFocus, "the name list is not reachable on a pad or a keyboard");
   A(verdict.correct === true, "naming the one who was taken came back wrong");
   A(/right/i.test(verdict.head), `the verdict reads "${verdict.head}"`);
   A(verdict.tell.length > 10, "the verdict does not say what they got wrong");
+  A(/asked/.test(verdict.cost), `the verdict does not say what the morning cost: "${verdict.cost}"`);
+  A(verdict.again, "there is no way to walk another day without going back to the title");
+  A(verdict.focus === "verdictAgain", `focus should land on the next day, got ${verdict.focus}`);
   A(verdict.phase === "verdict", `phase is "${verdict.phase}" after the verdict`);
   A(verdict.saveGone, "a finished morning is still in the save slot — Resume would hand it back");
 
