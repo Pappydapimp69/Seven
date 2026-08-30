@@ -258,8 +258,7 @@ test("NC: re-seeding per ask breaks the same-story guard", () => {
 // Wiring: the chronicle inside a real sim, across a real save.
 // ---------------------------------------------------------------------------
 
-const { createRun, swapOvernight, askAbout, spendAsk, searchForMissing, canAsk, canSearch,
-        MORNING_HOURS, ASK_COST, SEARCH_COST } = await import("../src/state.js");
+const { createRun, swapOvernight, askAbout } = await import("../src/state.js");
 const { serializeRun, deserializeRun, SAVE_VERSION } = await import("../src/save.js");
 
 const liveDay = (sim) => {
@@ -356,127 +355,6 @@ test("NC: dropping `swapped` from the save makes the fake honest", () => {
   assert.equal(askAbout(sim, "c2").tell !== null, true);
   assert.equal(askAbout(back, "c2").tell, null,
     "the negative control did not reproduce the defect — the guard is unmeasured");
-});
-
-console.log("chronicle — what the morning costs");
-
-test("a morning buys questions or a walk, not both in full", () => {
-  const sim = liveDay(createRun({ seed: 31 }));
-  swapOvernight(sim, "c1");
-  assert.equal(sim.morning.hours, MORNING_HOURS);
-  for (const c of sim.companions) spendAsk(sim, c.id);
-  // Five people, five hours, one each — and the fifth ask leaves nothing for
-  // the walk. That is the trade, not a cap.
-  assert.equal(sim.morning.hours, MORNING_HOURS - 5 * ASK_COST);
-  assert.equal(canSearch(sim), false);
-});
-
-test("re-asking is free — the story is stable, so charging taxes note-taking", () => {
-  const sim = liveDay(createRun({ seed: 32 }));
-  swapOvernight(sim, "c1");
-  const first = spendAsk(sim, "c2");
-  const spent = sim.morning.hours;
-  const again = spendAsk(sim, "c2");
-  assert.equal(sim.morning.hours, spent, "a second look cost an hour");
-  assert.deepEqual(divergence(first, again), []);
-});
-
-test("hours run out, and asking then does nothing at all", () => {
-  const sim = liveDay(createRun({ seed: 33 }));
-  swapOvernight(sim, "c1");
-  searchForMissing(sim);                       // 3 of 5
-  assert.equal(sim.morning.hours, MORNING_HOURS - SEARCH_COST);
-  spendAsk(sim, "c1"); spendAsk(sim, "c2");    // 5 of 5
-  assert.equal(canAsk(sim), false);
-  const before = sim.morning.asked.slice();
-  assert.equal(spendAsk(sim, "c3"), null, "asked on an empty morning");
-  assert.deepEqual(sim.morning.asked, before, "a refused ask still recorded");
-});
-
-test("you can only go out once", () => {
-  const sim = liveDay(createRun({ seed: 34 }));
-  swapOvernight(sim, "c1");
-  assert.ok(searchForMissing(sim));
-  assert.equal(searchForMissing(sim), null, "went out twice");
-  assert.equal(sim.morning.hours, MORNING_HOURS - SEARCH_COST);
-});
-
-test("going out costs the same DRAWS as not going", () => {
-  // The invariant the whole design rests on. Two runs, same seed, opposite
-  // choices: the stream must be in the same place at the end of the morning.
-  const a = liveDay(createRun({ seed: 35 }));
-  const b = liveDay(createRun({ seed: 35 }));
-  swapOvernight(a, "c1"); swapOvernight(b, "c1");
-  searchForMissing(a);
-  for (const c of b.companions) spendAsk(b, c.id);
-  assert.equal(a.rng.snapshot(), b.rng.snapshot(),
-    "the morning's choices moved the run's stream");
-});
-
-test("the odds fall with every question already asked, smoothly", () => {
-  const seen = [];
-  for (const asks of [0, 1, 2]) {
-    const sim = liveDay(createRun({ seed: 36 }));
-    swapOvernight(sim, "c1");
-    for (let i = 0; i < asks; i++) spendAsk(sim, sim.companions[i].id);
-    seen.push(searchForMissing(sim).odds);
-  }
-  assert.deepEqual(seen, [1, 0.75, 0.5]);
-  // Monotonic is not enough — a step function is monotonic too. The gaps must
-  // be equal, or the player meets a cliff nobody designed.
-  assert.equal(seen[0] - seen[1], seen[1] - seen[2], "the fall is not smooth");
-});
-
-test("both roads reach a win", () => {
-  let byAsking = 0, bySearching = 0;
-  for (let seed = 1; seed <= 40; seed++) {
-    const asker = liveDay(createRun({ seed }));
-    swapOvernight(asker);
-    for (const c of asker.companions) spendAsk(asker, c.id);
-    // What the player remembers, per speaker — the same account read with the
-    // swap flag off, which is exactly what a real member says.
-    const caught = asker.companions.find((c) =>
-      divergence(askAbout(asker, c.id),
-                 truthFor(asker.chronicle, c, asker.companions)).length > 0);
-    if (caught && accuse(asker.companions, caught.id).correct) byAsking++;
-
-    const searcher = liveDay(createRun({ seed }));
-    swapOvernight(searcher);
-    if (searchForMissing(searcher).found) bySearching++;
-  }
-  assert.equal(byAsking, 40, `asking every one should always identify: ${byAsking}/40`);
-  assert.equal(bySearching, 40, `going out first should always find them: ${bySearching}/40`);
-});
-
-test("the morning survives a save", () => {
-  const sim = liveDay(createRun({ seed: 37 }));
-  swapOvernight(sim, "c4");
-  spendAsk(sim, "c1");
-  const data = JSON.parse(JSON.stringify(serializeRun(sim)));
-  assert.equal(data.v, SAVE_VERSION);
-  const back = deserializeRun(data);
-  assert.deepEqual(back.morning, sim.morning);
-  assert.equal(back.searchRoll, sim.searchRoll);
-  assert.equal(searchForMissing(back).found, searchForMissing(sim).found);
-});
-
-test("NC: dropping searchRoll makes a resumed search find someone else", () => {
-  // Find a seed where the stored roll and the default disagree, and prove the
-  // resume flips on it. Without this the save field is decoration.
-  let flipped = 0;
-  for (let seed = 1; seed <= 40; seed++) {
-    const sim = liveDay(createRun({ seed }));
-    swapOvernight(sim);
-    spendAsk(sim, sim.companions[0].id);
-    spendAsk(sim, sim.companions[1].id);       // odds now 0.5
-    const data = JSON.parse(JSON.stringify(serializeRun(sim)));
-    delete data.searchRoll;
-    const back = deserializeRun(data);
-    if (searchForMissing(back).found !== searchForMissing(sim).found) flipped++;
-  }
-  assert.ok(flipped > 0,
-    "the negative control did not reproduce the defect — the guard is unmeasured");
-  console.log(`      (reverted: ${flipped}/40 resumed searches found differently)`);
 });
 
 console.log(`\n${passed} passed`);

@@ -11,11 +11,24 @@
 //     morning before it. Same names, same order, no marker, no colour.
 //   - Nothing highlights the difference. A found tell is the player's, or it is
 //     nothing. `tell` exists on every account and is not read until the debrief.
+//
+// THE PLAYER IS THE RECORDING. This page used to hand the day over as a list
+// and then keep that list pinned beside the accounts all morning. Both halves
+// were wrong, and together they turned the game into a diff: the evidence was a
+// document on screen, so the player compared two texts and their own memory was
+// never involved. Worse, five accounts side by side can be checked against each
+// OTHER, and four matching ones out-vote the fifth without anybody remembering
+// anything.
+//
+// So the day is LIVED — one thing at a time, a press between each, the player
+// present for all of it — and in the morning there is no transcript. What they
+// remember is the evidence, because they are the only place it exists. That is
+// the load-bearing idea of the whole design and everything downstream depends
+// on reading it correctly.
 
 import { buildDay, asLived } from "./day.js?v=seven-0.12.0";
 import { accountOf, accuse } from "./chronicle.js?v=seven-0.12.0";
-import { askAbout, spendAsk, searchForMissing, canAsk, canSearch,
-         MORNING_HOURS, SEARCH_COST } from "./state.js?v=seven-0.12.0";
+import { askAbout } from "./state.js?v=seven-0.12.0";
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -29,7 +42,8 @@ let run = null;
 
 function newDay(seed) {
   const { sim, taken } = buildDay({ seed });
-  run = { sim, taken, seed, asked: new Set(), accounts: new Map(), over: false };
+  // `seen` is how much of the day the player has actually lived through.
+  run = { sim, taken, seed, seen: 0, accounts: new Map(), over: false };
   $("seed").textContent = `seed ${seed}`;
   drawYesterday();
   show("yesterday");
@@ -40,16 +54,19 @@ function show(phase) {
 }
 
 function drawYesterday() {
+  const day = asLived(run.sim, accountOf).statements;
   const list = $("lived");
   list.replaceChildren();
-  for (const s of asLived(run.sim, accountOf).statements) list.append(el("li", null, s.text));
+  // Only what has happened SO FAR. A day you can scroll ahead in is a document,
+  // not a day.
+  for (const s of day.slice(0, run.seen)) list.append(el("li", null, s.text));
+  $("daycount").textContent = `${run.seen} of ${day.length}`;
+  $("next").hidden = run.seen >= day.length;
+  $("sleep").hidden = run.seen < day.length;
 }
 
 function drawMorning() {
-  const memory = $("memory");
-  memory.replaceChildren();
-  for (const s of asLived(run.sim, accountOf).statements) memory.append(el("li", null, s.text));
-
+  // Deliberately no memory panel. See the note at the top of this file.
   const who = $("who");
   who.replaceChildren();
   for (const c of run.sim.companions) {
@@ -62,11 +79,9 @@ function drawMorning() {
       for (const s of acct.statements) ul.append(el("li", null, s.text));
       card.append(ul);
     } else {
-      const ask = el("button", "ask", "Ask about yesterday  (1 hour)");
-      ask.disabled = !canAsk(run.sim);
+      const ask = el("button", "ask", "Ask about yesterday");
       ask.onclick = () => {
-        const got = spendAsk(run.sim, c.id);
-        if (got) run.accounts.set(c.id, got);
+        run.accounts.set(c.id, askAbout(run.sim, c.id));
         drawMorning();
       };
       card.append(ask);
@@ -77,51 +92,24 @@ function drawMorning() {
     card.append(name);
     who.append(card);
   }
-  const h = run.sim.morning.hours;
-  $("hours").textContent = `${h} of ${MORNING_HOURS} hours of daylight left`;
   $("asked").textContent = `${run.accounts.size} of ${run.sim.companions.length} asked`;
-
-  // The other thing the morning can be spent on. No cost is a cost until
-  // something else wants the same hours.
-  const go = $("search");
-  go.disabled = !canSearch(run.sim);
-  go.textContent = run.sim.morning.searched
-    ? "You went out and came back alone."
-    : `Go looking for whoever wandered off  (${SEARCH_COST} hours)`;
-  go.onclick = () => {
-    const r = searchForMissing(run.sim);
-    if (r && r.found) return finish(null, "rescue");
-    drawMorning();
-  };
-  $("search-note").textContent = run.sim.morning.searched
-    ? "Nothing out there but the trees."
-    : "Every question you ask first is an hour they are further away.";
 }
 
-function finish(id, how = "accusation") {
+function finish(id) {
   const verdict = accuse(run.sim.companions, id);
   const taken = run.sim.companions.find((c) => c.id === verdict.actual);
-  if (how === "rescue") {
-    // You never identified anyone. You brought the real one home, which the
-    // design counts as the win it is: the score is who you saved, not what you
-    // worked out.
-    $("call").textContent = "You found them.";
-    $("call").className = "right";
-    $("reveal").textContent =
-      `${taken.name} walked back in with you. Whatever had been sitting at the ` +
-      `fire wearing that name was gone by the time you got there.`;
-  } else {
-    $("call").textContent = verdict.correct ? "You were right." : "You were wrong.";
-    $("call").className = verdict.correct ? "right" : "wrong";
-    $("reveal").textContent = verdict.correct
-      ? `${taken.name} never walked back into camp.`
-      : `You named ${run.sim.companions.find((c) => c.id === id).name}. It was ${taken.name}.`;
-  }
+  $("call").textContent = verdict.correct ? "You were right." : "You were wrong.";
+  $("call").className = verdict.correct ? "right" : "wrong";
+  $("reveal").textContent = verdict.correct
+    ? `${taken.name} never walked back into camp.`
+    : `You named ${run.sim.companions.find((c) => c.id === id).name}. It was ${taken.name}.`;
 
   // The debrief, and only here. `tell` is the mirror of checkIn's `truth`: it
   // exists for this screen and the tests, and reaching it mid-run would be the
   // same mistake as printing the hidden meter.
   const acct = askAbout(run.sim, taken.id);
+  // The debrief is the one screen allowed to reproduce the day, because the run
+  // is over and the answer has already been given.
   const truth = asLived(run.sim, accountOf).statements;
   const lines = $("what");
   lines.replaceChildren();
@@ -135,6 +123,7 @@ function finish(id, how = "accusation") {
   show("verdict");
 }
 
+$("next").onclick = () => { run.seen++; drawYesterday(); };
 $("sleep").onclick = () => { drawMorning(); show("morning"); };
 $("again").onclick = () => newDay((run.seed % 9999) + 1);
 

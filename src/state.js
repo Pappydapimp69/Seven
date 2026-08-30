@@ -575,14 +575,6 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
     // tick. This is what an account is derived from, so it has to outlive the
     // frame and the save. See chronicle.js.
     chronicle: [],
-    // The morning after. `asked` is who has already been questioned — re-asking
-    // is free, because the account is stable by design and charging for a
-    // second look would only tax the player for not taking notes.
-    morning: { hours: MORNING_HOURS, asked: [], searched: false, found: null },
-    // The search outcome, drawn ONCE at the swap and stored. Rolling it at the
-    // moment the player sets out would make the draw count depend on whether
-    // they went, and two runs that chose differently would fork the stream.
-    searchRoll: 0,
     // Reused across a campaign's basins (not recreated) so the end-of-campaign
     // debrief reports cumulative totals, not just the final basin's.
     // `falseCrafts` and `phantomsRevealed` are the crafting-deception counters:
@@ -1172,23 +1164,6 @@ export function checkIn(sim, id) {
   return report;
 }
 
-// A morning, in hours, and what the two things that want it cost.
-//
-// The alpha shipped with asking free, which made it a diff: open all five
-// accounts, four match, the odd one falls out without the player's memory ever
-// being used. The obvious fix — cap the asks — was priced first and rejected:
-// it does not make the deduction harder, it makes it rarer and fills the gap
-// with a lottery (perfect play scores 40/60/80/100% at one through four asks,
-// and four is already certain because four clean accounts name the fifth).
-//
-// A cost is only a cost when something else wants the same resource. So the
-// morning buys either questions or a walk out to find the one who wandered off
-// in the night — the design's own second use for the hours you least want to
-// spend. See docs/blueprint-0.13-what-asking-costs.md.
-export const MORNING_HOURS = 5;
-export const ASK_COST = 1;
-export const SEARCH_COST = 3;
-
 /**
  * Overnight, one of them is replaced. Same id, same name, same skills — the
  * roster is bit-identical the next morning, which is the whole point: a player
@@ -1203,8 +1178,6 @@ export const SEARCH_COST = 3;
 export function swapOvernight(sim, id = null) {
   const pool = sim.companions.filter((c) => !c.swapped);
   const rolled = pool.length ? pool[Math.floor(sim.rng() * pool.length)] : null;
-  // Drawn here, always, used later or not at all.
-  sim.searchRoll = sim.rng();
   const victim = id ? sim.companions.find((c) => c.id === id) : rolled;
   if (!victim || victim.swapped) return null;
   victim.swapped = true;
@@ -1225,47 +1198,6 @@ export function askAbout(sim, id) {
   const ch = sim.companions.find((c) => c.id === id);
   if (!ch) return null;
   return accountOf(sim.chronicle, ch, sim.companions);
-}
-
-
-/** Hours enough for one more question. */
-export const canAsk = (sim) => sim.morning.hours >= ASK_COST;
-
-/** Hours enough to go out, and not already gone. */
-export const canSearch = (sim) =>
-  !sim.morning.searched && sim.morning.hours >= SEARCH_COST;
-
-/**
- * Ask, and pay for it. `askAbout` stays free and pure so the debrief and the
- * tests can read an account without charging the player for it — the morning
- * is spent here and nowhere else.
- */
-export function spendAsk(sim, id) {
-  const ch = sim.companions.find((c) => c.id === id);
-  if (!ch) return null;
-  if (sim.morning.asked.includes(id)) return askAbout(sim, id);  // free, see above
-  if (!canAsk(sim)) return null;
-  sim.morning.hours -= ASK_COST;
-  sim.morning.asked.push(id);
-  return askAbout(sim, id);
-}
-
-/**
- * Go out after the one who wandered off. Costs the hours you least want to
- * spend, which is the point.
- *
- * The odds fall with every question already asked — the one thing the player
- * controls in this slice is WHEN they went. Falling linearly rather than in a
- * step: a step function is monotonic and still reads as a cliff, and a knob
- * wants smoothness asserted, not just direction (Brain: brain-builder#E5).
- */
-export function searchForMissing(sim) {
-  if (!canSearch(sim)) return null;
-  sim.morning.hours -= SEARCH_COST;
-  sim.morning.searched = true;
-  const odds = Math.max(0, 1 - 0.25 * sim.morning.asked.length);
-  sim.morning.found = sim.searchRoll < odds;
-  return { found: sim.morning.found, odds };
 }
 
 function reportText(ch, claim) {
