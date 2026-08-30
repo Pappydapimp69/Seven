@@ -4,6 +4,34 @@ A fork of MIRAGE. The design of record is `docs/IDEAS.md` — the entry titled
 **"THE WOODS: full design note"**. Read it before doing anything non-trivial.
 `docs/HANDOFF-the-woods.md` says which slice to build first and why.
 
+## Where it is now (2026-08-30)
+
+**The alpha is built, deployed and playable: https://pappydapimp69.github.io/Seven/**
+One scripted day, a swap in the night, three questions in the morning, and a
+name. `docs/PLAYTEST-the-woods.md` says what to watch for; it is the first
+thing to read before touching anything.
+
+What shipped, and where it lives:
+
+- `src/names.js` — the roster, composed per run rather than picked.
+- `src/chronicle.js` — the record of the day, the account derived from it, and
+  the ONE fact bent for a fake. This is the file the whole design rests on.
+- `src/woods.js` — the day, the night, the morning, the verdict.
+- `src/main.js` / `index.html` / `css/style.css` — the wiring and the panels.
+- `tests/names.mjs`, `tests/chronicle.mjs`, `tests/woods.mjs`, and
+  `tests/woods-play.mjs` (a whole day in a real browser, to a verdict).
+- ADRs `0002-the-woods-alpha.md` (why this slice) and `0003-two-alphas.md`
+  (it was built twice, in parallel — what happened to the other one).
+
+Nothing beyond the alpha is built, on purpose: no map, no travel, no crafting,
+no day/night, no pylons, no recruitment, no skills, no meta-progression, no
+ending. All of it is in the design note and none of it matters if the asking
+is not fun. **Do not start it before the playtest answers that.**
+
+The one instrument that will answer it: every finished day writes a line to
+`seven:days` and the title screen shows days walked, caught, and how many of
+the last five. The interesting shape is a hit rate that climbs and then stops.
+
 ## What this repo is, and is not
 
 MIRAGE is the BONES: the sim/percept split, the party, the verbs, the save
@@ -106,6 +134,17 @@ sticky selector inverts when its eligibility widens — fix the ACQUIRE ordering
 not just preemption), `#E15` (chain cohesion is not proximity), `#E16` (a guard
 that never failed is unmeasured). `brain query deduction` and `accusation` both
 return zero — that ground is uncovered, so there is no prior art to miss.
+
+## Two things worth knowing before you touch the save
+
+- **The camp is not a seed.** Its map is authored, so `deserializeRun` routes
+  the sentinel seed to `buildCamp()`. Before that existed, a saved camp run
+  resumed as a procedurally generated BASIN with the camp positions pasted on,
+  and nothing errored anywhere.
+- **`/mirage/` and `/seven/` share one localStorage.** GitHub Pages serves every
+  project of one account from ONE origin; the project name is a path. SEVEN's
+  keys are namespaced (`seven:run`, `seven:settings`, `seven:days`) for that
+  reason. Do not un-namespace them.
 
 ## Inherited open item
 `tests/balance.mjs` is RED: the `deceived` bot policy wins 17% of standard seeds
