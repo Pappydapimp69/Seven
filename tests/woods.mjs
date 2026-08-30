@@ -245,14 +245,48 @@ check("a question is spent whether or not it told you anything", () => {
   assert(ask(sim, woods, PARTY[4]) === null, "asked a fourth question with three in the morning");
 });
 
-check("asking the same person twice is free and tells you nothing new", () => {
+check("asking again is free and gives back the SAME WORDS", () => {
+  // Not generosity. The difficulty is remembering the DAY; forgetting what
+  // somebody said four seconds ago is a different difficulty whose only
+  // counterplay is note-taking. And an account that moved when re-asked would
+  // be catchable with a stopwatch instead of a memory — ask anyone twice, watch
+  // the story change, done.
   const { sim, woods } = aRun(43);
   playTheDay(sim, woods);
   fallNight(sim, woods, makeRng, noEmit);
-  ask(sim, woods, PARTY[0]);
+  const first = ask(sim, woods, PARTY[0]);
   const left = woods.asksLeft;
-  assert(ask(sim, woods, PARTY[0]) === null, "asked the same person twice");
-  eq(woods.asksLeft, left, "a repeat question cost daylight");
+  const again = ask(sim, woods, PARTY[0]);
+  assert(again, "a spent question could not be re-read");
+  eq(again.repeat, true, "a re-read is not marked as one");
+  eq(accountText(again), accountText(first), "the story moved between two readings");
+  eq(woods.asksLeft, left, "re-reading cost daylight");
+});
+
+check("the fake holds its story too", () => {
+  // The one who is lying must be as stable as everyone else. A fake that
+  // improvises a new wrong detail each time it is asked is caught without any
+  // memory of the day at all.
+  for (let s = 1; s <= 60; s++) {
+    const { sim, woods } = aRun(s);
+    playTheDay(sim, woods);
+    fallNight(sim, woods, makeRng, noEmit);
+    const a = ask(sim, woods, woods.taken);
+    const b = ask(sim, woods, woods.taken);
+    eq(accountText(b), accountText(a), `seed ${s}: the taken member told it differently the second time`);
+  }
+});
+
+check("a spent question survives a reload, word for word", () => {
+  const { sim, woods } = aRun(51);
+  playTheDay(sim, woods);
+  fallNight(sim, woods, makeRng, noEmit);
+  const said = ask(sim, woods, PARTY[1]);
+  const back = deserializeWoods(JSON.parse(JSON.stringify(serializeWoods(woods))));
+  const recalled = ask(sim, back, PARTY[1]);
+  assert(recalled, "the answer was not there after a reload");
+  eq(accountText(recalled), accountText(said), "the answer changed across a reload");
+  eq(back.asksLeft, woods.asksLeft, "the reload refunded a question");
 });
 
 check("you cannot ask before the night or after naming somebody", () => {

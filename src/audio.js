@@ -254,6 +254,20 @@ export function createAudio() {
     // downward buzz: a wrong answer, not a threat.
     reveal: () => blip({ freq: 520, dur: 0.22, type: "square", gain: 0.15, slide: -260 }),
     break: () => blip({ freq: 240, dur: 0.25, type: "square", gain: 0.08 }),
+    // A job done. Two soft knocks, wooden rather than electronic, because
+    // everything it marks is manual work in a wood — and deliberately at the
+    // quiet end: it is punctuation on something the player just watched
+    // happen, not an achievement.
+    beat: () => {
+      blip({ freq: 196, dur: 0.09, type: "triangle", gain: 0.07, slide: -40 });
+      setTimeout(() => blip({ freq: 147, dur: 0.13, type: "triangle", gain: 0.06, slide: -30 }), 105);
+    },
+    // The last one, at dusk. The same shape a fifth lower and left to ring —
+    // the day closing rather than another job finished.
+    dayEnd: () => {
+      blip({ freq: 131, dur: 0.5, type: "triangle", gain: 0.08, slide: -18 });
+      setTimeout(() => blip({ freq: 98, dur: 0.9, type: "triangle", gain: 0.07, slide: -12 }), 160);
+    },
     deny: () => blip({ freq: 150, dur: 0.12, type: "square", gain: 0.07 }),
     // CHORUS agreeing with something the player just did. Deliberately NOT a
     // stinger: three near-unison partials a few cents apart, entering together

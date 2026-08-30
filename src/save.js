@@ -17,9 +17,9 @@
 //     options (dbh#E4, wrong-sky#E2). And an ended run is never saved, so a
 //     "Resume" can't drop you back onto the frame you already lost.
 
-import { createRun } from "./state.js?v=seven-0.15.0";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.15.0";
-import { attachSites, serializeWoods, deserializeWoods } from "./woods.js?v=seven-0.15.0";
+import { createRun } from "./state.js?v=seven-0.16.0";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.16.0";
+import { attachSites, serializeWoods, deserializeWoods } from "./woods.js?v=seven-0.16.0";
 
 // SEVEN'S OWN KEYS, and this is not cosmetic. GitHub Pages serves every project
 // of one account from ONE origin — `pappydapimp69.github.io` — so /mirage/ and
@@ -287,6 +287,9 @@ export function serializeRun(sim) {
     callUnlocked: sim.callUnlocked !== false,
     reachedTrainer: !!sim.reachedTrainer,
     woods: serializeWoods(sim.woods),
+    // The day's own seed. Every woods run is on the same authored camp, whose
+    // seed is a sentinel, so this is the only thing that identifies WHICH day.
+    woodsSeed: sim.woodsSeed ?? null,
   };
 }
 
@@ -321,6 +324,7 @@ export function deserializeRun(data) {
     sim.callUnlocked = data.callUnlocked !== false;
     sim.reachedTrainer = !!data.reachedTrainer;
     sim.woods = deserializeWoods(data.woods);
+    sim.woodsSeed = data.woodsSeed ?? null;
     if (sim.woods) {
       for (const c of sim.companions) c.name = sim.woods.nameById[c.id] || c.name;
     }

@@ -27,9 +27,9 @@
 //      saveable, resumable and reproducible, and every draw below is taken
 //      unconditionally so the draw count cannot depend on the branch.
 
-import { CELL, GRID, cellToWorld } from "./world.js?v=seven-0.15.0";
-import { makeChronicle, record, fact, account, pickPerturbation, WEATHERS } from "./chronicle.js?v=seven-0.15.0";
-import { makeRoster, nearMiss } from "./names.js?v=seven-0.15.0";
+import { CELL, GRID, cellToWorld } from "./world.js?v=seven-0.16.0";
+import { makeChronicle, record, fact, account, pickPerturbation, WEATHERS } from "./chronicle.js?v=seven-0.16.0";
+import { makeRoster, nearMiss } from "./names.js?v=seven-0.16.0";
 
 /**
  * The four places the day happens in, as camp cells.
@@ -141,6 +141,7 @@ export function startDay(sim, rng, partyIds) {
     perturbation: null,     // drawn at dusk, from a SEPARATE derived stream
     perturbSeed: (rng() * 0xffffffff) >>> 0,
     asked: [],
+    answers: {},          // what each asked person said, kept verbatim
     asksLeft: ASKS_ALLOWED,
     accused: null,
     correct: null,
@@ -256,17 +257,34 @@ export function fallNight(sim, woods, makeRngFn, emit) {
  * the player would have to first learn what ordinary variation looks like, and
  * a lone difference would prove nothing. Here, one difference is the whole
  * signal, and it costs a third of the morning to look for it.
+ *
+ * ASKING AGAIN IS FREE, and returns the SAME WORDS. Two reasons, and neither is
+ * generosity:
+ *
+ *   The difficulty this game is for is remembering the DAY — a day the player
+ *   played. Forgetting what somebody told you four seconds ago is a different
+ *   difficulty, it is not interesting, and the only counterplay for it is
+ *   taking notes, which is a chore rather than a decision.
+ *
+ *   And the account has to be STABLE. If re-asking regenerated it, a player
+ *   could ask anybody twice, watch the story move, and have their answer with
+ *   no memory involved at all. A fake that cannot hold its own story is caught
+ *   by a stopwatch. So the words are kept, and they are save state.
  */
 export function ask(sim, woods, id) {
   if (woods.phase !== PHASE.MORNING) return null;
-  if (woods.asksLeft <= 0) return null;
-  if (woods.asked.includes(id)) return null;
   const nameOf = (cid) => woods.nameById[cid] || cid;
+  if (woods.asked.includes(id)) {
+    const kept = woods.answers[id];
+    return kept ? { who: id, name: nameOf(id), repeat: true, ...kept } : null;
+  }
+  if (woods.asksLeft <= 0) return null;
   const lying = id === woods.taken;
   const acc = account(woods.chronicle, nameOf, lying ? woods.perturbation : null);
   woods.asked.push(id);
+  woods.answers[id] = acc;
   woods.asksLeft -= 1;
-  return { who: id, name: nameOf(id), ...acc };
+  return { who: id, name: nameOf(id), repeat: false, ...acc };
 }
 
 /** Name one. This is the run. */
@@ -295,6 +313,11 @@ export function serializeWoods(woods) {
     perturbation: woods.perturbation ? { ...woods.perturbation } : null,
     chronicle: { weather: woods.chronicle.weather, facts: woods.chronicle.facts.map((f) => ({ ...f })) },
     asked: woods.asked.slice(), asksLeft: woods.asksLeft,
+    // The words themselves, not just who was asked. A reload that regenerated
+    // them would be safe today — the perturbation is fixed and the renderer is
+    // pure — but "the account is stable" is a RULE of this design, and a rule
+    // that holds by coincidence is one edit from not holding.
+    answers: Object.fromEntries(Object.entries(woods.answers || {}).map(([k, v]) => [k, { weather: v.weather, lines: v.lines.slice() }])),
     accused: woods.accused, correct: woods.correct,
   };
 }
@@ -308,6 +331,7 @@ export function deserializeWoods(d) {
     perturbation: d.perturbation ? { ...d.perturbation } : null,
     chronicle: { weather: d.chronicle.weather, facts: d.chronicle.facts.map((f) => ({ ...f, withWhom: (f.withWhom || []).slice() })) },
     asked: (d.asked || []).slice(), asksLeft: d.asksLeft,
+    answers: Object.fromEntries(Object.entries(d.answers || {}).map(([k, v]) => [k, { weather: v.weather, lines: (v.lines || []).slice() }])),
     accused: d.accused ?? null, correct: d.correct ?? null,
   };
 }

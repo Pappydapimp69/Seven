@@ -6,11 +6,11 @@
 // the one hallucinating. The only place a real number is ever printed is the
 // debrief, after the run is over.
 
-import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds } from "./percept.js?v=seven-0.15.0";
-import { canWork, beatAt, PHASE } from "./woods.js?v=seven-0.15.0";
+import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds } from "./percept.js?v=seven-0.16.0";
+import { canWork, beatAt, PHASE } from "./woods.js?v=seven-0.16.0";
 import { LOG_RADIUS, PYLON_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, gatherTarget, GATHER_HOLD_TIME, previewCraft, claimedEntryAt, pylonAt,
   mossedAt,
-} from "./state.js?v=seven-0.15.0";
+} from "./state.js?v=seven-0.16.0";
 
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 

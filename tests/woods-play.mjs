@@ -175,9 +175,19 @@ const A = (c, m) => { if (!c) fails.push(m); };
         left: document.getElementById("asksLeft").textContent,
       });
     }
+    // A fourth PERSON is refused; re-reading one you already paid for is not.
     M.act(M.ACTIONS.CHECK_IN, 3);
     M.advance(0.1);
     out.fourth = M.woods.asksLeft;
+    out.fourthPanelName = document.getElementById("accountName").textContent;
+    M.act(M.ACTIONS.CHECK_IN, 0);
+    M.advance(0.1);
+    out.reread = {
+      name: document.getElementById("accountName").textContent,
+      lines: [...document.querySelectorAll("#accountLines li")].map((li) => li.textContent),
+      note: document.getElementById("asksLeft").textContent,
+      left: M.woods.asksLeft,
+    };
     return out;
   });
   for (const a of asked.accounts) {
@@ -187,6 +197,10 @@ const A = (c, m) => { if (!c) fails.push(m); };
     A(/left/.test(a.left), `the questions-left line is missing: "${a.left}"`);
   }
   A(asked.fourth === 0, `a fourth question was answered — asksLeft ${asked.fourth}`);
+  A(asked.reread.left === 0, `re-reading a spent answer cost a question — asksLeft ${asked.reread.left}`);
+  A(asked.reread.lines.join("|") === asked.accounts[0].lines.join("|"),
+    "re-reading gave different words than the first time");
+  A(/free/.test(asked.reread.note), `a re-read should say it is free, got "${asked.reread.note}"`);
   {
     const real = asked.accounts.filter((a) => a.who !== asked.taken).map((a) => a.lines.join("|"));
     const fake = asked.accounts.filter((a) => a.who === asked.taken).map((a) => a.lines.join("|"));

@@ -6,22 +6,22 @@ import {
   possess, release, possessableCompanions, activatePylon, pylonAt,
   callCompanion, clearMoss, mossedAt,
   PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=seven-0.15.0";
-import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.15.0";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.15.0";
+} from "./state.js?v=seven-0.16.0";
+import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.16.0";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.16.0";
 import {
   attachSites, startDay, beatAt, briefFor, canWork, workBeat, fallNight, ask, accuse,
   BEATS, PHASE, ASKS_ALLOWED,
-} from "./woods.js?v=seven-0.15.0";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=seven-0.15.0";
-import { createRenderer } from "./render.js?v=seven-0.15.0";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.15.0";
-import { createInput, ACTIONS } from "./input.js?v=seven-0.15.0";
-import { createAudio } from "./audio.js?v=seven-0.15.0";
-import { hashSeed, makeRng } from "./rng.js?v=seven-0.15.0";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings } from "./save.js?v=seven-0.15.0";
+} from "./woods.js?v=seven-0.16.0";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=seven-0.16.0";
+import { createRenderer } from "./render.js?v=seven-0.16.0";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.16.0";
+import { createInput, ACTIONS } from "./input.js?v=seven-0.16.0";
+import { createAudio } from "./audio.js?v=seven-0.16.0";
+import { hashSeed, makeRng } from "./rng.js?v=seven-0.16.0";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings } from "./save.js?v=seven-0.16.0";
 
-const BUILD = "seven-0.15.0";
+const BUILD = "seven-0.16.0";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -337,8 +337,8 @@ function woodsWork(sim) {
   const before = w.beat;
   workBeat(sim, w, emitToHud);
   if (w.beat === before) return false;
-  if (w.phase === PHASE.NIGHT) woodsTurnIn(sim);
-  else enterBeat(sim);
+  if (w.phase === PHASE.NIGHT) { audio.play("dayEnd"); woodsTurnIn(sim); }
+  else { audio.play("beat"); enterBeat(sim); }
   return true;
 }
 
@@ -423,10 +423,12 @@ function woodsTurnIn(sim) {
 function paintMorning(sim) {
   const w = sim.woods;
   if (!w) return;
+  const asked = w.asked.map((id) => w.nameById[id]).join(", ");
   setObjective(
     "The morning",
-    `Ask about yesterday — pick a name (1–5) and check in. ${w.asksLeft} of ${ASKS_ALLOWED} left. ` +
-    "When you are ready, press B to name somebody.",
+    `Ask about yesterday — pick a name (1–5) and check in. ${w.asksLeft} of ${ASKS_ALLOWED} left.` +
+    (asked ? ` Already asked: ${asked} — reading them again is free.` : "") +
+    " When you are ready, press B to name somebody.",
   );
 }
 
@@ -437,7 +439,7 @@ function woodsAsk(sim, id) {
   if (!acc) {
     // A refusal has to say WHY, or it reads as the key not working. The one
     // thing it may never say is anything about who is who.
-    hudSay(w.asked.includes(id) ? "You already asked them." : "No time. You have asked enough for one morning.");
+    hudSay("No time. You have asked enough for one morning.");
     return;
   }
   showAccount(acc, w);
@@ -454,7 +456,9 @@ function showAccount(acc, w) {
     li.textContent = line;
     list.appendChild(li);
   }
-  el("asksLeft").textContent = `${w.asksLeft} of ${ASKS_ALLOWED} questions left`;
+  el("asksLeft").textContent = acc.repeat
+    ? `${acc.name} already told you this — reading it again is free`
+    : `${w.asksLeft} of ${ASKS_ALLOWED} questions left`;
   openWoodsPanel("accountPanel");
 }
 
@@ -672,7 +676,14 @@ function mountRun(sim, openingLine) {
   hud.setHints(input.activeScheme);
   hud.say(openingLine, "warn");
   saveTimer = 0;
-  el("seedLabel").textContent = `seed ${seedValue}`;
+  // THE DAY'S seed, not the map's. Every woods run is on the same authored
+  // camp, whose seed is a sentinel (-1) and says nothing about which day this
+  // is — printing it told a player their day was "seed -1" and made two
+  // completely different days look identical. The seed worth showing is the one
+  // that decided the roster, the weather, who did what and who was taken.
+  el("seedLabel").textContent = sim.woods
+    ? `day ${sim.woodsSeed ?? "—"}`
+    : `seed ${seedValue}`;
   screens("hudLayer");
   audio.start();
   // The camp is a wood in daylight; a basin is a fogged plain. Crossfaded, not
