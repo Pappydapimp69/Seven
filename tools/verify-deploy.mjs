@@ -17,7 +17,10 @@
 // Usage: node tools/verify-deploy.mjs [baseUrl]
 //   defaults to the project's GitHub Pages url.
 
-const BASE = (process.argv[2] || "https://pappydapimp69.github.io/seven/").replace(/\/?$/, "/");
+// CASE MATTERS. The repository is `Pappydapimp69/Seven`, and GitHub Pages
+// serves the project path with the repository's own capitalisation — the
+// lowercase spelling is a hard 404, not a redirect.
+const BASE = (process.argv[2] || "https://pappydapimp69.github.io/Seven/").replace(/\/?$/, "/");
 
 const problems = [];
 const note = (m) => problems.push(m);
@@ -29,7 +32,13 @@ async function get(url) {
 }
 
 const IMPORT_RE = /from\s+"(\.\/[^"]+)"/g;
-const TOKEN_RE = /\?v=(mirage-[\d.]+)/g;
+// ANY project's token, not one hard-coded prefix. This read `mirage-` and this
+// is a fork: on SEVEN it matched nothing, so `tokens` came back empty, the
+// "more than one token is live" guard could never fire, and the tool printed
+// "OK — every module the browser loads carries the current token" over a graph
+// it had not checked a single token in. A verifier that cannot fail is worse
+// than no verifier, because it is believed.
+const TOKEN_RE = /\?v=([a-z]+-[\d.]+)/g;
 
 (async () => {
   console.log(`checking ${BASE}`);
@@ -87,6 +96,10 @@ const TOKEN_RE = /\?v=(mirage-[\d.]+)/g;
     }
   }
 
+  // A graph with no tokens at all has not been verified, it has been walked.
+  if (tokens.size === 0) {
+    note("no cache-bust token appears anywhere in the live module graph — nothing was actually checked");
+  }
   if (tokens.size > 1) {
     note(`more than one cache-bust token is live (${[...tokens].join(", ")}) — a partial stamp loads a module twice as two instances`);
   }

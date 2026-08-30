@@ -1,6 +1,6 @@
 # SEVEN
 
-> **Play it: https://pappydapimp69.github.io/seven/**
+> **Play it: https://pappydapimp69.github.io/Seven/**
 
 Two games on one set of bones.
 
