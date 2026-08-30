@@ -43,7 +43,7 @@ let run = null;
 function newDay(seed) {
   const { sim, taken } = buildDay({ seed });
   // `seen` is how much of the day the player has actually lived through.
-  run = { sim, taken, seed, seen: 0, accounts: new Map(), over: false };
+  run = { sim, taken, seed, seen: 0, open: null, accounts: new Map(), over: false };
   $("seed").textContent = `seed ${seed}`;
   drawYesterday();
   show("yesterday");
@@ -73,15 +73,25 @@ function drawMorning() {
     const card = el("div", "person");
     card.append(el("h3", null, c.name));
 
+    // ONE account on screen at a time. Five side by side can be read against
+    // each other — four matching ones out-vote the fifth and the player's
+    // memory is bypassed again, by a different route than the transcript. An
+    // account is something somebody said to you, once.
     const acct = run.accounts.get(c.id);
-    if (acct) {
+    if (acct && run.open === c.id) {
       const ul = el("ul", "account");
       for (const s of acct.statements) ul.append(el("li", null, s.text));
       card.append(ul);
+    } else if (acct) {
+      card.append(el("p", "spoken", "You have spoken to them."));
+      const again = el("button", "again", "Hear it again");
+      again.onclick = () => { run.open = c.id; drawMorning(); };
+      card.append(again);
     } else {
       const ask = el("button", "ask", "Ask about yesterday");
       ask.onclick = () => {
         run.accounts.set(c.id, askAbout(run.sim, c.id));
+        run.open = c.id;
         drawMorning();
       };
       card.append(ask);

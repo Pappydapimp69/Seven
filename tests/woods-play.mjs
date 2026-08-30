@@ -82,9 +82,12 @@ const A = (c, m) => { if (!c) fails.push(m); };
   A(asks.length === 5, `expected 5 people to ask, got ${asks.length}`);
   for (let i = 0; i < 5; i++) await (await page.$$("#who button.ask"))[0].click();
   A((await page.$$("#who button.ask")).length === 0, "someone could not be asked");
-  const accounts = await page.$$eval("#who .account", (ns) => ns.map((n) => n.children.length));
-  A(accounts.length === 5, "not every account is on screen");
-  A(accounts.every((n) => n === 7), `an account is not 7 lines: ${accounts.join(",")}`);
+  // ONE at a time — five on screen can be read against each other, which
+  // bypasses the player's memory by a second route.
+  const onScreen = await page.$$("#who .account");
+  A(onScreen.length === 1, `${onScreen.length} accounts on screen at once, want 1`);
+  A((await page.$$("#who .spoken")).length === 4, "the other four are not marked as spoken to");
+  A((await page.$$eval("#who .account li", (ns) => ns.length)) === 7, "the open account is not 7 lines");
 
   // THE MORNING HOLDS NO TRANSCRIPT. The player is the recording; a day left on
   // screen makes their memory unnecessary and the game a diff.
@@ -95,8 +98,14 @@ const A = (c, m) => { if (!c) fails.push(m); };
 
   // Exactly one account must differ from the day that actually happened — and
   // the page must not be the thing pointing it out.
-  const said = await page.$$eval("#who .account", (ns) =>
-    ns.map((n) => [...n.children].map((li) => li.textContent)));
+  const said = [];
+  for (let i = 1; i <= 5; i++) {
+    // whichever this person offers: a first ask, or hearing it again
+    const btn = await page.$(`#who .person:nth-child(${i}) button.ask, #who .person:nth-child(${i}) button.again`);
+    A(btn !== null, `nobody to ask in card ${i}`);
+    await btn.click();
+    said.push(await page.$$eval("#who .account li", (ns) => ns.map((n) => n.textContent)));
+  }
   const odd = said.filter((a) => a.some((line, i) => line !== lived[i]));
   A(odd.length === 1, `exactly one account should diverge, ${odd.length} did`);
 

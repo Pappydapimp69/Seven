@@ -32,9 +32,11 @@
   }
   button:hover { border-color: var(--warm); color: var(--warm); }
   button.name { display: block; }
+  button.again { font-size: .8rem; padding: .3rem .7rem; }
   .person { border-top: 1px solid var(--line); padding: 1rem 0; }
   .person:first-child { border-top: 0; }
   .account li { color: var(--dim); }
+  .spoken { color: var(--dim); font-size: .85rem; margin: .25rem 0 0; }
   .count { color: var(--dim); font-size: .85rem; }
   .right { color: #8fbf7f; }
   .wrong { color: #c98080; }
@@ -57,7 +59,7 @@
 
   <section id="morning" hidden>
     <h2>This morning</h2>
-    <p class="sub">You were there for all of it. Nobody wrote it down.</p>
+    <p class="sub">You were there for all of it. Nobody wrote it down, and they will only tell you one at a time.</p>
     <div class="panel" id="who"></div>
     <p class="count" id="asked"></p>
   </section>
