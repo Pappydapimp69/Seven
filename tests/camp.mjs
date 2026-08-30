@@ -83,20 +83,35 @@ check("both pylons exist, are reachable, and start mossed", () => {
   }
 });
 
-check("one pylon is on the way to the trainer", () => {
-  // Effect-gating only pays off if the player MEETS the inert thing before the
-  // objective needs it (brain: wrong-sky#E8). A pylon nobody walks past is no
-  // better than one that does not exist yet.
+// The pylons used to be required to sit ON the walk to the trainer, so a player
+// met one early. That was reversed deliberately: tripping over the thing makes
+// "there is something out here under the moss" a lie, and finding one should
+// take wandering. What still has to hold is that they are FINDABLE — off the
+// path, but inside the camp, reachable, and not so far that the objective
+// becomes a search of the whole map.
+check("the pylons are off the path but still findable", () => {
   const camp = buildCamp();
-  const near = camp.pylons.some((p) => {
-    const t = (p.x - camp.spawn.x) * (camp.trainer.x - camp.spawn.x) + (p.z - camp.spawn.z) * (camp.trainer.z - camp.spawn.z);
-    const len2 = (camp.trainer.x - camp.spawn.x) ** 2 + (camp.trainer.z - camp.spawn.z) ** 2;
-    const u = Math.max(0, Math.min(1, t / len2));
-    const px = camp.spawn.x + (camp.trainer.x - camp.spawn.x) * u;
-    const pz = camp.spawn.z + (camp.trainer.z - camp.spawn.z) * u;
-    return Math.hypot(p.x - px, p.z - pz) <= 8;
-  });
-  assert(near, "neither pylon is near the walk to the trainer — nobody will meet one before objective 5");
+  const reach = floodFill(camp.blocked, camp.camp.cx, camp.camp.cz);
+  const pathCells = [];
+  for (let cz = 0; cz < GRID; cz++) {
+    for (let cx = 0; cx < GRID; cx++) if (camp.cellKind[cz * GRID + cx] === 4) pathCells.push({ cx, cz });
+  }
+  assert(pathCells.length > 0, "the camp has no path to be off of");
+  for (const p of camp.pylons) {
+    assert(reach[p.cz * GRID + p.cx], `pylon ${p.id} is unreachable`);
+    const d = Math.min(...pathCells.map((c) => Math.hypot(c.cx - p.cx, c.cz - p.cz)));
+    assert(d >= 4, `pylon ${p.id} is ${d.toFixed(1)} cells from the path — you would trip over it`);
+    assert(d <= 16, `pylon ${p.id} is ${d.toFixed(1)} cells from any path — that is a search, not a find`);
+  }
+});
+
+check("the camp is big enough to have somewhere to wander", () => {
+  // The owner asked for four times the area. Asserted against the real count so
+  // a later edit that quietly shrinks it fails here.
+  const camp = buildCamp();
+  let open = 0;
+  for (let i = 0; i < camp.blocked.length; i++) if (!camp.blocked[i]) open++;
+  assert(open >= 1400, `only ${open} open cells — the camp has shrunk back toward its original ~775`);
 });
 
 check("the camp carries nothing an objective has not opened", () => {
