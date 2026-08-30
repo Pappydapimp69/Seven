@@ -2119,14 +2119,24 @@ export function checkEndings(sim) {
     sim.dissolveTimer = 0;
   }
 
-  if (sim.time >= TIME_LIMIT && sim.status === "playing") {
+  // Nobody decays in camp and nothing is racing, so the daylight limit has no
+  // business ending a lesson either.
+  if (!sim.noDrain && sim.time >= TIME_LIMIT && sim.status === "playing") {
     sim.status = "lost";
     sim.ending = "darkness";
     emit(sim, "end", "The light goes. Whatever is still out here stays out here.");
     return;
   }
 
-  if (trueLogCount(sim) >= sim.monoliths.length && sim.status === "playing") {
+  // `>= sim.monoliths.length` is trivially TRUE when there are no markers at
+  // all, so a map with none was won by standing still — which is exactly what
+  // the camp is. The tutorial ended three seconds in with an extraction screen,
+  // and every test passed, because no test ever ran the win check against a map
+  // with an empty objective list.
+  //
+  // Requiring at least one marker is right for basins too: a basin that
+  // generated none should not be winnable without doing anything.
+  if (sim.monoliths.length > 0 && trueLogCount(sim) >= sim.monoliths.length && sim.status === "playing") {
     // Survey complete — now walk it home. Extraction needs YOU plus at least
     // two others physically at camp; a lone lead with a written record is a
     // rumour, not a survey.
