@@ -17,7 +17,7 @@
 //     options (dbh#E4, wrong-sky#E2). And an ended run is never saved, so a
 //     "Resume" can't drop you back onto the frame you already lost.
 
-import { createRun } from "./state.js?v=mirage-0.12.2";
+import { createRun } from "./state.js?v=mirage-0.13.0";
 
 export const SAVE_KEY = "mirage:run";
 // Bumped whenever the shape below changes incompatibly. A save from an older
@@ -402,7 +402,7 @@ export const SETTINGS_KEY = "mirage:settings";
 // the save payload became a cross-slot leak the moment the game grew slots.
 // Settings rather than the run payload because progress has to survive
 // clearSave(), which every new run calls.
-const DEFAULT_SETTINGS = { volume: 0.7, muted: false, difficulty: "standard", coop: "solo", fov: 90, tutorial: { done: [], current: 0 } };
+const DEFAULT_SETTINGS = { volume: 0.7, muted: false, difficulty: "standard", coop: "solo", fov: 78, tutorial: { done: [], current: 0 } };
 
 /**
  * A defaults object nobody can corrupt. `{ ...DEFAULT_SETTINGS }` is a SHALLOW

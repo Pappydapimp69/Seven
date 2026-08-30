@@ -6,18 +6,18 @@ import {
   possess, release, possessableCompanions, activatePylon, pylonAt,
   callCompanion, clearMoss, mossedAt,
   PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=mirage-0.12.2";
-import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=mirage-0.12.2";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=mirage-0.12.2";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=mirage-0.12.2";
-import { createRenderer } from "./render.js?v=mirage-0.12.2";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=mirage-0.12.2";
-import { createInput, ACTIONS } from "./input.js?v=mirage-0.12.2";
-import { createAudio } from "./audio.js?v=mirage-0.12.2";
-import { hashSeed } from "./rng.js?v=mirage-0.12.2";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings } from "./save.js?v=mirage-0.12.2";
+} from "./state.js?v=mirage-0.13.0";
+import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=mirage-0.13.0";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=mirage-0.13.0";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=mirage-0.13.0";
+import { createRenderer } from "./render.js?v=mirage-0.13.0";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=mirage-0.13.0";
+import { createInput, ACTIONS } from "./input.js?v=mirage-0.13.0";
+import { createAudio } from "./audio.js?v=mirage-0.13.0";
+import { hashSeed } from "./rng.js?v=mirage-0.13.0";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings } from "./save.js?v=mirage-0.13.0";
 
-const BUILD = "mirage-0.12.2";
+const BUILD = "mirage-0.13.0";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -41,7 +41,7 @@ let saveTimer = 0;
 // Horizontal field of view in degrees, from stored preferences. Applied to
 // each renderer as it is built, since a run can start before the pause menu
 // has ever been opened.
-let fovPref = 90;
+let fovPref = 78;
 // Sim-seconds between autosaves. Short enough that a closed tab costs little,
 // long enough that a serialise is nowhere near a per-frame cost.
 const AUTOSAVE_EVERY = 5;
@@ -344,6 +344,9 @@ function mountRun(sim, openingLine) {
   el("seedLabel").textContent = `seed ${seedValue}`;
   screens("hudLayer");
   audio.start();
+  // The camp is a wood in daylight; a basin is a fogged plain. Crossfaded, not
+  // switched — see audio.js setBiome.
+  audio.setBiome(sim.world.cellKind ? 1 : 0);
   // A controller player has no use for mouse pointer lock — their look comes
   // from the right stick regardless of lock state — and requesting it here
   // would either no-op or flash a browser permission prompt for nothing.

@@ -6,9 +6,9 @@
 // list as the real ones.
 
 import * as THREE from "../lib/three.module.js";
-import { CELL, GRID, cellToWorld } from "./world.js?v=mirage-0.12.2";
-import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=mirage-0.12.2";
-import { PYLON_RADIUS } from "./state.js?v=mirage-0.12.2";
+import { CELL, GRID, cellToWorld } from "./world.js?v=mirage-0.13.0";
+import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=mirage-0.13.0";
+import { PYLON_RADIUS } from "./state.js?v=mirage-0.13.0";
 
 const PALETTE = {
   sky: 0x0a0f16,
@@ -55,11 +55,22 @@ const EYE_HEIGHT = 1.72;
 // Horizontal field of view, in degrees. 90 sits in the ordinary first-person
 // band (most games ship 90-100 horizontal); past ~100 the perspective starts
 // reading as a fisheye lens rather than as a room.
-const DEFAULT_HFOV = 90;
+// 90 was too wide. Rectilinear projection stretches hard toward the frame edges
+// at that angle — trunks near the screen border lean and smear as you turn, and
+// it reads as the lens being wrong rather than as a wide view. It is also the
+// wrong choice for THIS game: a slow, close, wooded exploration where the
+// periphery is where you are trying to notice a figure. 78 keeps the edges
+// honest. Still a player setting (70-110) — this is only the default.
+const DEFAULT_HFOV = 78;
 // On a very tall/narrow window (a phone held upright) deriving vertical from a
 // fixed horizontal would balloon it, so cap it — a portrait player loses a
 // little horizontal instead of gaining a vertical fisheye.
-const MAX_VFOV = 78;
+// And a hard cap on the VERTICAL, which is what actually distorts. On a narrow
+// or square window verticalFov() from a wide horizontal runs away — at a 1:1
+// aspect a 90 horizontal solves to 90 vertical — so the cap is the only thing
+// standing between an unusual window shape and a fisheye. 68 is wide enough to
+// feel open and short of where the stretch becomes obvious.
+const MAX_VFOV = 68;
 
 /** The VERTICAL fov Three wants, for a given aspect, holding horizontal fixed. */
 function verticalFov(aspect, hfov = DEFAULT_HFOV) {
@@ -425,24 +436,98 @@ export function createRenderer(canvas, sim) {
     return g;
   }
 
-  function makeFigure() {
+  // FIVE DISTINCT BUILDS, one per roster slot. Every companion was the same
+  // capsule in the same colour, so at any distance past a few metres the party
+  // was five identical grey shapes and "who is that over there" had no answer.
+  //
+  // Silhouette carries the difference, not colour — heights, widths, a pack, a
+  // hood. brain: the-game-the-recursion#E12 found two independently-authored
+  // entity palettes landing on the red-green confusion axis at nearly identical
+  // luminance, where only the silhouettes separated them. So the shapes differ
+  // first and the tints are a secondary cue, checked for luminance spread — the
+  // first pass put slots 3 and 5 within 0.7 luminance of each other ON that
+  // axis, which is precisely E12's case, so slot 5 was darkened until every
+  // pair clears a real margin.
+  const BUILDS = [
+    { r: 0.34, h: 1.05, head: 0.25, tint: 0x8d97a8, pack: true,  hood: false }, // 1 broad, packed
+    { r: 0.27, h: 0.86, head: 0.22, tint: 0xb9a58c, pack: false, hood: false }, // 2 slight
+    { r: 0.33, h: 1.16, head: 0.24, tint: 0x7f8d84, pack: false, hood: true  }, // 3 tall, hooded
+    { r: 0.30, h: 0.78, head: 0.26, tint: 0xa89aa6, pack: true,  hood: false }, // 4 short, packed
+    { r: 0.36, h: 0.98, head: 0.23, tint: 0x6a5f4a, pack: false, hood: false }, // 5 stocky
+  ];
+
+  function makeFigure(item) {
     const g = new THREE.Group();
-    const mat = new THREE.MeshStandardMaterial({ color: PALETTE.body, roughness: 0.8 });
-    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.32, 0.95, 6, 10), mat);
-    body.position.y = 1.05;
+    // `index` is 1-based on companions and 0 on the lead; a phantom has none, so
+    // it falls through to slot 0's build and reads as a real member — which is
+    // the point of a phantom.
+    const b = BUILDS[Math.max(0, ((item?.index ?? 1) - 1)) % BUILDS.length];
+    const mat = new THREE.MeshStandardMaterial({ color: b.tint, roughness: 0.8 });
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(b.r, b.h, 6, 10), mat);
+    body.position.y = 0.55 + b.h / 2;
     g.add(body);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 12, 10), mat);
-    head.position.y = 1.86;
+    const head = new THREE.Mesh(new THREE.SphereGeometry(b.head, 12, 10), mat);
+    head.position.y = 0.55 + b.h + b.head * 1.3;
     g.add(head);
+    if (b.hood) {
+      const hood = new THREE.Mesh(new THREE.ConeGeometry(b.head * 1.5, b.head * 2.1, 7), mat);
+      hood.position.y = head.position.y + b.head * 0.5;
+      g.add(hood);
+    }
+    if (b.pack) {
+      const pack = new THREE.Mesh(new THREE.BoxGeometry(b.r * 1.5, b.h * 0.7, b.r * 0.9), mat);
+      pack.position.set(0, 0.55 + b.h * 0.55, -b.r * 1.1);
+      g.add(pack);
+    }
     const light = new THREE.Mesh(
       new THREE.SphereGeometry(0.11, 8, 8),
       new THREE.MeshBasicMaterial({ color: 0xffd9a0 }),
     );
-    light.position.set(0.3, 1.3, 0.22);
+    light.position.set(b.r * 0.9, 0.55 + b.h * 0.75, 0.22);
     g.add(light);
-    g.userData = { mat, light, bob: Math.random() * 6.283, lastX: 0, lastZ: 0 };
+    g.userData = { mat, light, tint: b.tint, bob: Math.random() * 6.283, lastX: 0, lastZ: 0 };
     scene.add(g);
     return g;
+  }
+
+  /**
+   * A marker over the trainer, so "walk over to him" names somebody you can
+   * pick out. Without it the objective points at one of six identical figures
+   * standing in a field and the player has to guess which.
+   *
+   * Deliberately DIEGETIC-ish and camp-only: a lantern on a pole, not a
+   * floating waypoint arrow. It is a thing at a place, which is the same
+   * grammar as everything else in this game, and it never appears in a basin.
+   */
+  let trainerMark = null;
+  function ensureTrainerMark(at) {
+    if (!at) { if (trainerMark) trainerMark.visible = false; return; }
+    if (!trainerMark) {
+      const g = new THREE.Group();
+      const pole = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.07, 0.09, 3.2, 6),
+        new THREE.MeshStandardMaterial({ color: 0x3a3128, roughness: 0.9 }),
+      );
+      pole.position.y = 1.6;
+      g.add(pole);
+      const lamp = new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.3, 0),
+        new THREE.MeshBasicMaterial({ color: 0xffd489 }),
+      );
+      lamp.position.y = 3.25;
+      g.add(lamp);
+      const glow = new THREE.PointLight(0xffc879, 1.6, 16, 2);
+      glow.position.y = 3.25;
+      g.add(glow);
+      g.userData.lamp = lamp;
+      scene.add(g);
+      trainerMark = g;
+    }
+    trainerMark.visible = true;
+    trainerMark.position.set(at.x, terrainHeight(at.x, at.z), at.z);
+    // A slow pulse, so it reads as lit rather than as a decal.
+    const t = performance.now() / 1000;
+    trainerMark.userData.lamp.scale.setScalar(1 + Math.sin(t * 1.7) * 0.12);
   }
 
   function makeItem() {
@@ -508,7 +593,9 @@ export function createRenderer(canvas, sim) {
       seen.add(item.id);
       let obj = map.get(item.id);
       if (!obj) {
-        obj = factory();
+        // The ITEM is passed so a factory can vary by whose it is. makeFigure
+        // needs it to pick a build per roster slot; the others ignore it.
+        obj = factory(item);
         map.set(item.id, obj);
       }
       obj.visible = true;
@@ -640,6 +727,9 @@ export function createRenderer(canvas, sim) {
       const s = obj.userData.item;
       obj.position.set(s.x, terrainHeight(s.x, s.z), s.z);
     }
+
+    // The trainer's lantern. Camp only — `sim.trainer` exists nowhere else.
+    ensureTrainerMark(sim.trainer && !sim.reachedTrainer ? sim.trainer : null);
 
     // ---- companions (real and otherwise) ----
     syncPool(pool.figures, perceivedCompanions(percept, sim), makeFigure);
