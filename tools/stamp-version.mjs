@@ -45,10 +45,7 @@ for (const file of fs.readdirSync(path.join(ROOT, "src")).filter((f) => f.endsWi
 // is a second entry point, and an unstamped entry pins its whole import tree
 // to whatever the browser cached — which is the exact failure this tool was
 // written for, one page over.
-const ENTRIES = [
-  { file: "index.html", script: "src/main.js" },
-  { file: "woods.html", script: "src/woods.js" },
-];
+const ENTRIES = [{ file: "index.html", script: "src/main.js" }];
 for (const entry of ENTRIES) {
   const htmlPath = path.join(ROOT, entry.file);
   if (!fs.existsSync(htmlPath)) continue;

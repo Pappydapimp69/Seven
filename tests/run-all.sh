@@ -15,6 +15,10 @@ echo "== chronicle (can a player catch a fake by asking?) =="
 node tests/chronicle.test.mjs
 echo
 
+echo "== the woods (the scripted day, in the real camp) =="
+node tests/woods.mjs
+echo
+
 echo "== save/resume (pure) =="
 node tests/save.test.mjs
 echo
@@ -81,9 +85,6 @@ if [ -d /opt/pw-browsers ] && node -e 'require("/opt/node22/lib/node_modules/pla
   echo
   echo "== tutorial play (real browser, stages start and steps fire) =="
   node tests/tutorial-play.mjs
-  echo
-  echo "== the woods (real browser, the whole alpha loop) =="
-  node tests/woods-play.mjs
 else
   echo "== smoke + gamepad: SKIPPED — Playwright/Chromium not available here =="
   echo "   (the 3D layer was NOT exercised in this run)"

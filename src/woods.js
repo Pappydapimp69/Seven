@@ -1,145 +1,140 @@
-// woods.js — the investigation alpha, on its own page.
+// woods.js — THE WOODS: one scripted day at the camp, a swap in the night, and
+// a morning spent asking.
 //
-// Not wired into the 3D game on purpose. The alpha exists to answer one
-// question — can a player catch a fake by asking about a day they both lived
-// through — and the renderer, the party AI and the lucidity meter have nothing
-// to say about it. Building it as a layer beside the bones rather than through
-// them means a failed organ cannot break a working skeleton.
+// This is the alpha from docs/IDEAS.md, and it runs INSIDE the game. Not a page
+// beside it: the camp, the renderer, the party, the roster HUD and the check-in
+// verb, all of them already built and all of them the point. The player is
+// PRESENT for the day because they are standing in it.
 //
-// Two rules this screen keeps, both inherited:
-//   - Nothing is announced. The morning after the swap looks exactly like the
-//     morning before it. Same names, same order, no marker, no colour.
-//   - Nothing highlights the difference. A found tell is the player's, or it is
-//     nothing. `tell` exists on every account and is not read until the debrief.
+// That presence is load-bearing and is the thing a text version cannot have.
+// The evidence for the whole investigation is the player's own memory of a day
+// they lived, so the day has to be lived. A list on a screen makes the page the
+// record and the game a diff; being there makes the player the record, which is
+// what the design note means by their memory being the only evidence, because
+// only they were there.
 //
-// THE PLAYER IS THE RECORDING. This page used to hand the day over as a list
-// and then keep that list pinned beside the accounts all morning. Both halves
-// were wrong, and together they turned the game into a diff: the evidence was a
-// document on screen, so the player compared two texts and their own memory was
-// never involved. Worse, five accounts side by side can be checked against each
-// OTHER, and four matching ones out-vote the fifth without anybody remembering
-// anything.
-//
-// So the day is LIVED — one thing at a time, a press between each, the player
-// present for all of it — and in the morning there is no transcript. What they
-// remember is the evidence, because they are the only place it exists. That is
-// the load-bearing idea of the whole design and everything downstream depends
-// on reading it correctly.
+// The chronicle is written as each beat actually HAPPENS in the world, from the
+// same positions and at the same moment the player sees it. It is a record OF
+// the day, not a script the day is read from — which is why an account derived
+// from it can be checked against what the player watched.
 
-import { buildDay, asLived } from "./day.js?v=seven-0.12.0";
-import { accountOf, accuse } from "./chronicle.js?v=seven-0.12.0";
-import { askAbout } from "./state.js?v=seven-0.12.0";
+import { record, CHRONICLE_KINDS, WEATHER } from "./chronicle.js?v=seven-0.12.0";
+import { swapOvernight } from "./state.js?v=seven-0.12.0";
 
-const $ = (id) => document.getElementById(id);
-const el = (tag, cls, text) => {
-  const n = document.createElement(tag);
-  if (cls) n.className = cls;
-  if (text !== undefined) n.textContent = text;
-  return n;
-};
+/** How close the player has to be to count as present for a beat. */
+export const WITNESS_RADIUS = 26;
 
-let run = null;
+/** How long a companion has to stand at the spot before the beat lands. */
+export const BEAT_DWELL = 1.4;
 
-function newDay(seed) {
-  const { sim, taken } = buildDay({ seed });
-  // `seen` is how much of the day the player has actually lived through.
-  run = { sim, taken, seed, seen: 0, open: null, accounts: new Map(), over: false };
-  $("seed").textContent = `seed ${seed}`;
-  drawYesterday();
-  show("yesterday");
+/**
+ * The day, as landmarks on the camp rather than as sentences.
+ *
+ * A beat names WHERE, not what is said — the sentence is rendered from the
+ * chronicle entry later, by the one renderer, so what the player watches and
+ * what a companion recounts are the same fact seen twice.
+ */
+export const BEAT_COUNT = 7;
+
+/** Named spots on the authored camp, resolved from the world it hands back. */
+export function campPlaces(world) {
+  const p = world.pylons || [];
+  return [
+    { key: "the fire", x: world.camp.x, z: world.camp.z },
+    { key: "the trainer's post", x: world.trainer.x, z: world.trainer.z },
+    { key: "the north pylon", x: p[0]?.x ?? world.camp.x, z: p[0]?.z ?? world.camp.z },
+    { key: "the south pylon", x: p[1]?.x ?? world.trainer.x, z: p[1]?.z ?? world.trainer.z },
+  ];
 }
 
-function show(phase) {
-  for (const id of ["yesterday", "morning", "verdict"]) $(id).hidden = id !== phase;
-}
-
-function drawYesterday() {
-  const day = asLived(run.sim, accountOf).statements;
-  const list = $("lived");
-  list.replaceChildren();
-  // Only what has happened SO FAR. A day you can scroll ahead in is a document,
-  // not a day.
-  for (const s of day.slice(0, run.seen)) list.append(el("li", null, s.text));
-  $("daycount").textContent = `${run.seen} of ${day.length}`;
-  $("next").hidden = run.seen >= day.length;
-  $("sleep").hidden = run.seen < day.length;
-}
-
-function drawMorning() {
-  // Deliberately no memory panel. See the note at the top of this file.
-  const who = $("who");
-  who.replaceChildren();
-  for (const c of run.sim.companions) {
-    const card = el("div", "person");
-    card.append(el("h3", null, c.name));
-
-    // ONE account on screen at a time. Five side by side can be read against
-    // each other — four matching ones out-vote the fifth and the player's
-    // memory is bypassed again, by a different route than the transcript. An
-    // account is something somebody said to you, once.
-    const acct = run.accounts.get(c.id);
-    if (acct && run.open === c.id) {
-      const ul = el("ul", "account");
-      for (const s of acct.statements) ul.append(el("li", null, s.text));
-      card.append(ul);
-    } else if (acct) {
-      card.append(el("p", "spoken", "You have spoken to them."));
-      const again = el("button", "again", "Hear it again");
-      again.onclick = () => { run.open = c.id; drawMorning(); };
-      card.append(again);
-    } else {
-      const ask = el("button", "ask", "Ask about yesterday");
-      ask.onclick = () => {
-        run.accounts.set(c.id, askAbout(run.sim, c.id));
-        run.open = c.id;
-        drawMorning();
-      };
-      card.append(ask);
-    }
-
-    const name = el("button", "name", `It's ${c.name}`);
-    name.onclick = () => finish(c.id);
-    card.append(name);
-    who.append(card);
+/**
+ * Lay out the day. Five draws a beat, every beat, so the roll count is fixed
+ * whatever the day turns out to be — the same rule the rest of the sim lives by.
+ *
+ * Nothing is recorded here. A beat is an INTENTION until it happens in front of
+ * the player; the chronicle is written by `updateWoodsDay` at the moment the
+ * thing actually occurs, from where the people actually are.
+ */
+export function beginWoodsDay(sim, world) {
+  const places = campPlaces(world);
+  const beats = [];
+  let last = null;
+  for (let i = 0; i < BEAT_COUNT; i++) {
+    let k = Math.floor(sim.rng() * CHRONICLE_KINDS.length);
+    const a = Math.floor(sim.rng() * sim.companions.length);
+    const bRaw = Math.floor(sim.rng() * sim.companions.length);
+    const spot = places[Math.floor(sim.rng() * places.length)];
+    const weather = WEATHER[Math.floor(sim.rng() * WEATHER.length)];
+    // Nudged off the previous kind rather than re-rolled: a day with three
+    // identical beats reads as a generator's output, and the player is being
+    // asked to trust this as memory. Arithmetic on a draw already made, so the
+    // count stays fixed.
+    if (i > 0 && CHRONICLE_KINDS[k] === last) k = (k + 1) % CHRONICLE_KINDS.length;
+    last = CHRONICLE_KINDS[k];
+    const b = bRaw === a ? (a + 1) % sim.companions.length : bRaw;
+    beats.push({
+      kind: last, spot, weather,
+      subject: sim.companions[a].id,
+      second: sim.companions[b].id,
+      dwell: 0, done: false, witnessed: false,
+    });
   }
-  $("asked").textContent = `${run.accounts.size} of ${run.sim.companions.length} asked`;
+  sim.woods = { beats, at: 0, over: false, missed: 0 };
+  return sim.woods;
 }
 
-function finish(id) {
-  const verdict = accuse(run.sim.companions, id);
-  const taken = run.sim.companions.find((c) => c.id === verdict.actual);
-  $("call").textContent = verdict.correct ? "You were right." : "You were wrong.";
-  $("call").className = verdict.correct ? "right" : "wrong";
-  $("reveal").textContent = verdict.correct
-    ? `${taken.name} never walked back into camp.`
-    : `You named ${run.sim.companions.find((c) => c.id === id).name}. It was ${taken.name}.`;
+const near = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 
-  // The debrief, and only here. `tell` is the mirror of checkIn's `truth`: it
-  // exists for this screen and the tests, and reaching it mid-run would be the
-  // same mistake as printing the hidden meter.
-  const acct = askAbout(run.sim, taken.id);
-  // The debrief is the one screen allowed to reproduce the day, because the run
-  // is over and the answer has already been given.
-  const truth = asLived(run.sim, accountOf).statements;
-  const lines = $("what");
-  lines.replaceChildren();
-  if (run.accounts.has(taken.id)) {
-    const wrong = acct.statements.filter((s, i) => truth[i] && s.text !== truth[i].text);
-    lines.append(el("p", null, `They got the ${acct.tell.type} wrong:`));
-    for (const s of wrong) lines.append(el("li", "said", `“${s.text}”`));
+/**
+ * Drive the current beat and record it when it lands.
+ *
+ * `scripted` is set on the two companions the beat is about; party.js honours
+ * it ahead of its own goal selection so the AI does not steer them off mid-beat.
+ * It is cleared the moment the beat closes — a scripted flag left behind is a
+ * companion who never goes back to being a companion.
+ */
+export function updateWoodsDay(sim, dt) {
+  const w = sim.woods;
+  if (!w || w.over) return null;
+  const beat = w.beats[w.at];
+  const cast = [beat.subject, beat.second].map((id) => sim.companions.find((c) => c.id === id));
+  for (const c of cast) {
+    c.scripted = { x: beat.spot.x, z: beat.spot.z };
+  }
+  const arrived = cast.every((c) => near(c, beat.spot) < 3.5);
+  if (!arrived) return null;
+
+  beat.dwell += dt;
+  if (beat.dwell < BEAT_DWELL) return null;
+
+  // Was the player there to see it? The camp is small and the design puts
+  // everyone at it, so this is nearly always true — but "nearly" is not "by
+  // construction", and an account of something the player never saw is not
+  // evidence they can weigh. A missed beat is counted, never silently dropped.
+  const seen = near(sim.player, beat.spot) < WITNESS_RADIUS;
+  beat.witnessed = seen;
+  if (seen) {
+    const everyone = [sim.player, ...sim.companions].map((c) => c.id);
+    record(sim, beat.kind, {
+      actors: [beat.subject, beat.second,
+               ...everyone.filter((id) => id !== beat.subject && id !== beat.second)],
+      place: beat.spot.key,
+      weather: beat.weather,
+    });
   } else {
-    lines.append(el("p", null, `You never asked ${taken.name}.`));
+    w.missed++;
   }
-  show("verdict");
+  beat.done = true;
+  for (const c of cast) c.scripted = null;
+  w.at++;
+  if (w.at >= w.beats.length) w.over = true;
+  return { beat, seen, dayOver: w.over };
 }
 
-$("next").onclick = () => { run.seen++; drawYesterday(); };
-$("sleep").onclick = () => { drawMorning(); show("morning"); };
-$("again").onclick = () => newDay((run.seed % 9999) + 1);
-
-// The seed comes from the URL, or it is 1. NEVER from the clock: the whole
-// codebase rests on a run being a pure function of its seed, and a
-// time-seeded day cannot be reproduced, compared or reported in a bug. Seeding
-// from device state was considered and rejected once already.
-const fromUrl = Number.parseInt(new URLSearchParams(location.search).get("seed"), 10);
-newDay(Number.isFinite(fromUrl) && fromUrl > 0 ? fromUrl : 1);
+/** The day ends when the player turns in. Someone is taken; nothing is said. */
+export function sleepAtCamp(sim) {
+  if (!sim.woods || !sim.woods.over) return null;
+  for (const c of sim.companions) c.scripted = null;
+  sim.woods.slept = true;
+  return swapOvernight(sim);
+}

@@ -369,6 +369,20 @@ export function updateCompanions(sim, dt) {
     // the wheel, they are just being lied to about where they are going.
     if (c.humanSlot !== null) continue;
 
+    // A scripted beat outranks the AI's own goal selection. Only THE WOODS
+    // sets this, and only for the two people a beat is about, and it clears
+    // the moment the beat closes — everywhere else `scripted` is null and this
+    // branch never runs, so no existing behaviour moves. It sits above the
+    // hallucination branch on purpose: the alpha runs with noDrain, nobody
+    // goes lost, and a beat that could be stolen mid-walk would record a thing
+    // that did not happen where it says it did.
+    if (c.scripted) {
+      c.goalKind = "scripted";
+      c.goal = { x: c.scripted.x, z: c.scripted.z, label: null };
+      stepToward(sim, c, c.scripted, WALK_SPEED, dt);
+      continue;
+    }
+
     if (c.hallucinating) {
       // No formation, no orders, no lead. Just the errand they have invented.
       c.goalKind = "hallucinating";
