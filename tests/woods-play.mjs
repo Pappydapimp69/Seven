@@ -48,10 +48,18 @@ const A = (c, m) => { if (!c) fails.push(m); };
 
   await page.goto(`${base}?seed=3`, { waitUntil: "networkidle" });
 
-  // --- yesterday
-  const lived = await page.$$eval("#lived li", (ns) => ns.map((n) => n.textContent));
-  A(lived.length === 7, `yesterday should list 7 things, got ${lived.length}`);
-  A(await page.isVisible("#sleep"), "no way to sleep");
+  // --- yesterday is LIVED, one thing at a time
+  A((await page.$$("#lived li")).length === 0, "the day was handed over before it happened");
+  A(!(await page.isVisible("#sleep")), "could sleep before the day had happened");
+  const lived = [];
+  for (let i = 0; i < 7; i++) {
+    await page.click("#next");
+    const now = await page.$$eval("#lived li", (ns) => ns.map((n) => n.textContent));
+    A(now.length === i + 1, `after ${i + 1} presses the day should be ${i + 1} long, is ${now.length}`);
+    lived.push(now[i]);
+  }
+  A(!(await page.isVisible("#next")), "the day never ended");
+  A(await page.isVisible("#sleep"), "no way to sleep once the day is done");
 
   await page.click("#sleep");
   A(await page.isVisible("#morning"), "morning never came");
@@ -74,16 +82,31 @@ const A = (c, m) => { if (!c) fails.push(m); };
   A(asks.length === 5, `expected 5 people to ask, got ${asks.length}`);
   for (let i = 0; i < 5; i++) await (await page.$$("#who button.ask"))[0].click();
   A((await page.$$("#who button.ask")).length === 0, "someone could not be asked");
-  const accounts = await page.$$eval("#who .account", (ns) => ns.map((n) => n.children.length));
-  A(accounts.length === 5, "not every account is on screen");
-  A(accounts.every((n) => n === 7), `an account is not 7 lines: ${accounts.join(",")}`);
+  // ONE at a time — five on screen can be read against each other, which
+  // bypasses the player's memory by a second route.
+  const onScreen = await page.$$("#who .account");
+  A(onScreen.length === 1, `${onScreen.length} accounts on screen at once, want 1`);
+  A((await page.$$("#who .spoken")).length === 4, "the other four are not marked as spoken to");
+  A((await page.$$eval("#who .account li", (ns) => ns.length)) === 7, "the open account is not 7 lines");
 
-  // Exactly one account must differ from what the player remembers — and the
-  // page must not be the thing pointing it out.
-  const memory = await page.$$eval("#memory li", (ns) => ns.map((n) => n.textContent));
-  const said = await page.$$eval("#who .account", (ns) =>
-    ns.map((n) => [...n.children].map((li) => li.textContent)));
-  const odd = said.filter((a) => a.some((line, i) => line !== memory[i]));
+  // THE MORNING HOLDS NO TRANSCRIPT. The player is the recording; a day left on
+  // screen makes their memory unnecessary and the game a diff.
+  A((await page.$$("#memory li")).length === 0,
+    "the day is still on screen in the morning — the page is the evidence, not the player");
+  A(!(await page.content()).includes("What you remember"),
+    "the morning still hands the player their own memory back");
+
+  // Exactly one account must differ from the day that actually happened — and
+  // the page must not be the thing pointing it out.
+  const said = [];
+  for (let i = 1; i <= 5; i++) {
+    // whichever this person offers: a first ask, or hearing it again
+    const btn = await page.$(`#who .person:nth-child(${i}) button.ask, #who .person:nth-child(${i}) button.again`);
+    A(btn !== null, `nobody to ask in card ${i}`);
+    await btn.click();
+    said.push(await page.$$eval("#who .account li", (ns) => ns.map((n) => n.textContent)));
+  }
+  const odd = said.filter((a) => a.some((line, i) => line !== lived[i]));
   A(odd.length === 1, `exactly one account should diverge, ${odd.length} did`);
 
   const marked = await page.$$eval("#who .account li",
@@ -101,13 +124,54 @@ const A = (c, m) => { if (!c) fails.push(m); };
 
   // --- a different day is a different day
   await page.click("#again");
+  for (let i = 0; i < 7; i++) await page.click("#next");
   const next = await page.$$eval("#lived li", (ns) => ns.map((n) => n.textContent));
   A(next.join("|") !== lived.join("|"), "the next day is the same day");
 
   // --- and a seed replays exactly
   await page.goto(`${base}?seed=3`, { waitUntil: "networkidle" });
+  for (let i = 0; i < 7; i++) await page.click("#next");
   const again = await page.$$eval("#lived li", (ns) => ns.map((n) => n.textContent));
   A(again.join("|") === lived.join("|"), "seed 3 did not replay identically");
+
+  // --- NEGATIVE CONTROLS for the two guards above.
+  //
+  // Both are DOM assertions, and a DOM assertion written from the same mental
+  // model as the page it checks passes on the correct build and the broken one
+  // alike. This codebase has shipped four tests that asserted a bug instead of
+  // catching it, so: put the old shape back into the live page and watch the
+  // guards go red. Same document, same selectors, real fidelity — a synthetic
+  // control that does not match the real markup gives the same false verdict as
+  // a broken predicate (Brain: august-10#E20 / draft positive-control fidelity).
+  await page.goto(`${base}?seed=3`, { waitUntil: "networkidle" });
+  for (let i = 0; i < 7; i++) await page.click("#next");
+  await page.click("#sleep");
+  await page.evaluate((day) => {
+    const wrap = document.createElement("div");
+    wrap.innerHTML = "<h3>What you remember</h3><ul id=\"memory\"></ul>";
+    document.getElementById("morning").prepend(wrap);
+    for (const line of day) {
+      const li = document.createElement("li");
+      li.textContent = line;
+      document.getElementById("memory").append(li);
+    }
+  }, lived);
+  A((await page.$$("#memory li")).length !== 0,
+    "NEGATIVE CONTROL FAILED: the transcript guard passes with a transcript on screen");
+  A((await page.content()).includes("What you remember"),
+    "NEGATIVE CONTROL FAILED: the wording guard passes with the wording present");
+
+  // And the lived-day guard: a page that renders the whole day up front.
+  await page.goto(`${base}?seed=3`, { waitUntil: "networkidle" });
+  await page.evaluate((day) => {
+    for (const line of day) {
+      const li = document.createElement("li");
+      li.textContent = line;
+      document.getElementById("lived").append(li);
+    }
+  }, lived);
+  A((await page.$$("#lived li")).length !== 0,
+    "NEGATIVE CONTROL FAILED: the lived-day guard passes on a day handed over whole");
 
   A(errors.length === 0, `console/page errors: ${errors.slice(0, 3).join(" | ")}`);
 
@@ -117,5 +181,5 @@ const A = (c, m) => { if (!c) fails.push(m); };
     for (const f of fails) console.log("  ✗ " + f);
     process.exit(1);
   }
-  console.log("\x1b[32mseven woods: OK — read the day, asked everyone, made the call\x1b[0m");
+  console.log("\x1b[32mseven woods: OK — lived the day from nothing, asked everyone, made the call\x1b[0m");
 })();
