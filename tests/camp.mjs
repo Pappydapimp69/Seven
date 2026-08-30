@@ -8,6 +8,7 @@
 // Run: node tests/camp.mjs
 
 import { buildCamp, longestWalk, CAMP_SEED } from "../src/camp.js";
+import { createRun, tick } from "../src/state.js";
 import { generateWorld, validate, floodFill, GRID, CELL } from "../src/world.js";
 
 let passed = 0;
@@ -102,6 +103,36 @@ check("the camp carries nothing an objective has not opened", () => {
   const camp = buildCamp();
   eq(camp.items.length, 0, "an item exists in camp before its objective opens");
   eq(camp.monoliths.length, 0, "the camp has survey markers");
+});
+
+// --- the camp is not accidentally winnable ----------------------------------
+// The basin's extraction check asks whether every marker has been logged. With
+// no markers that is trivially true, so the camp — which has none by design —
+// was won by standing still, and the tutorial ended three seconds in with an
+// extraction screen. Nothing caught it: no test had ever run the win check
+// against a map with an empty objective list.
+check("standing in the camp does not win or lose the run", () => {
+  const world = buildCamp();
+  const sim = createRun({ seed: CAMP_SEED, world, difficulty: "gentle", level: 1, campaignLength: 1 });
+  sim.noDrain = true;
+  sim.player.x = world.spawn.x;
+  sim.player.z = world.spawn.z;
+  for (let i = 0; i < 90 * 30; i++) tick(sim, 1 / 30);
+  eq(sim.status, "playing", `the camp ended itself after 90s with ending "${sim.ending}"`);
+});
+
+check("a map with no markers is never extractable", () => {
+  // The general form of the same bug, asserted against the rule rather than
+  // against the camp — a basin that generated no markers must not be winnable
+  // by walking home either.
+  const world = buildCamp();
+  const sim = createRun({ seed: CAMP_SEED, world, difficulty: "gentle", level: 1, campaignLength: 1 });
+  sim.noDrain = true;
+  eq(sim.monoliths.length, 0, "fixture expects a map with no markers");
+  // Put the whole party on the extraction point, which is the winning position.
+  for (const c of sim.party) { c.x = world.camp.x; c.z = world.camp.z; }
+  for (let i = 0; i < 60; i++) tick(sim, 1 / 30);
+  eq(sim.status, "playing", "the whole party standing on camp extracted from a map with nothing to survey");
 });
 
 // --- it is the SAME map every time ------------------------------------------
