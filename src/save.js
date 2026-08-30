@@ -17,9 +17,9 @@
 //     options (dbh#E4, wrong-sky#E2). And an ended run is never saved, so a
 //     "Resume" can't drop you back onto the frame you already lost.
 
-import { createRun } from "./state.js?v=seven-0.17.0";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.17.0";
-import { attachSites, serializeWoods, deserializeWoods } from "./woods.js?v=seven-0.17.0";
+import { createRun } from "./state.js?v=seven-0.18.0";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.18.0";
+import { attachSites, serializeWoods, deserializeWoods } from "./woods.js?v=seven-0.18.0";
 
 // SEVEN'S OWN KEYS, and this is not cosmetic. GitHub Pages serves every project
 // of one account from ONE origin — `pappydapimp69.github.io` — so /mirage/ and
@@ -456,6 +456,85 @@ export function describeSave(data) {
 // tie the lifetime of "how loud is this" to the lifetime of "where was I",
 // which are unrelated questions.
 export const SETTINGS_KEY = "seven:settings";
+
+// ---------------------------------------------------------------------------
+// The tally
+// ---------------------------------------------------------------------------
+//
+// THE ALPHA EXISTS TO ANSWER ONE QUESTION, and it is not "was that fun once".
+// It is whether catching a fake by asking about a shared day still feels like
+// deduction on run five, or whether it has quietly become a coin flip the
+// player is dressing up. Nobody can answer that from memory: after six runs a
+// player remembers the ones they got right.
+//
+// So every finished morning writes one line here — the day's seed, what kind
+// of thing the fake got wrong, how many questions it took, and whether the
+// guess was right — and the title screen shows the running count. It is a
+// PLAYTEST INSTRUMENT, not a score: the interesting shape is a hit rate that
+// climbs at first and then stops moving, or one axis of tell that is never
+// caught.
+//
+// A separate key from the run slot and from preferences, for the same reason
+// those are separate from each other: losing a run must not lose the record of
+// having played it.
+export const TALLY_KEY = "seven:days";
+const TALLY_CAP = 200;
+
+export function recordDay(entry) {
+  const ls = store();
+  if (!ls) return false;
+  try {
+    const all = loadTally();
+    all.push({
+      seed: entry.seed ?? null,
+      tell: entry.tell ?? null,
+      asked: entry.asked ?? 0,
+      correct: !!entry.correct,
+      at: entry.at ?? null,
+    });
+    // Oldest first out. A tally that grows without bound eventually fails to
+    // write and takes the newest result with it, which is the one that matters.
+    while (all.length > TALLY_CAP) all.shift();
+    ls.setItem(TALLY_KEY, JSON.stringify(all));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function loadTally() {
+  const ls = store();
+  if (!ls) return [];
+  try {
+    const raw = JSON.parse(ls.getItem(TALLY_KEY) || "[]");
+    return Array.isArray(raw) ? raw.filter((d) => d && typeof d === "object") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** The one line the title screen shows, and the numbers behind it. */
+export function summariseTally(all = loadTally()) {
+  const days = all.length;
+  const caught = all.filter((d) => d.correct).length;
+  const byTell = {};
+  for (const d of all) {
+    if (!d.tell) continue;
+    const t = (byTell[d.tell] = byTell[d.tell] || { n: 0, caught: 0 });
+    t.n += 1;
+    if (d.correct) t.caught += 1;
+  }
+  // The LAST FIVE, separately. A lifetime hit rate hides exactly the thing
+  // this is for — a player who was 1-in-5 early and 4-in-5 lately has learned
+  // something, and one who has gone the other way has stopped deducing and
+  // started guessing.
+  const recent = all.slice(-5);
+  return {
+    days, caught, byTell,
+    recent: { n: recent.length, caught: recent.filter((d) => d.correct).length },
+    asked: days ? all.reduce((s, d) => s + (d.asked || 0), 0) / days : 0,
+  };
+}
 
 // Tutorial progress lives HERE, in the settings payload, not as its own
 // localStorage key — brain: dog#E64, where a "seen once ever" bit kept outside

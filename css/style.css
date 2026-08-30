@@ -771,3 +771,8 @@ body[data-coop="2"] .item-bar.p2 { display: flex; }
 }
 .nightfall.show p { opacity: 1; }
 .nightfall.lifting p { opacity: 0; transition: opacity 0.6s ease-out; }
+
+/* A name you have already spent a question on. Dim, not marked — it is
+   bookkeeping, and the roster must never look like a place where the answer
+   might be. */
+.roster-row.tag-asked .r-read { color: var(--dim); font-style: italic; }

@@ -6,11 +6,11 @@
 // the one hallucinating. The only place a real number is ever printed is the
 // debrief, after the run is over.
 
-import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds } from "./percept.js?v=seven-0.17.0";
-import { canWork, beatAt, holdFraction, PHASE } from "./woods.js?v=seven-0.17.0";
+import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds } from "./percept.js?v=seven-0.18.0";
+import { canWork, beatAt, holdFraction, PHASE } from "./woods.js?v=seven-0.18.0";
 import { LOG_RADIUS, PYLON_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, gatherTarget, GATHER_HOLD_TIME, previewCraft, claimedEntryAt, pylonAt,
   mossedAt,
-} from "./state.js?v=seven-0.17.0";
+} from "./state.js?v=seven-0.18.0";
 
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 
@@ -403,6 +403,23 @@ export function createHud(sim, percept, opts = {}) {
 
     for (const c of sim.companions) {
       const { row, read } = rows.get(c.id);
+      // THE WOODS uses the roster for something else entirely. The basin's
+      // read-out is a qualitative take on a mind that is coming apart, and
+      // nobody's mind moves during the alpha, so all five would read the same
+      // thing all day — noise with the shape of information. What the player
+      // actually needs beside a name in the morning is whether they have spent
+      // a question on it. It never says anything ABOUT the person, which is
+      // the whole point: the roster must not be a place to look for the answer.
+      if (sim.woods) {
+        const w = sim.woods;
+        read.textContent = w.phase === "morning" || w.phase === "verdict"
+          ? (w.asked.includes(c.id) ? "asked" : "")
+          : "";
+        row.className = "roster-row" +
+          (w.asked.includes(c.id) ? " tag-asked" : "") +
+          (sim.companions[selected] === c ? " selected" : "");
+        continue;
+      }
       const r = rosterRead(percept, sim, c);
       read.textContent = r.note;
       row.className = `roster-row tag-${r.tag.replace(/\s+/g, "-")}` +

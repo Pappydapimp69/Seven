@@ -27,9 +27,9 @@
 //      saveable, resumable and reproducible, and every draw below is taken
 //      unconditionally so the draw count cannot depend on the branch.
 
-import { CELL, GRID, cellToWorld } from "./world.js?v=seven-0.17.0";
-import { makeChronicle, record, fact, account, pickPerturbation, WEATHERS } from "./chronicle.js?v=seven-0.17.0";
-import { makeRoster, nearMiss } from "./names.js?v=seven-0.17.0";
+import { CELL, GRID, cellToWorld } from "./world.js?v=seven-0.18.0";
+import { makeChronicle, record, fact, account, pickPerturbation, WEATHERS } from "./chronicle.js?v=seven-0.18.0";
+import { makeRoster, nearMiss } from "./names.js?v=seven-0.18.0";
 
 /**
  * The four places the day happens in, as camp cells.

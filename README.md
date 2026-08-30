@@ -18,6 +18,9 @@ actually happened, never picked from a list, so there is nothing to memorise.
 The only copy of the truth that the game cannot reach is your memory of having
 been there.
 
+**Playtesting it?** Read `docs/PLAYTEST-the-woods.md` first — it says what to
+watch for and why, which is not obvious from playing it.
+
 This is the ALPHA of a much larger design (`docs/IDEAS.md`, "THE WOODS: full
 design note"), built to answer one question and nothing else: *can a player
 catch a fake by asking about a day they both lived through, and does it feel

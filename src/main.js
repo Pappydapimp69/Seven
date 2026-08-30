@@ -6,22 +6,22 @@ import {
   possess, release, possessableCompanions, activatePylon, pylonAt,
   callCompanion, clearMoss, mossedAt,
   PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=seven-0.17.0";
-import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.17.0";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.17.0";
+} from "./state.js?v=seven-0.18.0";
+import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.18.0";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.18.0";
 import {
   attachSites, startDay, beatAt, briefFor, canWork, workBeat, fallNight, ask, accuse,
   updateWorkHold, BEATS, PHASE, ASKS_ALLOWED,
-} from "./woods.js?v=seven-0.17.0";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=seven-0.17.0";
-import { createRenderer } from "./render.js?v=seven-0.17.0";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.17.0";
-import { createInput, ACTIONS } from "./input.js?v=seven-0.17.0";
-import { createAudio } from "./audio.js?v=seven-0.17.0";
-import { hashSeed, makeRng } from "./rng.js?v=seven-0.17.0";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings } from "./save.js?v=seven-0.17.0";
+} from "./woods.js?v=seven-0.18.0";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=seven-0.18.0";
+import { createRenderer } from "./render.js?v=seven-0.18.0";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.18.0";
+import { createInput, ACTIONS } from "./input.js?v=seven-0.18.0";
+import { createAudio } from "./audio.js?v=seven-0.18.0";
+import { hashSeed, makeRng } from "./rng.js?v=seven-0.18.0";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.18.0";
 
-const BUILD = "seven-0.17.0";
+const BUILD = "seven-0.18.0";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -198,6 +198,7 @@ function refreshTitleSave() {
     woodsBtn.textContent = "The woods";
     woodsBtn.appendChild(Object.assign(document.createElement("span"), { id: "woodsDetail", className: "resume-detail" }));
     woodsBtn.classList.remove("confirm-new");
+    refreshWoodsTally();
   }
   const btn = el("continueBtn");
   if (!btn) return;
@@ -227,6 +228,23 @@ let tut = null; // { stage, index, done } while a stage is running; null otherwi
 function tutorialProgress() {
   const s = loadSettings();
   return s.tutorial || { done: [], current: 0 };
+}
+
+/**
+ * The running count, on the button that starts another day.
+ *
+ * Deliberately plain and deliberately including the LAST FIVE separately: a
+ * lifetime hit rate hides the only shape anybody cares about here, which is
+ * whether the player is getting better at this or has quietly stopped
+ * deducing and started guessing.
+ */
+function refreshWoodsTally() {
+  const d = el("woodsDetail");
+  if (!d) return;
+  const t = summariseTally();
+  if (!t.days) { d.textContent = ""; return; }
+  const recent = t.recent.n >= 3 ? ` · last ${t.recent.n}: ${t.recent.caught}` : "";
+  d.textContent = ` · ${t.days} day${t.days === 1 ? "" : "s"} walked · caught ${t.caught}${recent}`;
 }
 
 function refreshLearnLabel() {
@@ -558,9 +576,23 @@ function woodsAccuse(sim, id) {
     `You asked ${spent === 0 ? "nobody" : spent === 1 ? "one of them" : `${spent} of them`}` +
     `${spent < ASKS_ALLOWED ? `, with ${ASKS_ALLOWED - spent} question${ASKS_ALLOWED - spent === 1 ? "" : "s"} left.` : ", which was all of them."}`;
   openWoodsPanel("verdictPanel");
+  // One line in the tally, then the slot goes. The tally is the only record
+  // that this day was ever played, and it is what the title screen counts.
+  recordDay({
+    seed: sim.woodsSeed ?? null,
+    tell: w.perturbation?.kind ?? null,
+    asked: ASKS_ALLOWED - w.asksLeft,
+    correct: !!v.correct,
+    at: Date.now(),
+  });
   // The run is over. Drop the slot so "Resume" cannot hand back a finished
   // morning — the same rule the basin debrief follows.
   clearSave();
+  refreshWoodsTally();
+  const t = summariseTally();
+  el("verdictTally").textContent = t.days > 1
+    ? `${t.days} days walked, ${t.caught} caught${t.recent.n >= 3 ? ` — ${t.recent.caught} of your last ${t.recent.n}` : ""}.`
+    : "";
 }
 
 /**

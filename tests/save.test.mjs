@@ -13,6 +13,7 @@ import { makeRng } from "../src/rng.js";
 import {
   serializeRun, deserializeRun, saveRun, loadSave, clearSave, hasSave,
   describeSave, SAVE_KEY, SAVE_VERSION, loadSettings, saveSettings, SETTINGS_KEY,
+  recordDay, loadTally, summariseTally, TALLY_KEY,
 } from "../src/save.js";
 import { buildCamp, CAMP_SEED } from "../src/camp.js";
 import { attachSites, startDay, PHASE } from "../src/woods.js";
@@ -381,6 +382,57 @@ check("the day survives a save, names and all", () => {
   for (const c of back.companions) {
     eq(c.name, sim.woods.nameById[c.id], `${c.id} came back under a different name`);
   }
+});
+
+// --- the tally -----------------------------------------------------------
+
+check("a finished day is recorded, and the tally survives losing a run", () => {
+  withFakeStorage((map) => {
+    recordDay({ seed: 11, tell: "order", asked: 2, correct: true });
+    recordDay({ seed: 12, tell: "name", asked: 3, correct: false });
+    // A lost run clears the RUN slot. It must not clear the record of having
+    // played — that is a separate key for exactly this reason.
+    map.delete(SAVE_KEY);
+    const all = loadTally();
+    eq(all.length, 2, "the tally did not survive the run slot being cleared");
+    eq(all[0].seed, 11, "the first day is not first");
+    eq(all[1].correct, false, "a wrong guess was recorded as right");
+  });
+});
+
+check("the summary separates the last five from the lifetime", () => {
+  withFakeStorage(() => {
+    // Wrong early, right lately: the shape the alpha exists to detect. A
+    // lifetime hit rate alone reports 50% and says nothing about it.
+    for (let i = 0; i < 5; i++) recordDay({ seed: i, tell: "weather", asked: 3, correct: false });
+    for (let i = 0; i < 5; i++) recordDay({ seed: 10 + i, tell: "place", asked: 1, correct: true });
+    const t = summariseTally();
+    eq(t.days, 10, "wrong number of days");
+    eq(t.caught, 5, "wrong lifetime count");
+    eq(t.recent.n, 5, "the recent window is the wrong size");
+    eq(t.recent.caught, 5, "the recent window is not the LAST five");
+    eq(t.byTell.weather.caught, 0, "per-tell counts are wrong");
+    eq(t.byTell.place.caught, 5, "per-tell counts are wrong");
+    eq(t.asked, 2, "average questions spent is wrong");
+  });
+});
+
+check("the tally is capped, and drops the OLDEST", () => {
+  withFakeStorage(() => {
+    for (let i = 0; i < 260; i++) recordDay({ seed: i, tell: "order", asked: 1, correct: i % 2 === 0 });
+    const all = loadTally();
+    assert(all.length <= 200, `the tally grew to ${all.length}`);
+    eq(all[all.length - 1].seed, 259, "the newest day was dropped instead of the oldest");
+  });
+});
+
+check("a corrupt tally reads as no days rather than throwing", () => {
+  withFakeStorage((map) => {
+    map.set(TALLY_KEY, "{{ not json");
+    eq(loadTally().length, 0, "a corrupt tally should read as empty");
+    eq(summariseTally().days, 0, "a corrupt tally should summarise as no days");
+  });
+  eq(recordDay({ seed: 1 }), false, "recordDay should report failure with no storage");
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
