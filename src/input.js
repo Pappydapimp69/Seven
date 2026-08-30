@@ -56,11 +56,30 @@ export const ACTIONS = Object.freeze({
 // carried by the unit vector and is therefore preserved EXACTLY, and there is
 // no discontinuity at the edge of the deadzone.
 const DEADZONE = 0.18;
+// ...but a radial deadzone preserves direction EXACTLY, which means it also
+// preserves AXIS DRIFT exactly. A worn stick resting at x=0.09 while pushed to
+// y=-0.95 clears the magnitude gate easily, and that 0.09 rides through as a
+// permanent lean: pressing straight up walks forward and slightly right,
+// forever, and no amount of pushing harder corrects it because the ratio is
+// preserved on purpose.
+//
+// So: radial gate for magnitude, then an AXIS EPSILON that snaps a component
+// which is tiny RELATIVE TO THE OTHER one to zero. This is not the square
+// deadzone coming back — the threshold is proportional, so a genuine diagonal
+// (x and y comparably sized) is untouched and only a near-cardinal push gets
+// cleaned up. That is exactly the case the player is complaining about and
+// exactly the case a square deadzone got wrong in the other direction.
+const AXIS_EPSILON = 0.16; // a component below 16% of the dominant one is drift
 function stickVector(ax, ay) {
   const mag = Math.hypot(ax, ay);
   if (mag < DEADZONE) return { x: 0, y: 0 };
+  let x = ax, y = ay;
+  const dom = Math.max(Math.abs(x), Math.abs(y));
+  if (Math.abs(x) < dom * AXIS_EPSILON) x = 0;
+  if (Math.abs(y) < dom * AXIS_EPSILON) y = 0;
+  const m2 = Math.hypot(x, y) || 1;
   const scaled = Math.min(1, (mag - DEADZONE) / (1 - DEADZONE));
-  return { x: (ax / mag) * scaled, y: (ay / mag) * scaled };
+  return { x: (x / m2) * scaled, y: (y / m2) * scaled };
 }
 
 export function createInput(canvas, opts = {}) {
