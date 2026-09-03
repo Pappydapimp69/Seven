@@ -35,6 +35,10 @@ echo "== tutorial (step pinning, starvation, meter leaks) =="
 node tests/tutorial.mjs
 echo
 
+echo "== triggers (does the index fire on the mistakes it was built from?) =="
+node tests/triggers.mjs
+echo
+
 echo "== woods names (composed, sayable, reproducible) =="
 node tests/names.mjs
 echo
