@@ -55,6 +55,49 @@ await page.waitForFunction(() => !!window.__seven, null, { timeout: 20000 });
   assert(btn && btn.row !== undefined, "the tutorial button is outside the gamepad menu grid — unreachable on a pad");
 }
 
+// --- does the camp LOOK like a camp? ----------------------------------------
+// Every other check in this file passes on a camp rendered as a near-black
+// rocky clearing, which is exactly what shipped: blocked cells drew as rock
+// spires because the renderer had never been told the camp exists, and the
+// per-frame fog drift reset the daylight every single frame. A player pressed
+// "Learn the walk" and reported being dropped in the woods with no tutorial.
+//
+// So this samples the actual framebuffer. It cannot judge whether the place
+// reads as a camp — no test can — but it can catch "the screen is black" and
+// "nothing but rock", which is what actually went wrong.
+{
+  // FIRST, before the playthrough — sampling after it finishes measures the
+  // title screen it returns to, which is dark and scored 21/255 with no green.
+  await page.evaluate(() => { window.__seven.startStage(0); });
+  await page.waitForTimeout(1500);
+
+  // Screenshot, then read the PIXELS BACK THROUGH AN <img>. Drawing the WebGL
+  // canvas straight into a 2D context returns solid black: the drawing buffer
+  // is not preserved between frames, so a readback outside the render call
+  // samples an empty buffer. The first version of this check measured 0/255 on
+  // a camp that was plainly lit on screen — the test was wrong, not the game.
+  const png = (await page.screenshot({ type: "png" })).toString("base64");
+  const lum = await page.evaluate(async (b64) => {
+    const img = new Image();
+    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = "data:image/png;base64," + b64; });
+    const c = document.createElement("canvas");
+    c.width = 160; c.height = 90;
+    const ctx = c.getContext("2d");
+    ctx.drawImage(img, 0, 0, c.width, c.height);
+    const d = ctx.getImageData(0, 0, c.width, c.height).data;
+    let sum = 0, green = 0, n = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      sum += (d[i] + d[i + 1] + d[i + 2]) / 3;
+      if (d[i + 1] > d[i] + 4 && d[i + 1] > d[i + 2] + 4) green++;
+      n++;
+    }
+    return { mean: sum / n, greenFraction: green / n };
+  }, png);
+  notes.push(`camp brightness ${lum.mean.toFixed(0)}/255, green ${(lum.greenFraction * 100).toFixed(0)}%`);
+  assert(lum.mean > 40, `the camp renders almost black (mean luminance ${lum.mean.toFixed(0)}/255) — it is unlit or the daylight was overwritten`);
+  assert(lum.greenFraction > 0.15, `only ${(lum.greenFraction * 100).toFixed(0)}% of the camp is green — trees and grass are not drawing, so it is rendering as a rock field`);
+}
+
 // --- the whole walk in, one session, start to finish ------------------------
 {
   const r = await page.evaluate(async () => {

@@ -41,7 +41,7 @@ let saveTimer = 0;
 // Horizontal field of view in degrees, from stored preferences. Applied to
 // each renderer as it is built, since a run can start before the pause menu
 // has ever been opened.
-let fovPref = 90;
+let fovPref = 78;
 // Sim-seconds between autosaves. Short enough that a closed tab costs little,
 // long enough that a serialise is nowhere near a per-frame cost.
 const AUTOSAVE_EVERY = 5;
@@ -208,6 +208,10 @@ function refreshLearnLabel() {
   const p = tutorialProgress();
   const n = p.done.length;
   d.textContent = n === 0 ? "" : n >= STAGES.length ? " · done" : ` · ${n}/${STAGES.length}`;
+  // Loud until it has been finished, then it steps back. A player who has never
+  // done the walk in should not have to notice a quiet button underneath a loud
+  // one to find out the game has a tutorial at all.
+  el("learnBtn")?.classList.toggle("quiet", n >= STAGES.length);
 }
 
 /**
@@ -326,6 +330,16 @@ function resumeRun() {
 
 /** Everything a run needs on screen, shared by a fresh start and a resume. */
 function mountRun(sim, openingLine) {
+  // DROP THE PREVIOUS RUN'S RENDERER FIRST.
+  //
+  // Every mount builds a fresh scene, a fresh geometry set and a fresh WebGL
+  // context on the same canvas. advanceLevel already disposed the outgoing one
+  // when moving basin to basin; this path — title -> run -> title -> run, and
+  // every tutorial start — never did, so a session that bounced in and out of
+  // the menu a few times stacked live contexts on one canvas. Browsers hard-cap
+  // those and start discarding the OLDEST, which presents as a black screen
+  // with nothing in the console.
+  run?.renderer?.dispose?.();
   const seedValue = sim.seed;
   const percept = createPercept(sim.player);
   const renderer = createRenderer(canvas, sim);
@@ -340,6 +354,9 @@ function mountRun(sim, openingLine) {
   el("seedLabel").textContent = `seed ${seedValue}`;
   screens("hudLayer");
   audio.start();
+  // The camp is a wood in daylight; a basin is a fogged plain. Crossfaded, not
+  // switched — see audio.js setBiome.
+  audio.setBiome(sim.world.cellKind ? 1 : 0);
   // A controller player has no use for mouse pointer lock — their look comes
   // from the right stick regardless of lock state — and requesting it here
   // would either no-op or flash a browser permission prompt for nothing.

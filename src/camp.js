@@ -40,13 +40,39 @@ import { CELL, GRID, FEATURE, cellToWorld, floodFill } from "./world.js?v=seven-
  */
 export const CAMP_SEED = -1;
 
+/**
+ * What a cell IS, not just whether you can walk through it.
+ *
+ * `blocked` is enough for the simulation — collision and pathfinding only ask
+ * "can I be here". It is NOT enough for the renderer, which draws one thing per
+ * blocked cell: a dark rock spire. Under that rule the camp's cabins rendered as
+ * rock, its treeline rendered as rock, and its dirt path rendered as nothing at
+ * all, so the whole map read as a rocky clearing. Every geometry test passed
+ * while the place looked like scenery from a different game.
+ *
+ * Basins do not set this. A world without `cellKind` falls back to the spire
+ * renderer exactly as before, so nothing about the basin changes.
+ */
+export const CELL_KIND = Object.freeze({
+  NONE: 0,
+  CABIN: 1,
+  TREELINE: 2,   // the dense perimeter wall
+  WOOD: 3,       // the thin wood inside the bounds
+  PATH: 4,       // walkable, but drawn as dirt rather than grass
+});
+
 const at = (cx, cz) => cz * GRID + cx;
 const inBounds = (cx, cz) => cx >= 0 && cz >= 0 && cx < GRID && cz < GRID;
 
 // The camp occupies a centred square smaller than a full basin — big enough to
 // wander and get slightly turned around in, small enough that the treeline is
 // always somewhere you could walk to. Everything outside MARGIN is dense trees.
-const MARGIN = 9;                       // cells of forest wall on every side
+// FOUR TIMES THE AREA. The camp was a 28x28-cell square inside a 46-cell grid,
+// which walked end to end in well under a minute and left the cabins crowding
+// each other. Halving the margin roughly doubles each side, so the playable
+// area goes from ~784 cells to ~1600 — four times the ground, and enough of it
+// that a pylon can be genuinely off in the trees rather than underfoot.
+const MARGIN = 3;                       // cells of forest wall on every side
 const LO = MARGIN, HI = GRID - MARGIN;  // inclusive playable bounds
 
 /**
@@ -84,24 +110,28 @@ function clearRect(blocked, x0, z0, x1, z1) {
 // Deliberately NOT flush with the path — a gap you can walk behind reads as a
 // place rather than as scenery.
 const CABINS = Object.freeze([
-  { x0: 15, z0: 15, x1: 19, z1: 18 },
-  { x0: 26, z0: 14, x1: 30, z1: 17 },
-  { x0: 20, z0: 26, x1: 25, z1: 29 },
+  { x0: 13, z0: 16, x1: 18, z1: 20 },
+  { x0: 27, z0: 14, x1: 32, z1: 18 },
+  { x0: 20, z0: 27, x1: 26, z1: 31 },
 ]);
 
 // The dirt path: a spine running the length of the camp with one branch. Stored
 // as cleared corridors, 3 cells wide, so it survives the tree pass.
 const PATH = Object.freeze([
-  { x0: 12, z0: 21, x1: 34, z1: 23 },   // the spine, west to east
-  { x0: 22, z0: 23, x1: 24, z1: 31 },   // south branch toward the third cabin
+  { x0: 6, z0: 22, x1: 40, z1: 24 },    // the spine, west to east, most of the map
+  { x0: 22, z0: 24, x1: 24, z1: 33 },   // south branch toward the third cabin
+  { x0: 30, z0: 12, x1: 32, z1: 22 },   // north branch, out toward the trees
 ]);
 
 // The thin wood — sparse trees you can walk through, somewhere to wander before
 // an objective opens. A fixed pattern, not noise: every cell here is authored
 // so the map is genuinely identical run to run.
 const THIN_WOOD = Object.freeze([
-  [30, 26], [32, 27], [29, 29], [33, 30], [31, 32], [28, 33], [34, 24],
-  [13, 27], [15, 29], [12, 31], [16, 32], [14, 34], [11, 25], [17, 26],
+  [30, 27], [33, 28], [29, 31], [35, 31], [31, 34], [28, 35], [36, 25], [38, 29],
+  [34, 34], [37, 33], [32, 37], [29, 38], [39, 26], [36, 37],
+  [12, 28], [15, 30], [10, 32], [16, 33], [13, 35], [9, 26], [17, 27],
+  [8, 30], [11, 36], [14, 38], [7, 34], [10, 39], [16, 37], [6, 28],
+  [20, 8], [24, 7], [18, 10], [27, 9], [22, 11], [16, 8], [29, 7],
 ]);
 
 /**
@@ -113,21 +143,29 @@ const THIN_WOOD = Object.freeze([
  */
 export function buildCamp() {
   const blocked = new Uint8Array(GRID * GRID);
+  const cellKind = new Uint8Array(GRID * GRID);
+  const mark = (cx, cz, kind) => { if (inBounds(cx, cz)) cellKind[at(cx, cz)] = kind; };
 
   // 1. Forest wall. Everything outside the playable square is solid trees. This
   //    is the map boundary and it is absolute — there is no way out of camp.
   for (let cz = 0; cz < GRID; cz++) {
     for (let cx = 0; cx < GRID; cx++) {
-      if (cx < LO || cx > HI || cz < LO || cz > HI) blocked[at(cx, cz)] = 1;
+      if (cx < LO || cx > HI || cz < LO || cz > HI) { blocked[at(cx, cz)] = 1; cellKind[at(cx, cz)] = CELL_KIND.TREELINE; }
     }
   }
 
   // 2. Cabins, then the path carved back through them. Order matters: the path
   //    is cut LAST so a cabin can never sit across it, which is the single
   //    easiest way to seal the map by hand.
-  for (const c of CABINS) fillRect(blocked, c.x0, c.z0, c.x1, c.z1);
-  for (const [cx, cz] of THIN_WOOD) if (inBounds(cx, cz)) blocked[at(cx, cz)] = 1;
-  for (const p of PATH) clearRect(blocked, p.x0, p.z0, p.x1, p.z1);
+  for (const c of CABINS) {
+    fillRect(blocked, c.x0, c.z0, c.x1, c.z1);
+    for (let cz = c.z0; cz <= c.z1; cz++) for (let cx = c.x0; cx <= c.x1; cx++) mark(cx, cz, CELL_KIND.CABIN);
+  }
+  for (const [cx, cz] of THIN_WOOD) if (inBounds(cx, cz)) { blocked[at(cx, cz)] = 1; mark(cx, cz, CELL_KIND.WOOD); }
+  for (const p of PATH) {
+    clearRect(blocked, p.x0, p.z0, p.x1, p.z1);
+    for (let cz = p.z0; cz <= p.z1; cz++) for (let cx = p.x0; cx <= p.x1; cx++) mark(cx, cz, CELL_KIND.PATH);
+  }
 
   // 3. A cleared yard around every cabin, so you can always walk all the way
   //    around one and nothing pinches shut against the forest wall.
@@ -137,15 +175,24 @@ export function buildCamp() {
         const edge = cx < c.x0 || cx > c.x1 || cz < c.z0 || cz > c.z1;
         if (edge && inBounds(cx, cz) && cx >= LO && cx <= HI && cz >= LO && cz <= HI) {
           blocked[at(cx, cz)] = 0;
+          // Clear the KIND too. A cell that stops being solid but keeps its
+          // cabin tag would draw a cabin you can walk through.
+          if (cellKind[at(cx, cz)] === CELL_KIND.CABIN) cellKind[at(cx, cz)] = CELL_KIND.NONE;
         }
       }
     }
   }
 
-  const spawnCell = { cx: 13, cz: 22 };   // west end of the path
-  const trainerCell = { cx: 33, cz: 22 }; // east end — objective 1 is a real walk
-  clearRect(blocked, spawnCell.cx - 1, spawnCell.cz - 1, spawnCell.cx + 1, spawnCell.cz + 1);
-  clearRect(blocked, trainerCell.cx - 1, trainerCell.cz - 1, trainerCell.cx + 1, trainerCell.cz + 1);
+  const spawnCell = { cx: 7, cz: 23 };    // west end of the path
+  const trainerCell = { cx: 39, cz: 23 }; // east end — objective 1 is a real walk
+  for (const c of [spawnCell, trainerCell]) {
+    clearRect(blocked, c.cx - 1, c.cz - 1, c.cx + 1, c.cz + 1);
+    for (let cz = c.cz - 1; cz <= c.cz + 1; cz++) {
+      for (let cx = c.cx - 1; cx <= c.cx + 1; cx++) {
+        if (inBounds(cx, cz) && cellKind[at(cx, cz)] === CELL_KIND.CABIN) cellKind[at(cx, cz)] = CELL_KIND.NONE;
+      }
+    }
+  }
 
   const place = (id, kind, cx, cz, extra = {}) => ({
     id, kind, cx, cz, ...cellToWorld(cx, cz), ...extra,
@@ -155,9 +202,13 @@ export function buildCamp() {
   // trainer passes it; one is off in the thin wood for a player who wanders.
   // Whichever they meet first, they meet it BEFORE the objective that needs it,
   // which is the entire reason it is present-but-inert rather than absent.
+  // OFF IN THE TREES, both of them, and well away from the path spine. They
+  // sat at the centre of the camp before, which made "there is something out
+  // here under the moss" a lie — you tripped over it walking to the trainer.
+  // Finding one should take wandering.
   const pylons = [
-    place("p0", FEATURE.PYLON, 27, 22, { spent: false, mossed: true, primedBy: [], primedAt: -1e9 }),
-    place("p1", FEATURE.PYLON, 31, 29, { spent: false, mossed: true, primedBy: [], primedAt: -1e9 }),
+    place("p0", FEATURE.PYLON, 35, 33, { spent: false, mossed: true, primedBy: [], primedAt: -1e9 }),
+    place("p1", FEATURE.PYLON, 10, 34, { spent: false, mossed: true, primedBy: [], primedAt: -1e9 }),
   ];
 
   return {
@@ -165,6 +216,7 @@ export function buildCamp() {
     grid: GRID,
     cell: CELL,
     blocked,
+    cellKind,
     heightAt: campHeight,
     camp: { id: "camp", kind: FEATURE.CAMP, ...spawnCell, ...cellToWorld(spawnCell.cx, spawnCell.cz) },
     // A camp has no survey markers and no raw materials. The tutorial spawns

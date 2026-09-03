@@ -18,6 +18,7 @@
 //     "Resume" can't drop you back onto the frame you already lost.
 
 import { createRun } from "./state.js?v=seven-0.12.0";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.12.0";
 
 export const SAVE_KEY = "seven:run";
 // Bumped whenever the shape below changes incompatibly. A save from an older
@@ -35,7 +36,10 @@ export const SAVE_KEY = "seven:run";
 // so a v2 snapshot restored without it re-rolls on a different tick and the
 // resumed run silently forks — which is precisely how the divergence test
 // caught it.
-export const SAVE_VERSION = 4;
+// v5: the camp is a world, not a seed (ported from mirage-0.13.1), on top of
+// SEVEN's own v4 which added the chronicle and the swap flag. Both are schema
+// changes, so a save written before this will not load.
+export const SAVE_VERSION = 5;
 
 const store = () => (typeof localStorage === "undefined" ? null : localStorage);
 
@@ -265,6 +269,13 @@ export function serializeRun(sim) {
     // Same class of field as the per-companion countdowns above: sightTimer
     // gates discover(), which draws from sim.rng, so leaving it out silently
     // re-phases every sighting roll after a resume.
+    // Camp-only flags. Not cosmetic: `noDrain` decides whether a whole class of
+    // per-tick rng draws happens at all, and the other three decide which verbs
+    // the prompt resolver will even offer. (Ported from mirage-0.13.1.)
+    noDrain: !!sim.noDrain,
+    canClearMoss: !!sim.canClearMoss,
+    callUnlocked: sim.callUnlocked !== false,
+    reachedTrainer: !!sim.reachedTrainer,
     sightTimer: sim.sightTimer ?? 0,
     lastDt: sim.lastDt ?? 0,
   };
@@ -278,12 +289,29 @@ export function serializeRun(sim) {
  */
 export function deserializeRun(data) {
   if (!data || data.v !== SAVE_VERSION) return null;
+  // THE CAMP IS NOT A SEED. Every basin is a pure function of its seed and
+  // regenerates exactly; the camp is hand-placed and regenerates as nothing at
+  // all. Passing the sentinel through to generateWorld produced a perfectly
+  // valid BASIN and pasted the saved camp positions onto it — no error, no
+  // warning, just a resume into somewhere the player had never been. The
+  // tutorial autosaves every five seconds, so anyone who quit part way through
+  // the walk in and pressed Resume got that. (Ported from mirage-0.13.1.)
+  const camp = data.seed === CAMP_SEED;
+  const world = camp ? buildCamp() : null;
   const sim = createRun({
     seed: data.seed,
     difficulty: data.difficulty,
     level: data.level,
     campaignLength: data.campaignLength,
+    world,
   });
+  if (camp) {
+    sim.trainer = world.trainer;
+    sim.noDrain = !!data.noDrain;
+    sim.canClearMoss = !!data.canClearMoss;
+    sim.callUnlocked = data.callUnlocked !== false;
+    sim.reachedTrainer = !!data.reachedTrainer;
+  }
 
   const byId = new Map(sim.party.map((c) => [c.id, c]));
   for (const s of data.party) {
@@ -413,7 +441,7 @@ export const SETTINGS_KEY = "seven:settings";
 // the save payload became a cross-slot leak the moment the game grew slots.
 // Settings rather than the run payload because progress has to survive
 // clearSave(), which every new run calls.
-const DEFAULT_SETTINGS = { volume: 0.7, muted: false, difficulty: "standard", coop: "solo", fov: 90, tutorial: { done: [], current: 0 } };
+const DEFAULT_SETTINGS = { volume: 0.7, muted: false, difficulty: "standard", coop: "solo", fov: 78, tutorial: { done: [], current: 0 } };
 
 /**
  * A defaults object nobody can corrupt. `{ ...DEFAULT_SETTINGS }` is a SHALLOW
