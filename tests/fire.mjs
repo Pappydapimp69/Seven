@@ -8,11 +8,11 @@
 // Run: node tests/fire.mjs
 
 import {
-  createRun, tick, buildFire, feedFire, fireAt, gatherResource, recover,
+  createRun, tick, buildFire, feedFire, fireAt, gatherResource, recover, previewCraft, craftItem, STAKE_COST,
   FIRE_COST, FIRE_FUEL_MAX, FIRE_BURN_RATE, FIRE_FEED, FIRE_FEED_COST, FIRE_RADIUS,
   BAND, bandOf, HALLUCINATION, GATHER_RADIUS,
 } from "../src/state.js";
-import { createPercept, updatePercept, notePhantomFeed } from "../src/percept.js";
+import { createPercept, updatePercept, notePhantomFeed, believedFireAt } from "../src/percept.js";
 import { serializeRun, deserializeRun } from "../src/save.js";
 
 let passed = 0;
@@ -79,17 +79,36 @@ const brittle = (sim) => {
   eq(bandOf(sim.player.lucidity), BAND.BRITTLE, "fixture is not actually brittle");
 };
 
-check("a far-gone mind with no fire is shown one, and it behaves", () => {
+// A FIRE THAT WAS NEVER BUILT IS NEVER SHOWN, however far gone the mind is.
+// The first version of this fabricated one from nothing, which put a "Feed the
+// fire" prompt on empty ground the instant the lead went under — and a prompt
+// that appears only while hallucinating is a lucidity readout, which is the one
+// thing the prompt ladder may never be. The browser smoke test caught it.
+check("no fire is invented where the player never built one", () => {
   const sim = run();
   const percept = createPercept(sim.player);
+  brittle(sim);
+  for (let i = 0; i < 60; i++) updatePercept(percept, sim, 1 / 30);
+  eq(percept.shownFire, null, "a fire was fabricated on ground where none was ever built — the prompt would give the lead away");
+  eq(percept.phantomFire, null, "a phantom fire exists with no real fire behind it");
+  eq(believedFireAt(percept, sim, sim.player), null, "the feed verb was offered over nothing");
+});
+
+check("a far-gone mind's own dead fire still looks alive, and behaves", () => {
+  const sim = run();
+  const percept = createPercept(sim.player);
+  sim.wood = FIRE_COST.wood;
+  buildFire(sim);
+  sim.fire.fuel = 0;
   updatePercept(percept, sim, 0.1);
-  eq(percept.shownFire, null, "a lucid mind with no fire was shown one");
+  eq(percept.phantomFire, null, "a lucid mind was told its dead fire is alive");
+  eq(percept.shownFire.fuel, 0, "a lucid mind is not shown its fire as out");
 
   brittle(sim);
   updatePercept(percept, sim, 0.1);
-  assert(percept.shownFire, "a brittle mind with no fire was shown nothing");
-  assert(percept.phantomFire, "the shown fire is not marked as fabricated");
-  eq(sim.fire, null, "the sim grew a fire it should not have");
+  assert(percept.phantomFire, "a brittle mind saw its own dead fire as dead");
+  assert(percept.shownFire.fuel > 0, "the fabrication is shown already out");
+  eq(sim.fire.fuel, 0, "the sim's fire came back to life");
 
   const before = percept.shownFire.fuel;
   for (let i = 0; i < 30 * 10; i++) updatePercept(percept, sim, 1 / 30);
@@ -100,14 +119,19 @@ check("a far-gone mind with no fire is shown one, and it behaves", () => {
 check("feeding the fire that is not there spends real wood and does nothing", () => {
   const sim = run();
   const percept = createPercept(sim.player);
+  sim.wood = FIRE_COST.wood;
+  sim.player.x = -40; sim.player.z = 10;
+  buildFire(sim);
+  sim.fire.fuel = 0;                    // out, and they are about to stop believing it
+  sim.player.x = 60; sim.player.z = 60; // and standing nowhere near it
   brittle(sim);
   updatePercept(percept, sim, 0.1);
   sim.wood = 5;
   const res = feedFire(sim);
   eq(res.ok, true, "the feed was refused, which is itself a tell");
-  eq(res.fed, false, "the sim banked fuel into a fire that does not exist");
+  eq(res.fed, false, "the sim banked fuel into a fire that is out and out of reach");
   eq(sim.wood, 5 - FIRE_FEED_COST, "feeding nothing did not spend real wood");
-  eq(sim.fire, null, "feeding created a fire");
+  eq(sim.fire.fuel, 0, "feeding revived a dead fire from across the basin");
   // ...and the fabrication accepts it, because a fire that ignored being fed
   // would be visible as a lie.
   const before = percept.shownFire.fuel;
@@ -125,21 +149,6 @@ check("a real live fire is never replaced by a fabrication, however far gone", (
   updatePercept(percept, sim, 0.1);
   eq(percept.phantomFire, null, "fabricated a fire on top of a real burning one");
   eq(percept.shownFire, sim.fire, "shown the wrong fire while one was actually burning");
-});
-
-check("a DEAD fire looks live to a far-gone mind, in the place it was built", () => {
-  const sim = run();
-  sim.wood = FIRE_COST.wood;
-  sim.player.x = -20; sim.player.z = 33;
-  buildFire(sim);
-  sim.fire.fuel = 0;
-  sim.player.x = -19; sim.player.z = 33;
-  const percept = createPercept(sim.player);
-  brittle(sim);
-  updatePercept(percept, sim, 0.1);
-  assert(percept.phantomFire, "a brittle mind saw its dead fire as dead");
-  eq(percept.phantomFire.x, -20, "the fabricated fire is not where the real one was built");
-  assert(percept.shownFire.fuel > 0, "the fabricated fire is shown already out");
 });
 
 // --- the count -------------------------------------------------------------
@@ -176,6 +185,36 @@ check("feeding lowers shown and true together, so the arithmetic stays consisten
   updatePercept(percept, sim, 0.1);
   eq(sim.wood, 4 - FIRE_FEED_COST, "true wood did not fall");
   eq(percept.shownWood, 7 - FIRE_FEED_COST, "shown wood did not fall with it — the gap must not widen on a spend");
+});
+
+// --- it must not have taken another verb's rung ---------------------------
+// It did, for about ten minutes: as a material recipe in findCraftMatch it
+// outranked the Stake and made it unreachable wherever both were affordable,
+// which is resolver starvation one level below the prompt ladder. Fire has its
+// own rung on the interact verb now. This is the guard on that.
+check("the fire never appears in the craft resolver, and never starves the Stake", () => {
+  const sim = run();
+  sim.wood = 99; sim.stone = 99; sim.fire = null;
+  const pv = previewCraft(sim);
+  assert(pv.ok, "nothing craftable with a pile of both materials");
+  eq(pv.kind, "stake", "the fire took the Stake's place in the craft resolver again");
+  const cres = craftItem(sim);
+  assert(cres.ok && cres.kind === "stake", "crafting with both materials did not produce a Stake");
+  eq(sim.fire, null, "crafting built a fire");
+});
+
+check("a believed fire is offered in reach and withheld out of it", () => {
+  const sim = run();
+  const percept = createPercept(sim.player);
+  sim.wood = FIRE_COST.wood;
+  buildFire(sim);
+  sim.fire.fuel = 0;
+  brittle(sim);
+  updatePercept(percept, sim, 0.1);
+  assert(believedFireAt(percept, sim, sim.player), "standing at a fabricated fire, nothing was offered");
+  const f = percept.shownFire;
+  sim.player.x = f.x + FIRE_RADIUS + 4; sim.player.z = f.z;
+  eq(believedFireAt(percept, sim, sim.player), null, "a fire well out of reach was still offered");
 });
 
 // --- it has to survive a resume -------------------------------------------

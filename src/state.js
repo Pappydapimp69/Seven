@@ -14,9 +14,9 @@
 // The sim's job is to keep an honest, testable record of what is TRUE; `percept.js`
 // is the only place allowed to lie about it.
 
-import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=seven-0.18.0";
-import { makeRng } from "./rng.js?v=seven-0.18.0";
-import { updateCompanions, companionRemark } from "./party.js?v=seven-0.18.0";
+import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=seven-0.19.0";
+import { makeRng } from "./rng.js?v=seven-0.19.0";
+import { updateCompanions, companionRemark } from "./party.js?v=seven-0.19.0";
 
 export const PARTY_SIZE = 6; // you + 5 companions — the spec's five NPCs, plus the player
 export const MAX_LUCIDITY = 100;
@@ -2135,6 +2135,12 @@ export function craftItem(sim, prefer = -1, believed = null) {
  * refusal comes from what is there.
  */
 export function buildFire(sim, actor = sim.player) {
+  // NOT A CRAFT RECIPE. It was one for about ten minutes: `findCraftMatch`
+  // returns the FIRST match, so a fire that outranked the Stake made the Stake
+  // unreachable wherever both were affordable — five tests went red at once,
+  // which is the resolver starvation this codebase already has a rule about,
+  // one level down from the prompt ladder. A fire has its OWN rung on the
+  // interact verb instead, at the bottom where it can starve nothing.
   if (sim.status !== "playing") return { ok: false, reason: "over" };
   if (sim.fire) return { ok: false, reason: "already" };
   if (sim.wood < FIRE_COST.wood) return { ok: false, reason: "no-wood" };

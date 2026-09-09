@@ -6,9 +6,9 @@
 // list as the real ones.
 
 import * as THREE from "../lib/three.module.js";
-import { CELL, cellToWorld, gridOf } from "./world.js?v=seven-0.18.0";
-import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=seven-0.18.0";
-import { PYLON_RADIUS } from "./state.js?v=seven-0.18.0";
+import { CELL, cellToWorld, gridOf } from "./world.js?v=seven-0.19.0";
+import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=seven-0.19.0";
+import { PYLON_RADIUS } from "./state.js?v=seven-0.19.0";
 
 const PALETTE = {
   sky: 0x0a0f16,
@@ -392,7 +392,7 @@ export function createRenderer(canvas, sim) {
   // ---- monoliths, pylons, figures: pooled and rebuilt from perception ------
   const monolithGeo = new THREE.BoxGeometry(1.5, 7.4, 1.1);
   const ringGeo = new THREE.TorusGeometry(PYLON_RADIUS, 0.09, 6, 40);
-  const pool = { monoliths: new Map(), pylons: new Map(), figures: new Map(), items: new Map(), trees: new Map(), stones: new Map(), sites: new Map() };
+  const pool = { monoliths: new Map(), pylons: new Map(), figures: new Map(), items: new Map(), trees: new Map(), stones: new Map(), sites: new Map(), fires: new Map() };
 
   function makeMonolith() {
     const g = new THREE.Group();
@@ -544,6 +544,32 @@ export function createRenderer(canvas, sim) {
    * the rest are unlit stone. That difference is the only thing the renderer
    * says about the day, and it says it in the world rather than on the HUD.
    */
+  // A fire: a low cone of flame over a ring of stones, plus the light it throws.
+  // Everything that says how healthy it is — how tall, how bright, how far the
+  // light reaches — is driven off fuel below, because this game shows no meters
+  // and the fire IS the readout.
+  function makeFire() {
+    const g = new THREE.Group();
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.72, 0.16, 4, 9),
+      new THREE.MeshStandardMaterial({ color: 0x6b6660, roughness: 1, flatShading: true }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.12;
+    g.add(ring);
+    const flame = new THREE.Mesh(
+      new THREE.ConeGeometry(0.5, 1.2, 6),
+      new THREE.MeshBasicMaterial({ color: 0xffa63a }),
+    );
+    flame.position.y = 0.7;
+    g.add(flame);
+    const glow = new THREE.PointLight(0xffa03c, 2.2, 22, 2);
+    glow.position.y = 1.1;
+    g.add(glow);
+    g.userData = { flame, glow };
+    return g;
+  }
+
   function makeSite() {
     const g = new THREE.Group();
     const cairn = new THREE.Mesh(
@@ -775,6 +801,26 @@ export function createRenderer(canvas, sim) {
 
     // The day's worksites. Camp only, and only once a day has been started —
     // `world.sites` exists nowhere else and `sim.woods` gates the lighting.
+    // THE FIRE THIS EYE SEES — percept.shownFire, never sim.fire. A far-gone
+    // mind is shown a whole fire where there is none, and it has to be drawn
+    // exactly like a real one or the difference is the tell.
+    const shownFire = percept.shownFire;
+    syncPool(pool.fires, shownFire ? [{ id: "fire", x: shownFire.x, z: shownFire.z }] : [], makeFire);
+    // GUARDED ON shownFire, not on the pool being non-empty. The fire a mind
+    // sees can vanish between frames — recovery ends the fabrication outright —
+    // and the pool is not guaranteed to be empty on the same frame, so reading
+    // fuel off a null here threw the moment a hallucination ended.
+    for (const obj of shownFire ? pool.fires.values() : []) {
+      obj.position.y = terrainHeight(obj.position.x, obj.position.z);
+      const f = Math.max(0, Math.min(1, shownFire.fuel / 100));
+      const { flame, glow } = obj.userData;
+      // Height and light both fall with the fuel, and a spent fire keeps a low
+      // ember rather than vanishing — you can still see where it was.
+      flame.scale.set(0.45 + f * 0.75, 0.3 + f * 1.1, 0.45 + f * 0.75);
+      flame.material.color.setHex(f > 0.35 ? 0xffa63a : 0xd2541c);
+      glow.intensity = 0.25 + f * 2.6;
+      glow.distance = 8 + f * 16;
+    }
     syncPool(pool.sites, sim.world.sites || [], makeSite);
     const activeSite = sim.woods?.activeSiteId || null;
     for (const obj of pool.sites.values()) {

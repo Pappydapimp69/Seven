@@ -12,9 +12,9 @@
 // without booting a browser.
 
 import { HALLUCINATION, BAND, bandOf, ITEM_INFO, LUCIDITY_GRACE, CORROBORATE_RADIUS,
-  LINK_RANGE, PING_RANGE, FIRE_FUEL_MAX, FIRE_BURN_RATE, FIRE_FEED,
-} from "./state.js?v=seven-0.18.0";
-import { ITEM_KINDS } from "./world.js?v=seven-0.18.0";
+  LINK_RANGE, PING_RANGE, FIRE_FUEL_MAX, FIRE_BURN_RATE, FIRE_FEED, FIRE_RADIUS,
+} from "./state.js?v=seven-0.19.0";
+import { ITEM_KINDS } from "./world.js?v=seven-0.19.0";
 
 const PHANTOM_NAMES = ["the Sixth Stone", "the Watching Slab", "the Other Cairn", "the Hollow Tooth"];
 const PHANTOM_COMPANIONS = ["ODEN", "MARIS", "THE SEVENTH"];
@@ -851,16 +851,22 @@ function updateFalseFire(percept, sim, p, dt) {
   const band = bandOf(p.lucidity);
   const farGone = band === BAND.BRITTLE || band === BAND.GONE;
 
-  if (live || !farGone) {
+  // IT ONLY LIES ABOUT A FIRE THAT EXISTS. Fabricating one from nothing put a
+  // "Feed the fire" prompt on empty ground the moment the lead went under, and
+  // a prompt that appears only while hallucinating IS a lucidity readout — the
+  // exact thing paintPrompt's strike rung is written to avoid. So the lie is
+  // the narrower one the design note actually states, and the one
+  // deadPylonsLookLive already implements: a far-gone mind sees a DEAD fire as
+  // live. Never a fire where the player never built one.
+  if (live || !farGone || !real) {
     percept.phantomFire = null;
     percept.shownFire = real;
     return;
   }
-  // Far gone, and nothing actually burning. Put the fire where one would be:
-  // where they built the last one if they ever did, otherwise where they stand.
+  // Their own fire, in the place they built it, still burning as far as they
+  // can tell. They will feed it all night.
   if (!percept.phantomFire) {
-    const at = real || p;
-    percept.phantomFire = { x: at.x, z: at.z, fuel: FIRE_FUEL_MAX * 0.6 };
+    percept.phantomFire = { x: real.x, z: real.z, fuel: FIRE_FUEL_MAX * 0.6 };
   }
   percept.phantomFire.fuel = Math.max(0, percept.phantomFire.fuel - FIRE_BURN_RATE * dt);
   percept.shownFire = percept.phantomFire;
@@ -873,6 +879,20 @@ function updateFalseFire(percept, sim, p, dt) {
  * why. This is the other half — the phantom takes the fuel, exactly as a real
  * fire would, because a fire that visibly ignored being fed is a tell.
  */
+/**
+ * The fire this mind believes it is standing at, real or not.
+ *
+ * BELIEVED, not real — the same rule the pylon prompt follows. If the verb only
+ * appeared over a fire that exists, its absence over a fabricated one would be
+ * a perfect lucidity readout: press, nothing offered, therefore you are gone.
+ * The offer has to look identical; what differs is that the wood buys nothing.
+ */
+export function believedFireAt(percept, sim, actor) {
+  const f = percept.shownFire;
+  if (!f) return null;
+  return Math.hypot(f.x - actor.x, f.z - actor.z) <= FIRE_RADIUS ? f : null;
+}
+
 export function notePhantomFeed(percept) {
   if (!percept.phantomFire) return;
   percept.phantomFire.fuel = Math.min(FIRE_FUEL_MAX, percept.phantomFire.fuel + FIRE_FEED);

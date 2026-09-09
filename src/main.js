@@ -4,24 +4,24 @@
 import {
   createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem, dropItem, craftItem, gatherTarget, offerItem,
   possess, release, possessableCompanions, activatePylon, pylonAt,
-  callCompanion, clearMoss, mossedAt,
+  callCompanion, clearMoss, mossedAt, feedFire, buildFire, FIRE_COST,
   PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=seven-0.18.0";
-import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.18.0";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.18.0";
+} from "./state.js?v=seven-0.19.0";
+import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.19.0";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.19.0";
 import {
   attachSites, startDay, beatAt, briefFor, canWork, workBeat, fallNight, ask, accuse,
   updateWorkHold, BEATS, PHASE, ASKS_ALLOWED,
-} from "./woods.js?v=seven-0.18.0";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds } from "./percept.js?v=seven-0.18.0";
-import { createRenderer } from "./render.js?v=seven-0.18.0";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.18.0";
-import { createInput, ACTIONS } from "./input.js?v=seven-0.18.0";
-import { createAudio } from "./audio.js?v=seven-0.18.0";
-import { hashSeed, makeRng } from "./rng.js?v=seven-0.18.0";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.18.0";
+} from "./woods.js?v=seven-0.19.0";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.19.0";
+import { createRenderer } from "./render.js?v=seven-0.19.0";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.19.0";
+import { createInput, ACTIONS } from "./input.js?v=seven-0.19.0";
+import { createAudio } from "./audio.js?v=seven-0.19.0";
+import { hashSeed, makeRng } from "./rng.js?v=seven-0.19.0";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.19.0";
 
-const BUILD = "seven-0.18.0";
+const BUILD = "seven-0.19.0";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -984,7 +984,39 @@ function handleAction(action, arg, player = run.players[0]) {
         }
         break;
       }
-      const res = logMarker(sim, nearestPhantom(sim, percept, actor), actor);
+      // The fire, believed. Same rung as the HUD prompt puts it on — under the
+      // pylon, above the survey — and the same reason the pylon branch uses a
+      // believed target: the press must LAND identically whether or not there
+      // is a fire there, or the silence is a readout. What differs is that the
+      // wood buys nothing, and nobody is told.
+      const believedFire = believedFireAt(percept, sim, actor);
+      if (believedFire) {
+        const fres = feedFire(sim, actor);
+        if (!fres.ok) {
+          audio.play("deny");
+          hud.say("Nothing left to burn.", "warn");
+        } else {
+          if (!fres.fed) notePhantomFeed(percept);
+          audio.play("log");
+          hud.say("You feed the fire.", "good");
+        }
+        break;
+      }
+      // THE BOTTOM RUNG, and deliberately so. Building has no target on the
+      // ground, so anywhere it sat higher it would shadow a verb that does —
+      // which is how the craft-resolver version of this broke the Stake. Down
+      // here the only thing it can take precedence over is the "nothing to
+      // survey" refusal, and that is not a verb.
+      const marker = nearestPhantom(sim, percept, actor);
+      if (!marker && !sim.fire && sim.wood >= FIRE_COST.wood) {
+        const bres = buildFire(sim, actor);
+        audio.play(bres.ok ? "recover" : "deny");
+        hud.say(bres.ok
+          ? "The kindling catches. It will burn as long as you feed it."
+          : "Not enough wood to get one lit.", bres.ok ? "good" : "warn");
+        break;
+      }
+      const res = logMarker(sim, marker, actor);
       if (!res.ok) {
         // A failed survey used to be silent-but-for-a-sound-cue — indistinguishable
         // from the button doing nothing at all if audio hadn't started or wasn't

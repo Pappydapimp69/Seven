@@ -6,11 +6,11 @@
 // the one hallucinating. The only place a real number is ever printed is the
 // debrief, after the run is over.
 
-import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds } from "./percept.js?v=seven-0.18.0";
-import { canWork, beatAt, holdFraction, PHASE } from "./woods.js?v=seven-0.18.0";
+import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds, believedFireAt } from "./percept.js?v=seven-0.19.0";
+import { canWork, beatAt, holdFraction, PHASE } from "./woods.js?v=seven-0.19.0";
 import { LOG_RADIUS, PYLON_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, gatherTarget, GATHER_HOLD_TIME, previewCraft, claimedEntryAt, pylonAt,
-  mossedAt,
-} from "./state.js?v=seven-0.18.0";
+  mossedAt, FIRE_FUEL_MAX, FIRE_COST,
+} from "./state.js?v=seven-0.19.0";
 
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 
@@ -341,6 +341,7 @@ export function createHud(sim, percept, opts = {}) {
       return;
     }
     const pylon = pylonAt(sim, actor) || believedPylonAt(viewer, sim, actor);
+    const fire = believedFireAt(viewer, sim, actor);
     if (pylon && sim.status === "playing") {
       const together = sim.party.filter(
         (c) => Math.hypot(c.x - pylon.x, c.z - pylon.z) <= PYLON_RADIUS,
@@ -348,6 +349,16 @@ export function createHud(sim, percept, opts = {}) {
       els.text.textContent = pylon.primedBy?.length
         ? `Pylon primed — needs a second pair of hands`
         : `Set hands on the pylon — ${together} of you in range, one use only`;
+      els.prompt.classList.add("show");
+      els.fill.style.width = "0%";
+    } else if (fire && sim.status === "playing") {
+      // Under the pylon rung and above everything else you can be standing on.
+      // A pylon is one-use and permanently losable, so it still outranks this;
+      // a fire is losable too — walk away and it goes out — which puts it above
+      // an item lying on the ground that will still be there later.
+      // BELIEVED, so the prompt reads identically over a fire that is not
+      // there. What differs is that feeding it buys nothing.
+      els.text.textContent = fire.fuel > FIRE_FUEL_MAX * 0.35 ? "Feed the fire" : "The fire is low — feed it";
       els.prompt.classList.add("show");
       els.fill.style.width = "0%";
     } else if (pickup && sim.status === "playing") {
@@ -373,6 +384,14 @@ export function createHud(sim, percept, opts = {}) {
       // sees this same offer, presses it, and nothing happens — which is what
       // being unreliable is supposed to feel like from the inside.
       els.text.textContent = `Nothing here — strike ${strikeable.name} from the record`;
+      els.prompt.classList.add("show");
+      els.fill.style.width = "0%";
+    } else if (!sim.fire && (percept.shownWood ?? sim.wood) >= FIRE_COST.wood && sim.status === "playing") {
+      // The bottom rung, matching main.js's interact chain. Offered off the
+      // SHOWN count, so a mind that believes it has wood is offered the fire —
+      // and finds out it has not by the refusal, which is the same shape as
+      // every other lie here: the offer is honest-looking, the world is not.
+      els.text.textContent = "Build a fire here";
       els.prompt.classList.add("show");
       els.fill.style.width = "0%";
     } else {
@@ -436,7 +455,11 @@ export function createHud(sim, percept, opts = {}) {
     el.survey.classList.toggle("complete", logged >= sim.monoliths.length);
     if (el.found) el.found.textContent = `${discoveredCount(sim)} / ${sim.monoliths.length}`;
     el.doses.textContent = String(sim.doses);
-    if (el.wood) el.wood.textContent = String(sim.wood);
+    // THE COUNT THIS MIND BELIEVES IT HAS, not the one that exists. Wood cut
+    // while hallucinating never entered sim.wood; showing the true number here
+    // would hand the player a free lucidity readout — chop, watch the counter
+    // not move, know. See percept.shownWood.
+    if (el.wood) el.wood.textContent = String(percept.shownWood ?? sim.wood);
     if (el.stone) el.stone.textContent = String(sim.stone);
 
     const yaw = perceivedYaw(percept, sim);
