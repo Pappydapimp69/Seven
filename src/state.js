@@ -14,9 +14,9 @@
 // The sim's job is to keep an honest, testable record of what is TRUE; `percept.js`
 // is the only place allowed to lie about it.
 
-import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=seven-0.19.0";
-import { makeRng } from "./rng.js?v=seven-0.19.0";
-import { updateCompanions, companionRemark } from "./party.js?v=seven-0.19.0";
+import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=seven-0.20.0";
+import { makeRng } from "./rng.js?v=seven-0.20.0";
+import { updateCompanions, companionRemark } from "./party.js?v=seven-0.20.0";
 
 export const PARTY_SIZE = 6; // you + 5 companions — the spec's five NPCs, plus the player
 export const MAX_LUCIDITY = 100;
@@ -102,6 +102,57 @@ export function graceMultiplier(t) {
   const into = t - LUCIDITY_GRACE;
   return into >= LUCIDITY_RAMP ? 1 : into / LUCIDITY_RAMP;
 }
+// ---------------------------------------------------------------------------
+// DAY AND NIGHT. A day is the unit (docs/IDEAS.md, THE WOODS design note): you
+// have daylight, you decide what to spend it on, and night raises the rate
+// substantially.
+//
+// DAY_LENGTH IS DERIVED FROM LUCIDITY_GRACE, NOT TYPED AGAIN. They have to be
+// the same number — the opening calm is exactly "day one is quiet", and the
+// first thing that ever bites is the first nightfall. Written as two literals
+// they would drift the first time either was tuned, and the drift would be
+// invisible: grace ending mid-afternoon or a night that costs nothing.
+//
+// Nothing here is save state. The cycle is a pure function of `sim.time`, which
+// is already saved, so a resumed run wakes at the same hour by construction —
+// no field to forget, no schema to bump.
+// ---------------------------------------------------------------------------
+export const DAY_LENGTH = LUCIDITY_GRACE;
+export const NIGHT_LENGTH = 150;
+export const CYCLE_LENGTH = DAY_LENGTH + NIGHT_LENGTH;
+export const NIGHT_DRAIN_MULT = 2.2;
+export const NIGHT_SLIP_MULT = 2.2;
+export const FIRE_WARMTH = 9; // stand this close to a burning fire and the night lets go
+
+/** Which day it is, 1-based. */
+export const dayOf = (t) => Math.floor(t / CYCLE_LENGTH) + 1;
+/** How far into the current day/night, 0..1, for the renderer and the HUD. */
+export const phaseOf = (t) => {
+  const into = t % CYCLE_LENGTH;
+  return into < DAY_LENGTH
+    ? { night: false, day: dayOf(t), frac: into / DAY_LENGTH }
+    : { night: true, day: dayOf(t), frac: (into - DAY_LENGTH) / NIGHT_LENGTH };
+};
+
+/**
+ * How hard the night is bearing on this mind, 0..1.
+ *
+ * 0 in daylight, 0 in the camp (which suppresses the whole cycle the same way
+ * it suppresses drain), and 0 standing in the warmth of a fire that is actually
+ * burning — which is the entire reason to build one. Ramped over the first and
+ * last twenty seconds so nightfall is felt rather than flicked, and so nothing
+ * downstream has to special-case the boundary tick.
+ */
+export function nightFactor(sim, ch = null) {
+  if (sim.noDrain || sim.woods) return 0;
+  const ph = phaseOf(sim.time);
+  if (!ph.night) return 0;
+  const EDGE = 20 / NIGHT_LENGTH;
+  const ramp = Math.min(1, Math.min(ph.frac, 1 - ph.frac) / EDGE);
+  if (ch && sim.fire && sim.fire.fuel > 0 && dist2D(sim.fire, ch) <= FIRE_WARMTH) return 0;
+  return Math.max(0, ramp);
+}
+
 export const ISOLATION_DIST = 13; // units from the party centroid before you count as alone
 export const ISOLATION_MULT = 1.9; // walking off alone burns you down fastest
 export const CONTAGION_DIST = 9; // seeing someone come apart costs you
@@ -788,13 +839,18 @@ export function tickLucidity(sim, ch, dt) {
   // into the meter, never restores lucidity directly, so it can't substitute
   // for a pylon — just buy time to reach one.
   if (ch.steadyUntil > sim.time) mult *= ITEM_INFO.tether.steadyMult;
+  // NIGHT. The rate rises; a fire in reach holds it off. No new rng draw — the
+  // multiplier only scales a rate and a threshold, so the stream position and
+  // the draw count are exactly what they were in daylight.
+  const night = nightFactor(sim, ch);
+  if (night > 0) mult *= 1 + (NIGHT_DRAIN_MULT - 1) * night;
 
   // Slip check, using the draw taken at the top. Gated on the same grace window
   // as the drain — the opening calm means calm, not "calm unless unlucky".
   if (
     !ch.hallucinating &&
     sim.time >= (ch.microCooldownUntil || 0) &&
-    slipRoll < (MICRO_RATE[bandOf(ch.lucidity)] || 0) * dt
+    slipRoll < (MICRO_RATE[bandOf(ch.lucidity)] || 0) * dt * (1 + (NIGHT_SLIP_MULT - 1) * night)
   ) {
     beginMicroEpisode(sim, ch, slipDur);
     return 0;

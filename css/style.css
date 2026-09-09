@@ -316,6 +316,8 @@ input[type="range"] { width: 100%; margin-bottom: 1.125rem; accent-color: var(--
 .gather-fly.stone { background: #c3ccd8; }
 #surveyCount.complete { color: var(--good); }
 #clock.low { color: var(--bad); }
+/* Night is a word, not a bar — same discipline as the roster. */
+#dayLabel.night { color: #8fa6d8; letter-spacing: 0.08em; }
 
 .hud-left {
   position: absolute;

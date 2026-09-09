@@ -6,9 +6,10 @@
 // list as the real ones.
 
 import * as THREE from "../lib/three.module.js";
-import { CELL, cellToWorld, gridOf } from "./world.js?v=seven-0.19.0";
-import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=seven-0.19.0";
-import { PYLON_RADIUS } from "./state.js?v=seven-0.19.0";
+import { CELL, cellToWorld, gridOf } from "./world.js?v=seven-0.20.0";
+import { nightFactor } from "./state.js?v=seven-0.20.0";
+import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=seven-0.20.0";
+import { PYLON_RADIUS } from "./state.js?v=seven-0.20.0";
 
 const PALETTE = {
   sky: 0x0a0f16,
@@ -124,15 +125,20 @@ export function createRenderer(canvas, sim) {
   rig.add(camera);
   scene.add(rig);
 
-  scene.add(isCamp
+  const sky = isCamp
     ? new THREE.HemisphereLight(0xcfe0f2, 0x6a6555, 1.5)
-    : new THREE.HemisphereLight(0x5d708c, 0x1d2230, 1.05));
+    : new THREE.HemisphereLight(0x5d708c, 0x1d2230, 1.05);
+  scene.add(sky);
   const sun = new THREE.DirectionalLight(isCamp ? 0xfff0d8 : 0xbfd0e6, isCamp ? 1.15 : 0.55);
   sun.position.set(-40, 60, 30);
   scene.add(sun);
   // A single carried lamp — cheaper than one light per companion, and it makes
   // the party's own pool of light the thing you navigate by.
   const lamp = new THREE.PointLight(0xffdcb0, 1.9, 44, 1.5);
+  // NIGHTFALL, held as the values the scene was BUILT with rather than as a
+  // second copy of them. The camp and the woods run no cycle (nightFactor knows
+  // that), so this is inert there without the renderer needing to ask.
+  const dayLit = { sky: sky.intensity, sun: sun.intensity, fog: scene.fog.density, lamp: lamp.intensity };
   rig.add(lamp);
 
   // ---- terrain -------------------------------------------------------------
@@ -694,6 +700,17 @@ export function createRenderer(canvas, sim) {
     elapsed += dt;
     const eye = opts.eye || sim.player;
     const vp = opts.viewport || null;
+    // The night is a WORLD fact, so it is read without a character: a fire keeps
+    // the night off the mind standing in it (nightFactor(sim, ch)), it does not
+    // hold the sky up. The local light a fire throws is drawn with the fire.
+    const night = nightFactor(sim);
+    sky.intensity = dayLit.sky * (1 - 0.72 * night);
+    sun.intensity = dayLit.sun * (1 - 0.85 * night);
+    scene.fog.density = dayLit.fog * (1 + 0.9 * night);
+    lamp.intensity = dayLit.lamp * (1 + 0.55 * night);
+    if (scene.background && scene.background.isColor) {
+      scene.background.setHex(isCamp ? 0x8fa2b4 : 0x000000).multiplyScalar(1 - 0.8 * night);
+    }
     const dis = distortion(percept, sim);
 
     if (vp) {

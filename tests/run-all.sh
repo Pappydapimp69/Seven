@@ -35,6 +35,10 @@ echo "== tutorial (step pinning, starvation, meter leaks) =="
 node tests/tutorial.mjs
 echo
 
+echo "== day/night (the cycle, and what the night costs) =="
+node tests/daynight.mjs
+echo
+
 echo "== fire (the structure the player adds, and the count that lies) =="
 node tests/fire.mjs
 echo

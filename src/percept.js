@@ -13,8 +13,8 @@
 
 import { HALLUCINATION, BAND, bandOf, ITEM_INFO, LUCIDITY_GRACE, CORROBORATE_RADIUS,
   LINK_RANGE, PING_RANGE, FIRE_FUEL_MAX, FIRE_BURN_RATE, FIRE_FEED, FIRE_RADIUS,
-} from "./state.js?v=seven-0.19.0";
-import { ITEM_KINDS } from "./world.js?v=seven-0.19.0";
+} from "./state.js?v=seven-0.20.0";
+import { ITEM_KINDS } from "./world.js?v=seven-0.20.0";
 
 const PHANTOM_NAMES = ["the Sixth Stone", "the Watching Slab", "the Other Cairn", "the Hollow Tooth"];
 const PHANTOM_COMPANIONS = ["ODEN", "MARIS", "THE SEVENTH"];

@@ -6,11 +6,11 @@
 // the one hallucinating. The only place a real number is ever printed is the
 // debrief, after the run is over.
 
-import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds, believedFireAt } from "./percept.js?v=seven-0.19.0";
-import { canWork, beatAt, holdFraction, PHASE } from "./woods.js?v=seven-0.19.0";
+import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds, believedFireAt } from "./percept.js?v=seven-0.20.0";
+import { canWork, beatAt, holdFraction, PHASE } from "./woods.js?v=seven-0.20.0";
 import { LOG_RADIUS, PYLON_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, gatherTarget, GATHER_HOLD_TIME, previewCraft, claimedEntryAt, pylonAt,
-  mossedAt, FIRE_FUEL_MAX, FIRE_COST,
-} from "./state.js?v=seven-0.19.0";
+  mossedAt, FIRE_FUEL_MAX, FIRE_COST, phaseOf,
+} from "./state.js?v=seven-0.20.0";
 
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 
@@ -43,6 +43,7 @@ export function createHud(sim, percept, opts = {}) {
     doses: document.getElementById("doseCount"),
     compass: document.getElementById("compass"),
     clock: document.getElementById("clock"),
+    dayLabel: document.getElementById("dayLabel"),
     subtitles: document.getElementById("subtitles"),
     prompt: document.getElementById("actionPrompt"),
     vignette: document.getElementById("vignette"),
@@ -476,6 +477,15 @@ export function createHud(sim, percept, opts = {}) {
     const left = Math.max(0, TIME_LIMIT - sim.time);
     el.clock.textContent = `${String(Math.floor(left / 60)).padStart(2, "0")}:${String(Math.floor(left % 60)).padStart(2, "0")}`;
     el.clock.classList.toggle("low", left < 120);
+    // WHICH DAY, AND WHETHER IT IS DARK. Not a meter — a day number and a word,
+    // the same way the roster says "falling behind" rather than 41/100. The
+    // camp and the woods run no cycle, and phaseOf is only consulted when one
+    // is actually running.
+    if (el.dayLabel && !sim.noDrain && !sim.woods) {
+      const ph = phaseOf(sim.time);
+      el.dayLabel.textContent = ph.night ? `NIGHT ${ph.day}` : `DAY ${ph.day}`;
+      el.dayLabel.classList.toggle("night", ph.night);
+    }
 
     const dis = distortion(percept, sim);
     el.vignette.style.opacity = String(Math.min(0.92, dis * 0.9));
