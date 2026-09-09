@@ -31,6 +31,65 @@ for; the value of this file is that writing in it costs nothing.
 
 ---
 
+## 2026-09-09 — the fire is an item, and it is the thing that lies  [open]
+
+Session talking through the traverse. The full design note above already has the
+map, the days, the time-gating and the skills; these are the parts of that
+conversation it does NOT already say.
+
+**Fire is not a place.** It is a crafted, placed structure — no authored
+coordinate, position decided at craft time, one per basin. It follows the
+planted Stake, not an item: it exists in no seed-generated world, so it lives in
+`sim` and is serialised whole. It is the first thing the player ADDS to the
+world; everything today is taken out of one.
+
+**Fire has fuel, and burns down.** Fed with wood. The readout is the fire —
+flame height, colour, light radius — never a number. This game does not render
+meters (`tests/smoke.mjs` asserts the HUD shows no lucidity value) and the design
+note already gives pylons the same treatment: blue -> red, no gauge.
+
+**Below `BAND.BRITTLE` the fire is hallucinated.** Not "embers look big" — the
+whole fire is fabricated and behaves CORRECTLY: burning normally, shrinking on
+schedule, asking to be fed. Feeding does nothing. The consistency is what makes
+it convincing; a lie that behaves wrongly is not a hallucination, it is a bug the
+player can see. Consistent with the existing rule that a far-gone mind sees dead
+pylons as live.
+
+**Wood becomes shown-vs-true.** Feeding a false fire spends REAL wood — it
+leaves the inventory. Chopping a phantom tree raises only the SHOWN count. So:
+
+- `sim.wood` stays a true scalar. No per-unit truth, no schema change.
+- `percept` reports a shown wood, exactly as `percept.itemLabels` already does
+  for item names.
+- Feeding lowers both together, so the arithmetic looks consistent throughout.
+- The gap only widens while under, never announces itself, and morning is the
+  reconciliation: shown snaps to true.
+
+The first instinct here was to treat the HUD count disagreeing with reality as a
+leak to engineer around. It is not a leak. It is the mechanic.
+
+**Worksites should be pinned to objects, not coordinates.** `woods.js` SITES are
+four hand-typed camp cells drawn as four IDENTICAL cairn-and-lamp markers. The
+file's own reason for their existing is that "a wrong-place claim is only
+evidence if the places are distinguishable" — and a cairn is distinguishable
+from nothing, not from another cairn. Pin them to real objects (a creek, felled
+timber, raised ground) and the coordinates stop being authored at all. Needs:
+the objects to exist, and a rule for a world that has no valid spot for one.
+
+**Landmarks and regions are different things, and the traverse wants both.** A
+landmark is a POINT you stand at — answers "where am I going", and is what makes
+a wrong-place claim catchable. A region is an EXTENT you are inside — answers
+"where am I", and is what makes one hour of walking differ from another. A creek
+is a landmark that could sit in any region. Independent systems.
+
+**Two notes on pacing the design note does not carry.** The first obstacle is
+what TEACHES the loop — you meet the downed tree, you cannot clear it before
+dark, so you make camp and that is the tutorial. And low starting skill is the
+pacing mechanism itself, not only a build choice: it is what makes day one end
+where it ends.
+
+---
+
 ## 2026-08-28 — THE WOODS: full design note  [building — the ALPHA slice is built; see docs/adr/0002-the-woods-alpha.md]
 
 Worked out in conversation. This supersedes the two entries below it, which are
