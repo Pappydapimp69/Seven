@@ -242,6 +242,22 @@ export const GATHER_YIELD = Object.freeze({ min: 2, max: 3 });
 // scarce enough to matter, not so scarce it's never worth reaching for.
 export const STAKE_COST = Object.freeze({ wood: 2, stone: 2 });
 
+// ---------------------------------------------------------------------------
+// FIRE. Not a place, not a carried item — a structure the player BUILDS, whose
+// position is decided at the moment they build it. It follows the planted Stake
+// (see useItem's "stake" case): it exists in no seed-generated world, so it
+// lives on `sim` and is serialised whole rather than rebuilt from a seed.
+//
+// It is also the first thing the player ADDS to the world. Everything else is
+// taken out of one.
+// ---------------------------------------------------------------------------
+export const FIRE_COST = Object.freeze({ wood: 2 });
+export const FIRE_FUEL_MAX = 100;
+export const FIRE_BURN_RATE = 0.55; // fuel per second — a built fire is ~3min unfed
+export const FIRE_FEED_COST = 1;    // wood per feed
+export const FIRE_FEED = 35;        // fuel per feed
+export const FIRE_RADIUS = 6;       // how close you stand to build on, or feed, a fire
+
 // A short campaign: winning a basin before the last one advances to a fresh
 // basin instead of ending the run — see checkEndings(). Callers that don't
 // know about campaigns (tests, the balance harness) get campaignLength=1 by
@@ -532,6 +548,9 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
     // crafting fuel, never carried or used on their own. Carry forward too.
     wood: carryOver ? carryOver.wood : 0,
     stone: carryOver ? carryOver.stone : 0,
+    // The built fire, or null. One per basin. NOT carried across basins: a fire
+    // is a place you made, and you left it behind.
+    fire: null,
     // Monotonic slot-id counter. Ids used to be `slot{length}-{time}`, which
     // repeats the moment a use-then-pickup lands in the same 0.01s tick at the
     // same inventory length — and percept.itemLabels is keyed by slot id, so a
@@ -884,6 +903,9 @@ export function beginHallucinating(sim, ch) {
 export function recover(sim, ch, cause) {
   ch.hallucinating = false;
   ch.hallucination = null;
+  // The wood they thought they had was never cut. Coming back is where the
+  // count reconciles — shown snaps to true, and it does so silently.
+  ch.phantomWood = 0;
   // CLEAR THE SLIP WINDOW TOO. This function predates micro-episodes and only
   // ever knew how to end the bottomed-out kind of hallucination. Pulling
   // somebody out of a SLIP from outside — a pylon firing around them, a dose —
@@ -1759,7 +1781,17 @@ export function gatherResource(sim, actor = sim.player) {
     const t = sim.trees.find((x) => x.id === pick.id);
     t.chopped = true;
     const n = sim.rng.int(GATHER_YIELD.min, GATHER_YIELD.max);
-    sim.wood += n;
+    // A HALLUCINATING PAIR OF HANDS BRINGS BACK NOTHING. The draw above is
+    // unconditional — the yield is rolled whatever the state, or a chopper who
+    // was under would burn one fewer draw than one who was not and re-phase
+    // every other mind in the tick. What changes is where the wood goes: the
+    // count they will SEE (percept.shownWood) rather than the count that exists.
+    // Note this is the first crack in "wood and stone carry no deception layer"
+    // — deliberately. The Stake gate below still reads TRUE wood, so the one
+    // craft that can never come out false stays that way; what lies is the
+    // number, not the recipe.
+    if (actor.hallucinating) actor.phantomWood = (actor.phantomWood || 0) + n;
+    else sim.wood += n;
     // x/z ride along on the event so the HUD can animate the haul from the
     // node's own world position to the Wood pill, instead of the counter
     // just silently ticking up.
@@ -2094,6 +2126,67 @@ export function craftItem(sim, prefer = -1, believed = null) {
   return { ok: true, kind: "stake", real: true };
 }
 
+/**
+ * Build a fire where the actor is standing. One per basin.
+ *
+ * Costs TRUE wood. A mind that has been "gathering" while under has a shown
+ * count well above what it has, so this is one of the two places the lie
+ * settles up (the other is the Stake): the offer comes from what they see, the
+ * refusal comes from what is there.
+ */
+export function buildFire(sim, actor = sim.player) {
+  if (sim.status !== "playing") return { ok: false, reason: "over" };
+  if (sim.fire) return { ok: false, reason: "already" };
+  if (sim.wood < FIRE_COST.wood) return { ok: false, reason: "no-wood" };
+  sim.wood -= FIRE_COST.wood;
+  sim.fire = { x: actor.x, z: actor.z, fuel: FIRE_FUEL_MAX, builtAt: sim.time };
+  emit(sim, "fire", "The kindling catches. A fire, for as long as you feed it.", { who: actor.id });
+  return { ok: true };
+}
+
+/** The built fire, if the actor is standing close enough to work it. */
+export function fireAt(sim, actor = sim.player) {
+  if (!sim.fire) return null;
+  return dist2D(sim.fire, actor) <= FIRE_RADIUS ? sim.fire : null;
+}
+
+/**
+ * Feed the fire. Spends TRUE wood whether or not there is a fire to feed.
+ *
+ * That asymmetry is the whole mechanic and it is deliberate. The sim never asks
+ * whether anyone is hallucinating here — it just takes the wood and, if a real
+ * fire is in reach, banks the fuel. Deciding whether to OFFER the verb belongs
+ * to percept, which is the only module allowed to lie. A lucid lead is never
+ * prompted to feed empty ground; a brittle one is, and pays for it.
+ */
+export function feedFire(sim, actor = sim.player) {
+  if (sim.status !== "playing") return { ok: false, reason: "over" };
+  if (sim.wood < FIRE_FEED_COST) return { ok: false, reason: "no-wood" };
+  sim.wood -= FIRE_FEED_COST;
+  const f = fireAt(sim, actor);
+  if (!f) {
+    // No event, no line. Feeding a fire that is not there has to look exactly
+    // like feeding one that is, or the subtitle is the tell.
+    return { ok: true, fed: false };
+  }
+  f.fuel = Math.min(FIRE_FUEL_MAX, f.fuel + FIRE_FEED);
+  return { ok: true, fed: true };
+}
+
+/**
+ * Burn the fire down. No rng: fuel gates nothing that draws, so this decides
+ * how things LOOK and how cold the night is, never the stream position.
+ *
+ * A spent fire keeps its object with `fuel: 0` rather than being deleted. It is
+ * still a place — the place you built it — and percept needs somewhere to put
+ * the fire a far-gone mind still sees. Same reason a dead pylon stays a pylon.
+ */
+export function tickFire(sim, dt) {
+  if (!sim.fire || sim.fire.fuel <= 0) return;
+  sim.fire.fuel = Math.max(0, sim.fire.fuel - FIRE_BURN_RATE * dt);
+  if (sim.fire.fuel === 0) emit(sim, "fire", "The fire is out.", {});
+}
+
 /** Everyone at camp, or close enough to walk in together. */
 export function partyAtCamp(sim) {
   return sim.party.filter((c) => dist2D(c, sim.world.camp) <= 9).length;
@@ -2282,6 +2375,7 @@ export function tick(sim, dt, input = {}) {
     discover(sim);
   }
 
+  tickFire(sim, step);
   for (const ch of sim.party) tickLucidity(sim, ch, step);
 
   // Unprompted chatter is the other half of the sensor: a companion who is

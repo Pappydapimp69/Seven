@@ -52,7 +52,14 @@ export const SAVE_KEY = "seven:run";
 // so a v2 snapshot restored without it re-rolls on a different tick and the
 // resumed run silently forks — which is precisely how the divergence test
 // caught it.
-export const SAVE_VERSION = 4;
+// v5: the built fire, and wood that was never cut. `sim.fire` is a structure
+// the PLAYER added — it exists in no seed-generated world, so like a planted
+// Stake it has to travel in the payload or a resumed run wakes up beside cold
+// ground it remembers lighting. `phantomWood` rides on the character for the
+// same reason `lostSince` does: dropped, it restores as undefined, and
+// `sim.wood + undefined` is NaN, which does not throw and does not fail a
+// round-trip — it just quietly shows the player a broken number.
+export const SAVE_VERSION = 5;
 
 const store = () => (typeof localStorage === "undefined" ? null : localStorage);
 
@@ -109,6 +116,9 @@ function packCharacter(c) {
     // later as a different basin. Anything that gates an rng draw is save
     // state, however cosmetic the thing it gates looks.
     remarkCooldown: c.remarkCooldown ?? 0,
+    // Wood this mind believes it cut while under. Decides the count it is
+    // SHOWN, not the count that exists (percept.shownWood).
+    phantomWood: c.phantomWood ?? 0,
     repathTimer: c.repathTimer ?? 0,
     facing: c.facing ?? 0,
     // Cohesion state. Same rule as the throttle countdowns above, and it broke
@@ -196,6 +206,11 @@ function applyCharacter(c, s) {
   // clock is not companion-only state.
   c.lostSince = s.lostSince ?? null;
   c.lostStallUntil = s.lostStallUntil ?? 0;
+  // NOT companion-only, for the third time and the same reason: the lead
+  // hallucinates, so the lead is the one who cuts wood that was never there.
+  // Restored inside the !isPlayer guard it came back undefined for the only
+  // mind whose count is on screen, and `sim.wood + undefined` is NaN.
+  c.phantomWood = s.phantomWood ?? 0;
   if (!c.isPlayer) {
     c.drain = s.drain; c.stoic = s.stoic; c.chatty = s.chatty;
     c.wander = s.wander; c.selfCare = s.selfCare;
@@ -272,6 +287,9 @@ export function serializeRun(sim) {
       // two runs permanently out of phase. Measured: 12 of 60 seeds forked.
       spent: !!p.spent, primedBy: [...(p.primedBy || [])], primedAt: p.primedAt ?? -1e9,
     })),
+    // The built fire, whole. Same reason the pylons above are saved whole: it
+    // exists in no seed-generated world, so nothing can rebuild it.
+    fire: sim.fire ? { x: sim.fire.x, z: sim.fire.z, fuel: sim.fire.fuel, builtAt: sim.fire.builtAt ?? 0 } : null,
     monoliths: packFlags(sim.monoliths, ["logged", "discovered", "foundBy"]),
     items: packFlags(sim.items, ["discovered", "taken"]),
     trees: packFlags(sim.trees, ["discovered", "chopped"]),
@@ -371,6 +389,9 @@ export function deserializeRun(data) {
   sim.gatherHold = { ...data.gatherHold };
   sim.time = data.time;
   sim.status = data.status;
+  sim.fire = data.fire
+    ? { x: data.fire.x, z: data.fire.z, fuel: data.fire.fuel ?? 0, builtAt: data.fire.builtAt ?? 0 }
+    : null;
   sim.sightTimer = data.sightTimer ?? 0;
   sim.lastDt = data.lastDt ?? 0;
 
