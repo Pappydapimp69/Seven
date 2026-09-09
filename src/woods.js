@@ -27,7 +27,8 @@
 //      saveable, resumable and reproducible, and every draw below is taken
 //      unconditionally so the draw count cannot depend on the branch.
 
-import { CELL, GRID, cellToWorld } from "./world.js?v=seven-0.18.0";
+import { CELL, cellToWorld, gridOf } from "./world.js?v=seven-0.18.0";
+import { CAMP_GRID } from "./camp.js?v=seven-0.18.0";
 import { makeChronicle, record, fact, account, pickPerturbation, WEATHERS } from "./chronicle.js?v=seven-0.18.0";
 import { makeRoster, nearMiss } from "./names.js?v=seven-0.18.0";
 
@@ -70,7 +71,10 @@ export const WORK_HOLD_TIME = 1.7;
 
 /** Camp-only, like `world.trainer`. Consumers that do not know about it ignore it. */
 export function attachSites(world) {
-  world.sites = SITES.map((s) => ({ ...s, ...cellToWorld(s.cx, s.cz) }));
+  // The sites are CAMP cells, so they place against the camp's own grid, read
+  // off the world they are being attached to rather than a module constant.
+  const grid = gridOf(world);
+  world.sites = SITES.map((s) => ({ ...s, ...cellToWorld(s.cx, s.cz, grid) }));
   return world;
 }
 
@@ -408,4 +412,7 @@ export function leaks(text) {
 }
 
 export const CELL_SIZE = CELL;
-export const GRID_SIZE = GRID;
+// The CAMP's grid — sites are camp cells, and the basin's is a different number
+// now that each world carries its own. Unused today; kept correct rather than
+// left pointing at the wrong map.
+export const GRID_SIZE = CAMP_GRID;

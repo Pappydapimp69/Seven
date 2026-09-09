@@ -76,7 +76,14 @@ function packCharacter(c) {
     goneTime: c.goneTime,
     steadyUntil: c.steadyUntil,
     lensUntil: c.lensUntil,
-    givenUpPylons: c.givenUpPylons,
+    // COPIED, not handed over. Every other structure here is copied and this
+    // one was not, which made the payload share a live object with the running
+    // sim. Through localStorage that is invisible — JSON.stringify snapshots
+    // it — but `deserializeRun(serializeRun(sim))` with no JSON hop, which is
+    // exactly what the divergence test does, gave the restored run the
+    // ORIGINAL's object to mutate. The two runs then edited each other and
+    // forked, and the test read that as a save bug.
+    givenUpPylons: { ...(c.givenUpPylons || {}) },
     pylonWaitFor: c.pylonWaitFor,
     pylonWaitUntil: c.pylonWaitUntil,
     decayPausedUntil: c.decayPausedUntil,
@@ -259,7 +266,11 @@ export function serializeRun(sim) {
     // would silently cancel a confirmation the players had already made.
     pylons: sim.pylons.map((p) => ({
       id: p.id, x: p.x, z: p.z,
-      spent: !!p.spent, primedBy: p.primedBy || [], primedAt: p.primedAt ?? -1e9,
+      // Same rule, and this was the one that actually bit: a shared `primedBy`
+      // let a companion in the ORIGINAL run add themselves to a pylon in the
+      // RESTORED one, which confirmed a pylon a tick early there and put the
+      // two runs permanently out of phase. Measured: 12 of 60 seeds forked.
+      spent: !!p.spent, primedBy: [...(p.primedBy || [])], primedAt: p.primedAt ?? -1e9,
     })),
     monoliths: packFlags(sim.monoliths, ["logged", "discovered", "foundBy"]),
     items: packFlags(sim.items, ["discovered", "taken"]),
