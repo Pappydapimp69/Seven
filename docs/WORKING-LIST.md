@@ -29,15 +29,14 @@ short on purpose.
 
 ## Open — predicted, unconfirmed
 
-- [ ] The trigger index is hand-derived. The claim is that it should be
-      *generated* from each Brain entry's own "Where/why it failed" field,
-      which is where the precondition already lives. Unconfirmed: I have not
-      checked whether that field is consistently written as a precondition
-      across the corpus, or only in the entries I wrote.
 - [ ] `brain sync` from a session with only `seven` attached: query and local
       write will work (the cache is per-machine), but sync PUSHES to the
       knowledge repos on GitHub. Untested whether that needs them in the
       session's repo scope or just credentials.
+      STILL OPEN after 2026-09-12, and worth saying why so nobody thinks it was
+      answered: sync ran clean from this repo several times that day, but the
+      knowledge repos were attached to that session the whole time. A pass that
+      succeeds with them in scope says nothing about a session without them.
 
 ## Open — found in passing, not yet fixed
 
@@ -60,16 +59,47 @@ short on purpose.
       than shipped — it re-rolls every basin (another SAVE_VERSION bump) for a
       feature that does not do its job.
 
-- [ ] **22 proposals in the shared intake queue are still HELD**, oldest
-      2026-08-01. Not mine — other projects and earlier sessions. Most are
-      missing `- ID:`, `Tags`, `What` or `Why built`, i.e. the same
-      hand-written-format failure. Until a steward promotes them the system has
-      been told 22 lessons it cannot answer with. Worth a single cleanup pass
-      by whoever owns them.
-- [ ] `tests/balance.mjs` — the `deceived` bot at 17% against a 35% bar. The
-      owner's open difficulty decision, not a defect. Do not tune it.
+- [ ] **The shared intake queue holds held proposals, and the count moves.**
+      This said 22 for a long time; on 2026-09-12 the queue was empty in the
+      morning and held 5 by the evening, all from other sessions. So the number
+      is not the item — the pattern is. Two of the five are missing field
+      labels the validator looks for (the hand-written-format failure); the rest
+      pass every field name and are held on provenance, which needs a human.
+      Until a steward promotes them the system has been told things it cannot
+      answer with. Re-read `brain doctor` before acting on this; do not trust
+      any count written here.
+- [ ] `tests/balance.mjs` — the `deceived` bot, the one row difficulty may be
+      read from, is at **0%** against a 35% bar as of seven-0.21.0. It was 13%
+      before day/night landed. The owner's open difficulty decision, not a
+      defect: do not tune it. What is new is that the decision is now forced
+      rather than deferred — at 0% the row cannot get worse and can no longer be
+      read. The five oracle rows are a separate problem: they finish inside
+      daylight, never meet a night, and report identical numbers, so `@night`
+      rows were added to give the harness something that discriminates.
 
 ## Denied — kept so it is not re-proposed
+
+- **"The trigger index should be GENERATED from each Brain entry's own
+  `Where/why it failed` field, which is where the precondition already lives."**
+  Measured, refuted. Back-test over the 14 hand-written triggers, 12 of which
+  have a source entry in the canon: how much of each trigger's `when:`
+  vocabulary each field of its source entry could have produced —
+
+  | field | mean recall | wins | lift vs shuffled |
+  |---|---|---|---|
+  | `What` (67 words) | 44.5% | 8/12 | +39.7 |
+  | `Rule of thumb` (39 words) | 41.9% | 2/12 | +37.9 |
+  | `Where/why it failed` (42 words) | 19.4% | **0/12** | +15.0 |
+
+  Not a length artefact — `Rule of thumb` is the SHORTER field and still more
+  than doubles it — and every field was negative-controlled against shuffled
+  trigger/entry pairings. Hand-reading 24 failure fields sampled at a fixed
+  stride agrees: 1 states a precondition, ~7 a general mechanism, ~16 a
+  past-tense narrative of one incident. The field answers "what went wrong",
+  which is only knowable after the fact.
+  Two of the 14 triggers have no canon entry at all, so a generator can seed
+  this table but never own it. Settled in `mirage` and carried here, which is
+  why it sat open in this copy for a day after it was answered.
 
 - **"The nightfall stall was a code bug."** It was environment saturation: a
   headless page under software GL with three mounted runs. Six attempts went
