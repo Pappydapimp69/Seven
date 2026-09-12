@@ -40,24 +40,36 @@ short on purpose.
 
 ## Open — found in passing, not yet fixed
 
-- [ ] **Obstacles cannot earn their keep on the survey basin, and three
-      experiments say it is structural rather than tuning.** A deadfall is only
-      an obstacle if walking round it costs something. Measured, with placement
-      gated on a >=6-cell detour to a feature: random placement 0.2 deadfalls
-      per world, a carved 3-wide path with dense sides 0.03, the same path with
-      the rock band pushed from 4 cells deep to 10 gave 0.00 and barely moved
-      the open-cell count (1517 -> 1397).
-      The cause: the basin is 78% walkable, and the generator's contract is that
-      every feature is REACHABLE — it flood-fills and carves corridors until
-      that holds. A path only matters when most ground is expensive to cross,
-      which is the opposite guarantee. Thickening ground near the path just
-      hands the repair pass more corridors to carve, and it carves them back
-      through the exact routes the path was meant to make costly.
-      So: not a placement bug and not a constant to tune. Obstacles, paths and
-      regions all want the traverse map, and this is now the third separate
-      finding pointing there. The path-carving experiment was reverted rather
-      than shipped — it re-rolls every basin (another SAVE_VERSION bump) for a
-      feature that does not do its job.
+- [x] **Obstacles cannot earn their keep on the survey basin — SETTLED by
+      weakening the guarantee, not by tuning.** The three experiments were
+      right that it was structural: the basin is 78% walkable because the
+      generator's contract is that every feature is REACHABLE, and thickening
+      ground near a path just hands the repair pass more corridors to carve
+      back through the very routes the path was meant to make costly.
+      The unlock was the entry's own unasked question — make reachability a
+      WEAKER guarantee. `validate()` now runs a distance field and reports
+      `worstDistance` / `overBudget` / `withinBudget` against a `DISTANCE_BUDGET`
+      of 3x the grid's side, alongside an unchanged `ok`. That gave a density
+      pass a keep/reject test it never had: 78% -> 63% walkable, and deadfalls
+      clearing the 6-cell detour bar went from 0.2 per world to 3.40, median
+      detour 10.
+      Density ships OPT-IN (`generateWorld(seed, { dense: true })`) and the
+      survey basin stays open — see the successor item below. Shipped in
+      seven-0.22.0 (6d2bfb4); the default basin is byte-identical, so no
+      SAVE_VERSION bump.
+
+- [ ] **Dense ground and a companion who wanders off want opposite maps.**
+      The successor fork, filed as a red tension. Density breaks the
+      lucid-dark drift assertion monotonically: a gone companion drifts 8
+      units from where they broke on 24 of 24 seeds with density off, 7 of 12
+      at one round, 5 of 12 at two, against a suite wanting 8. Deadfalls are
+      innocent — the same test passes with density off and deadfalls on, so it
+      is the fill.
+      Unanswered, and the more interesting half: whether the assertion is the
+      right SHAPE on dense ground. It measures euclidean units from the break
+      point, and a companion lost four cells away behind rock may read as MORE
+      unnerving, not less. Nobody has watched it. Do not tune the threshold to
+      make it pass — restate it in path distance, or watch a human play it.
 
 - [ ] **The shared intake queue holds held proposals, and the count moves.**
       This said 22 for a long time; on 2026-09-12 the queue was empty in the
