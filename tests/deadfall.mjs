@@ -11,7 +11,7 @@ import {
   createRun, gatherTarget, holdTimeFor, deadfallAt, clearDeadfall, recover,
   DEADFALL_HOLD_TIME, DEADFALL_WOOD, GATHER_HOLD_TIME, HALLUCINATION,
 } from "../src/state.js";
-import { generateWorld, validate, floodFill, DEADFALL_COUNT } from "../src/world.js";
+import { generateWorld, validate, floodFill, distanceField, DEADFALL_COUNT, DEADFALL_MIN_DETOUR, DISTANCE_BUDGET } from "../src/world.js";
 import { createPercept, updatePercept } from "../src/percept.js";
 import { serializeRun, deserializeRun } from "../src/save.js";
 import { buildCamp } from "../src/camp.js";
@@ -41,6 +41,88 @@ check("no deadfall ever walls anything off, across many seeds", () => {
   eq(stranded.length, 0, `deadfalls sealed ground off on seeds ${stranded.slice(0, 6).join(",")} — that is a wall, and nothing is walled off`);
 });
 
+// THE CONTRACT THAT REPLACED "REACHABLE AT ANY COST".
+// Binary reachability is satisfied by a single winding corridor, so it says
+// nothing about price — a map where everything is a long hard walk and one
+// where everything is a stroll pass identically. That is why dense ground could
+// not survive here, and why obstacles had nothing to block.
+check("validate reports what the walk COSTS, not only that it exists", () => {
+  for (let seed = 1; seed <= 20; seed++) {
+    const v = validate(generateWorld(seed));
+    assert(v.ok, `seed ${seed}: ${v.unreachable.join(",")} unreachable`);
+    assert(v.withinBudget, `seed ${seed}: ${v.overBudget.map((o) => `${o.id}@${o.cells}`).join(",")} beyond the budget`);
+    assert(v.worstDistance > 0, `seed ${seed}: the longest walk measured zero`);
+    assert(v.worstDistance <= DISTANCE_BUDGET, `seed ${seed}: worst walk ${v.worstDistance} over budget ${DISTANCE_BUDGET}`);
+    eq(typeof v.worstId, "string", `seed ${seed}: the worst walk names nobody`);
+  }
+});
+
+check("the budget is a weaker contract than reachability, and still subsumes it", () => {
+  const w = generateWorld(9);
+  // Wall a marker in completely: unreachable is infinite distance, so it has to
+  // fail BOTH checks, not just the old one.
+  const m = w.monoliths[0];
+  for (let dz = -1; dz <= 1; dz++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (dx || dz) w.blocked[(m.cz + dz) * w.grid + (m.cx + dx)] = 1;
+    }
+  }
+  const v = validate(w);
+  assert(!v.ok, "walling a marker in did not break reachability");
+  assert(!v.withinBudget, "walling a marker in left it inside the budget — unreachable must never be affordable");
+  // ...and a budget tight enough to bite reports the same world as too dear
+  // while still calling it connected.
+  const w2 = generateWorld(9);
+  const tight = validate(w2, { budget: 5 });
+  assert(tight.ok, "a tight budget broke reachability, which it must not touch");
+  assert(!tight.withinBudget, "a 5-cell budget called a whole basin affordable");
+  assert(tight.overBudget.length > 0, "nothing was reported over a 5-cell budget");
+});
+
+check("the density pass spends the budget, and only when asked", () => {
+  let walkable = 0;
+  for (let seed = 1; seed <= 20; seed++) {
+    const w = generateWorld(seed, { dense: true });
+    let open = 0;
+    for (const b of w.blocked) if (!b) open++;
+    walkable += open / (w.grid * w.grid);
+  }
+  const pct = (walkable / 20) * 100;
+  // It was 78% before the budget existed, and at 78% almost nothing was worth
+  // walking round. Both bounds matter: too open and obstacles are scenery, too
+  // closed and it stops being a basin.
+  assert(pct < 72, `dense ground is ${pct.toFixed(0)}% walkable — the density pass is not spending the budget`);
+  assert(pct > 50, `dense ground is only ${pct.toFixed(0)}% walkable — that is a maze, not a basin`);
+
+  // ...and the survey basin is NOT dense, deliberately. Density costs the
+  // companion drift ("they DO wander off"), measured at 7 of 12 seeds with one
+  // round and 5 with two, against a suite that wants 8. The default has to stay
+  // open until a map exists that wants the trade.
+  let openPct = 0;
+  for (let seed = 1; seed <= 20; seed++) {
+    const w = generateWorld(seed);
+    let open = 0;
+    for (const b of w.blocked) if (!b) open++;
+    openPct += open / (w.grid * w.grid);
+  }
+  assert((openPct / 20) * 100 > 74, "the default basin has quietly become dense — that breaks the lost-drift wander");
+});
+
+check("on dense ground a deadfall is worth walking round, or it does not exist", () => {
+  let placed = 0, cheap = [];
+  for (let seed = 1; seed <= 20; seed++) {
+    const w = generateWorld(seed, { dense: true });
+    for (const d of w.deadfalls) {
+      placed++;
+      if (d.detour < DEADFALL_MIN_DETOUR) cheap.push(`${seed}/${d.id}@${d.detour}`);
+    }
+  }
+  eq(cheap.length, 0, `deadfalls that cost nothing to ignore: ${cheap.slice(0, 5).join(",")}`);
+  // On the old open basin this was 0.2 per world. An obstacle nobody meets is
+  // not an obstacle, so the count is part of the assertion.
+  assert(placed / 20 >= 2, `only ${(placed / 20).toFixed(2)} deadfalls per world clear the detour bar — obstacles are not landing`);
+});
+
 check("a deadfall never buries a feature", () => {
   for (let seed = 1; seed <= 40; seed++) {
     const w = generateWorld(seed);
@@ -49,10 +131,20 @@ check("a deadfall never buries a feature", () => {
   }
 });
 
-check("every basin gets deadfalls; the camp gets the field and none of them", () => {
+check("basins get deadfalls where the ground allows, and the camp gets none", () => {
+  // NOT an exact count any more, and the change is the point. Placement is
+  // gated on a real detour now, so a seed whose ground offers few chokepoints
+  // gets few deadfalls — and it should. Asserting DEADFALL_COUNT exactly would
+  // be asserting that the gate never refuses anything, which would quietly turn
+  // the gate off. The floor is per-world, the average is checked separately.
+  let total = 0;
   for (let seed = 1; seed <= 12; seed++) {
-    eq(generateWorld(seed).deadfalls.length, DEADFALL_COUNT, `seed ${seed} did not get its deadfalls`);
+    const n = generateWorld(seed).deadfalls.length;
+    assert(n >= 1, `seed ${seed} got no deadfalls at all`);
+    assert(n <= DEADFALL_COUNT, `seed ${seed} got ${n} deadfalls, over the cap of ${DEADFALL_COUNT}`);
+    total += n;
   }
+  assert(total / 12 >= 2, `only ${(total / 12).toFixed(2)} deadfalls per world`);
   const camp = buildCamp();
   assert(Array.isArray(camp.deadfalls), "the camp is missing the deadfalls field every basin has");
   eq(camp.deadfalls.length, 0, "something is blocking the walk in");

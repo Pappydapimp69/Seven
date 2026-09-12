@@ -24,7 +24,7 @@
 // reachability from scratch and is asserted in the test suite — the fixup is
 // verified, not trusted.
 
-import { makeRng } from "./rng.js?v=seven-0.21.0";
+import { makeRng } from "./rng.js?v=seven-0.22.0";
 
 export const CELL = 2.6; // world units per grid cell
 /**
@@ -51,6 +51,7 @@ export const ITEM_KINDS = Object.freeze(["flare", "tether", "lens", "husk"]);
 // ITEM, these carry no `itemKind` — a tree is always a tree, a deposit always
 // stone. There is no deception layer for these at all (see state.js/percept.js
 // comments): only carried/crafted ITEMS are ever subject to the lie.
+
 // DEADFALLS — the obstacle the day/night loop is priced against. A tangle of
 // fallen timber lying across a route: it BLOCKS, it takes real time to cut
 // through, and it pays in wood. The design note's rule is the load-bearing part
@@ -59,6 +60,56 @@ export const ITEM_KINDS = Object.freeze(["flare", "tether", "lens", "husk"]);
 // always a shortcut, never a gate. Going round costs distance; cutting costs
 // daylight; you pay either way, and choosing which is the whole mechanic.
 export const DEADFALL_COUNT = 4;
+// How much further you must walk to go ROUND one before it counts as an
+// obstacle at all. On the old 78%-walkable basin almost nothing cleared this
+// bar — an obstacle that is free to ignore is scenery.
+export const DEADFALL_MIN_DETOUR = 6;
+
+// ---- HOW FAR IS TOO FAR, in cells of walking from camp --------------------
+//
+// The old contract was binary: every feature REACHABLE, at any cost, enforced by
+// a repair pass that carves a corridor to anything the flood fill misses. That
+// guarantee is why this generator can ship without hand inspection, and it is
+// also why dense ground cannot survive here — "reachable" says nothing about
+// price, so a map where everything is a long hard walk and a map where
+// everything is a stroll both pass identically.
+//
+// A budget is the weaker, more useful contract: reachable EVENTUALLY, at a cost
+// this says out loud. It subsumes reachability (unreachable is infinite
+// distance) while making expense visible, which is what a traverse needs —
+// "you can always go further; you may not get back before dark".
+//
+// 3x the grid's side. A straight crossing is ~46 cells; this allows a route
+// that doubles back and detours heavily before anything is called too far.
+// Measured on the open basin: the worst walk to a feature runs 54-71 cells, so
+// nothing here is near the bar — the budget exists to price density, not to
+// police the map as it stands.
+export const DISTANCE_BUDGET = GRID * 3;
+
+// DENSITY — what the budget BUYS, and why it is OFF by default.
+//
+// Each round fills a slice of open cells and keeps it only if every feature is
+// still inside the budget; a rejected round is rolled back WHOLE. Swept at
+// 0.22/6, 0.12/14, 0.08/24 and 0.05/40 fill-per-round: every setting lands at
+// 62-64% walkable, but the gentler climbs get further into the budget before a
+// round is refused (worst walk 72 cells at 0.22, 87 at 0.12), so the fill is
+// small and the rounds few.
+//
+// Then the measurement that decided the default. Density breaks companion drift
+// monotonically: a gone companion drifts 8 units from where they broke on 24 of
+// 24 seeds with density off, on 7 of 12 at one round, on 5 of 12 at two. The
+// suite wants 8. Deadfalls are innocent — the same test passes with density off
+// and deadfalls on.
+//
+// "They DO wander off — the dwell is a beat, not a leash" is a design
+// assertion, not a fixture: a gone companion who cannot leave is a different
+// and worse game. So the survey basin stays open and this pass waits for the
+// map that wants it — the traverse, where a cut path through dense forest is
+// the point. `generateWorld(seed, { dense: true })` turns it on, and the
+// deadfall detour gate with it.
+export const DENSITY_ROUNDS = 4;
+export const DENSITY_FILL = 0.12;
+
 export const TREE_COUNT = 5;
 export const STONE_COUNT = 5;
 
@@ -194,6 +245,36 @@ function blockedGrid(rng) {
   return blocked;
 }
 
+/**
+ * Walking distance in cells from one cell to every other, -1 where unreachable.
+ *
+ * The same BFS as floodFill, counting steps instead of only marking them. It
+ * exists because "can the party get there" and "what does getting there cost"
+ * are different questions and only the first one had an answer — see
+ * DISTANCE_BUDGET. Four-way, so it understates a diagonal walk; every consumer
+ * compares two of these to each other, and both sides understate identically.
+ */
+export function distanceField(blocked, startCx, startCz) {
+  const GRID = needGrid(Math.round(Math.sqrt(blocked.length)), "distanceField");
+  const dist = new Int32Array(GRID * GRID).fill(-1);
+  if (!inBounds(startCx, startCz, GRID) || blocked[startCz * GRID + startCx]) return dist;
+  const start = startCz * GRID + startCx;
+  dist[start] = 0;
+  const queue = [start];
+  for (let head = 0; head < queue.length; head++) {
+    const idx = queue[head];
+    const cx = idx % GRID, cz = (idx - cx) / GRID;
+    for (const [nx, nz] of [[cx + 1, cz], [cx - 1, cz], [cx, cz + 1], [cx, cz - 1]]) {
+      if (!inBounds(nx, nz, GRID)) continue;
+      const ni = nz * GRID + nx;
+      if (dist[ni] !== -1 || blocked[ni]) continue;
+      dist[ni] = dist[idx] + 1;
+      queue.push(ni);
+    }
+  }
+  return dist;
+}
+
 /** Flood fill from a cell; returns a Uint8Array marking the reachable component. */
 export function floodFill(blocked, startCx, startCz) {
   // The stride comes from the ARRAY, not from a constant or an argument: the
@@ -259,7 +340,7 @@ function openNear(blocked, cx, cz) {
  * Generate an area. Returns a plain data object — no live references, so a
  * world can be serialised, diffed in tests, or handed to a worker.
  */
-export function generateWorld(seed = 1) {
+export function generateWorld(seed = 1, { dense = false } = {}) {
   const rng = makeRng(seed);
   const blocked = blockedGrid(rng);
   const heightAt = makeHeightField(rng);
@@ -391,6 +472,48 @@ export function generateWorld(seed = 1) {
     }
   }
 
+  // ---- DENSITY, SPENT AGAINST THE BUDGET -----------------------------------
+  // What the budget is FOR. Under the old binary contract this pass could not
+  // exist: "reachable" is satisfied by a single winding corridor, so there was
+  // no way to say how much closing the ground had cost and therefore no way to
+  // know when to stop. With a budget there is — fill a slice, ask what the
+  // longest walk to a feature now is, and keep the slice only if it is still
+  // affordable.
+  //
+  // Rolled back WHOLE on rejection rather than cell by cell. A partial round
+  // leaves the map in a state no measurement was taken of, which is how a
+  // generator ends up shipping worlds nothing ever validated.
+  if (dense) {
+    for (let round = 0; round < DENSITY_ROUNDS; round++) {
+      const before = Uint8Array.from(blocked);
+      // Never wall in the camp, never bury a feature's ring, never touch the rim.
+      const protectedCells = new Set();
+      for (const f of [...features, camp]) {
+        for (let dz = -2; dz <= 2; dz++) {
+          for (let dx = -2; dx <= 2; dx++) protectedCells.add((f.cz + dz) * GRID + (f.cx + dx));
+        }
+      }
+      let filled = 0;
+      for (let cz = 2; cz < GRID - 2; cz++) {
+        for (let cx = 2; cx < GRID - 2; cx++) {
+          const i = cz * GRID + cx;
+          if (blocked[i] || protectedCells.has(i)) continue;
+          if (Math.hypot(cx - camp.cx, cz - camp.cz) < 7) continue;
+          if (!rng.chance(DENSITY_FILL)) continue;
+          blocked[i] = 1;
+          filled++;
+        }
+      }
+      if (!filled) break;
+      const d = distanceField(blocked, camp.cx, camp.cz);
+      const affordable = features.every((f) => {
+        const v = d[f.cz * GRID + f.cx];
+        return v >= 0 && v <= DISTANCE_BUDGET;
+      });
+      if (!affordable) { blocked.set(before); break; }
+    }
+  }
+
   // ---- DEADFALLS, placed LAST and never sealing anything --------------------
   // After the repair pass, so nothing here can be undone by a later carve, and
   // each one is accepted only if the whole map is still reachable with it in
@@ -416,7 +539,9 @@ export function generateWorld(seed = 1) {
       // Two cells of clearance, because a feature needs its own ring walkable.
       if (features.some((f) => cells.some((c) => Math.abs(f.cx - c.cx) <= 2 && Math.abs(f.cz - c.cz) <= 2))) continue;
       if (deadfalls.some((d) => Math.hypot(d.cx - cx, d.cz - cz) < 8)) continue;
-      // Lay it down, then ask the map whether it still holds together.
+      // Lay it down, then ask the map two questions: does it still hold
+      // together, and does going round actually COST anything.
+      const beforeDist = distanceField(blocked, camp.cx, camp.cz);
       for (const c of cells) blocked[c.cz * GRID + c.cx] = 1;
       const after = floodFill(blocked, camp.cx, camp.cz);
       let stillOpen = 0;
@@ -428,11 +553,30 @@ export function generateWorld(seed = 1) {
         for (const c of cells) blocked[c.cz * GRID + c.cx] = 0;
         continue;
       }
+      // AN OBSTACLE THAT IS FREE TO IGNORE IS SCENERY. Measured against the
+      // features the party actually walks to, not the map in general: a
+      // deadfall across a corner of empty field costs nobody anything, however
+      // pinched the corner looks.
+      const afterDist = distanceField(blocked, camp.cx, camp.cz);
+      const detour = features.reduce((worstD, f) => {
+        const i = f.cz * GRID + f.cx;
+        const b = beforeDist[i], a2 = afterDist[i];
+        return (b >= 0 && a2 >= 0) ? Math.max(worstD, a2 - b) : worstD;
+      }, 0);
+      // Only on dense ground. On the open basin almost nothing clears this bar
+      // (0.2 deadfalls per world, measured), and gating there would delete the
+      // feature rather than improve it — an obstacle that is free to ignore is
+      // scenery, but no obstacle at all is worse.
+      if (dense && detour < DEADFALL_MIN_DETOUR) {
+        for (const c of cells) blocked[c.cz * GRID + c.cx] = 0;
+        continue;
+      }
       open = stillOpen;
       deadfalls.push({
         id: `df${deadfalls.length}`,
         kind: FEATURE.DEADFALL,
         cx, cz, horiz,
+        detour, // cells of extra walking it costs to go round — diagnostic
         cells,
         cleared: false,
         ...cellToWorld(cx, cz, GRID),
@@ -490,20 +634,49 @@ export function moveWithCollision(world, pos, dx, dz, radius = 0.55) {
  * pass above is verified, not trusted.
  * Returns { ok, unreachable: [featureId] }.
  */
-export function validate(world) {
+export function validate(world, { budget = DISTANCE_BUDGET } = {}) {
   const grid = gridOf(world);
-  const reach = floodFill(world.blocked, world.camp.cx, world.camp.cz);
+  // DISTANCES, not a flood fill. Same traversal, one more number per cell, and
+  // that number is the whole point: `reachable` is `distance !== -1`, so this
+  // still answers the old question while also answering how dear the answer is.
+  const dist = distanceField(world.blocked, world.camp.cx, world.camp.cz);
+  const reach = dist;
   const unreachable = [];
+  const overBudget = [];
+  let worst = 0;
+  let worstId = null;
   for (const f of [...world.monoliths, ...world.pylons, ...world.items, ...world.trees, ...world.stones]) {
-    if (!reach[f.cz * grid + f.cx]) unreachable.push(f.id);
+    const d = dist[f.cz * grid + f.cx];
+    if (d < 0) {
+      // UNREACHABLE IS INFINITE DISTANCE, so it fails the budget too. Reported
+      // in both lists on purpose: a caller that only reads `withinBudget` must
+      // not be told a walled-in marker is affordable. The budget is a WEAKER
+      // contract than reachability, and a weaker contract still has to hold
+      // wherever the stronger one does.
+      unreachable.push(f.id);
+      overBudget.push({ id: f.id, cells: Infinity });
+      continue;
+    }
+    if (d > worst) { worst = d; worstId = f.id; }
+    if (d > budget) overBudget.push({ id: f.id, cells: d });
   }
   let open = 0;
   for (let i = 0; i < world.blocked.length; i++) if (!world.blocked[i]) open++;
   let reached = 0;
-  for (let i = 0; i < reach.length; i++) if (reach[i]) reached++;
+  for (let i = 0; i < reach.length; i++) if (reach[i] >= 0) reached++;
   return {
+    // `ok` still means what it always meant, and every existing caller keeps
+    // working. The budget is reported ALONGSIDE it rather than folded into it:
+    // a world where a marker is a very long walk is not broken, it is hard, and
+    // conflating those two is how a difficulty question turns into a crash.
     ok: unreachable.length === 0,
     unreachable,
+    // Reachable, but dear. A generator that wants dense ground reads these.
+    overBudget,
+    withinBudget: overBudget.length === 0,
+    budget,
+    worstDistance: worst,
+    worstId,
     openCells: open,
     reachableCells: reached,
     // Fraction of walkable ground the party can actually get to. Not a pass/fail
