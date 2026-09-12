@@ -133,6 +133,20 @@ log, a false one from the same log with one fact perturbed. If the wrong details
 ever come from a hand-written list, a player memorises them and the game is dead
 by run ten.
 <!-- brain:pointer v2 — managed by `brain link`/`sync`; edits here are overwritten -->
+## ZaneGPT — the skill for pressure-testing, not for building
+
+`.claude/skills/zanegpt/` ships with this repo, so `/zanegpt <question>` works
+for anyone who clones it. Use it when a PREMISE is in question — a plan, a
+claim, a design fork — not for execution work where the answer is already
+agreed. It challenges the premise, names the missing variables, separates
+observation from interpretation from recommendation, and ends on a next move.
+
+It came from `Pappydapimp69/Zanegpt`, which is also a Claude Code plugin
+marketplace (`/plugin marketplace add Pappydapimp69/Zanegpt`). The copy here is
+a COPY: if the upstream skill changes, this one does not. It is vendored anyway
+because a skill that only exists on one machine is not part of the project — but
+if you edit either, edit both, and prefer changing upstream first.
+
 ## Cognitive system: Brain (linked via `brain` CLI)
 This project is linked to the Brain cognitive system. Do not read the node
 repos directly — use the CLI.
