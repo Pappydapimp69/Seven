@@ -41,6 +41,25 @@ short on purpose.
 
 ## Open — found in passing, not yet fixed
 
+- [ ] **Obstacles cannot earn their keep on the survey basin, and three
+      experiments say it is structural rather than tuning.** A deadfall is only
+      an obstacle if walking round it costs something. Measured, with placement
+      gated on a >=6-cell detour to a feature: random placement 0.2 deadfalls
+      per world, a carved 3-wide path with dense sides 0.03, the same path with
+      the rock band pushed from 4 cells deep to 10 gave 0.00 and barely moved
+      the open-cell count (1517 -> 1397).
+      The cause: the basin is 78% walkable, and the generator's contract is that
+      every feature is REACHABLE — it flood-fills and carves corridors until
+      that holds. A path only matters when most ground is expensive to cross,
+      which is the opposite guarantee. Thickening ground near the path just
+      hands the repair pass more corridors to carve, and it carves them back
+      through the exact routes the path was meant to make costly.
+      So: not a placement bug and not a constant to tune. Obstacles, paths and
+      regions all want the traverse map, and this is now the third separate
+      finding pointing there. The path-carving experiment was reverted rather
+      than shipped — it re-rolls every basin (another SAVE_VERSION bump) for a
+      feature that does not do its job.
+
 - [ ] **22 proposals in the shared intake queue are still HELD**, oldest
       2026-08-01. Not mine — other projects and earlier sessions. Most are
       missing `- ID:`, `Tags`, `What` or `Why built`, i.e. the same
