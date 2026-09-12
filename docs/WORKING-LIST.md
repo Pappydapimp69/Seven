@@ -58,18 +58,30 @@ short on purpose.
       seven-0.22.0 (6d2bfb4); the default basin is byte-identical, so no
       SAVE_VERSION bump.
 
-- [ ] **Dense ground and a companion who wanders off want opposite maps.**
-      The successor fork, filed as a red tension. Density breaks the
-      lucid-dark drift assertion monotonically: a gone companion drifts 8
-      units from where they broke on 24 of 24 seeds with density off, 7 of 12
-      at one round, 5 of 12 at two, against a suite wanting 8. Deadfalls are
-      innocent — the same test passes with density off and deadfalls on, so it
-      is the fill.
-      Unanswered, and the more interesting half: whether the assertion is the
-      right SHAPE on dense ground. It measures euclidean units from the break
-      point, and a companion lost four cells away behind rock may read as MORE
-      unnerving, not less. Nobody has watched it. Do not tune the threshold to
-      make it pass — restate it in path distance, or watch a human play it.
+- [ ] **Two dense seeds where a gone companion never leaves, and nobody knows
+      why.** What is LEFT of the density/drift worry after the rest of it turned
+      out to be a broken test. The test teleported the companion to a computed
+      point without checking the ground; inside rock there is no start cell for
+      `findPath`, the path is emptied and never refilled, and the character
+      records 0.0u of drift for the whole episode. That fires at the rate a
+      random point lands in rock, so it rises with density and reads as a map
+      regression. Corrected: 9 of 12 seeds clear the departure on dense ground
+      against 11 on the open basin, bar 8. Density costs two seeds, not the
+      collapse it appeared to cause — the tension filed on the old numbers is
+      withdrawn.
+      The residual is real: on two dense seeds the companion is on OPEN ground,
+      holds ONE invented goal for the whole 70s episode, and travels under a
+      unit. Not penned in, not pathless — stuck on a goal it never revises.
+      `tests/hallucination.test.mjs` asserts 8 of 12 so this is visible rather
+      than tuned away. Diagnose before touching the bar.
+
+- [ ] **Density's default is now an open decision, not a settled one.** It was
+      made opt-in to protect the drift assertion, and that reason is gone.
+      Turning it on by default re-rolls every basin (a SAVE_VERSION bump and a
+      balance re-read), which is a real cost, and the survey basin is a
+      survey-and-return loop rather than the traverse density was built for.
+      So: still opt-in, but now by choice rather than by measurement. The
+      owner's call, not a test's.
 
 - [ ] **The shared intake queue holds held proposals, and the count moves.**
       This said 22 for a long time; on 2026-09-12 the queue was empty in the
