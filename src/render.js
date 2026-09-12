@@ -6,10 +6,10 @@
 // list as the real ones.
 
 import * as THREE from "../lib/three.module.js";
-import { CELL, cellToWorld, gridOf } from "./world.js?v=seven-0.20.0";
-import { nightFactor } from "./state.js?v=seven-0.20.0";
-import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=seven-0.20.0";
-import { PYLON_RADIUS } from "./state.js?v=seven-0.20.0";
+import { CELL, cellToWorld, gridOf } from "./world.js?v=seven-0.21.0";
+import { nightFactor } from "./state.js?v=seven-0.21.0";
+import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=seven-0.21.0";
+import { PYLON_RADIUS } from "./state.js?v=seven-0.21.0";
 
 const PALETTE = {
   sky: 0x0a0f16,
@@ -398,7 +398,7 @@ export function createRenderer(canvas, sim) {
   // ---- monoliths, pylons, figures: pooled and rebuilt from perception ------
   const monolithGeo = new THREE.BoxGeometry(1.5, 7.4, 1.1);
   const ringGeo = new THREE.TorusGeometry(PYLON_RADIUS, 0.09, 6, 40);
-  const pool = { monoliths: new Map(), pylons: new Map(), figures: new Map(), items: new Map(), trees: new Map(), stones: new Map(), sites: new Map(), fires: new Map() };
+  const pool = { monoliths: new Map(), pylons: new Map(), figures: new Map(), items: new Map(), trees: new Map(), stones: new Map(), sites: new Map(), fires: new Map(), falls: new Map() };
 
   function makeMonolith() {
     const g = new THREE.Group();
@@ -554,6 +554,21 @@ export function createRenderer(canvas, sim) {
   // Everything that says how healthy it is — how tall, how bright, how far the
   // light reaches — is driven off fuel below, because this game shows no meters
   // and the fire IS the readout.
+  // A deadfall: three trunks down across the ground, low enough to read as an
+  // obstacle rather than a wall and solid enough that you believe it stops you.
+  function makeFall() {
+    const g = new THREE.Group();
+    const mat = new THREE.MeshStandardMaterial({ color: 0x4a3a2a, roughness: 1, flatShading: true });
+    for (let i = 0; i < 3; i++) {
+      const log = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.5, CELL * 2.6, 5), mat);
+      log.rotation.z = Math.PI / 2;
+      log.position.set(0, 0.45 + i * 0.34, (i - 1) * 0.7);
+      log.rotation.y = (i - 1) * 0.18;
+      g.add(log);
+    }
+    return g;
+  }
+
   function makeFire() {
     const g = new THREE.Group();
     const ring = new THREE.Mesh(
@@ -821,6 +836,16 @@ export function createRenderer(canvas, sim) {
     // THE FIRE THIS EYE SEES — percept.shownFire, never sim.fire. A far-gone
     // mind is shown a whole fire where there is none, and it has to be drawn
     // exactly like a real one or the difference is the tell.
+    // Deadfalls still standing. Not lied about — a deadfall is geometry you walk
+    // into, and percept.js lies about what things ARE, never about whether the
+    // ground is solid.
+    const standing = (sim.deadfalls || []).filter((d) => !d.cleared);
+    syncPool(pool.falls, standing, makeFall);
+    for (const obj of pool.falls.values()) {
+      obj.position.y = terrainHeight(obj.position.x, obj.position.z);
+      const d = standing.find((x) => Math.abs(x.x - obj.position.x) < 0.01 && Math.abs(x.z - obj.position.z) < 0.01);
+      if (d) obj.rotation.y = d.horiz ? 0 : Math.PI / 2;
+    }
     const shownFire = percept.shownFire;
     syncPool(pool.fires, shownFire ? [{ id: "fire", x: shownFire.x, z: shownFire.z }] : [], makeFire);
     // GUARDED ON shownFire, not on the pool being non-empty. The fire a mind

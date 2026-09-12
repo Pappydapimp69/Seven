@@ -23,7 +23,7 @@
 // wrong length — the failure surfaces somewhere far away as a NaN position or
 // an invisible floor. The returned object is asserted field-for-field in tests.
 
-import { CELL, FEATURE, cellToWorld, floodFill, gridOf } from "./world.js?v=seven-0.20.0";
+import { CELL, FEATURE, cellToWorld, floodFill, gridOf } from "./world.js?v=seven-0.21.0";
 
 /**
  * The reserved seed that means "this is the camp, not a basin".
@@ -236,6 +236,10 @@ export function buildCamp() {
     // objective is the out-of-order pickup the pinning discipline exists to
     // prevent (brain: wrong-sky#E8 — objective-critical targets stay
     // existence-gated; only the pylons are effect-gated).
+    // The camp has no deadfalls — nothing blocks the walk in — but the field has
+    // to exist, because every consumer takes a world without asking where it
+    // came from and `tests/camp.mjs` pins the shape field for field.
+    deadfalls: [],
     monoliths: [],
     pylons,
     items: [],

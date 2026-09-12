@@ -35,6 +35,10 @@ echo "== tutorial (step pinning, starvation, meter leaks) =="
 node tests/tutorial.mjs
 echo
 
+echo "== deadfall (the obstacle the day is priced against) =="
+node tests/deadfall.mjs
+echo
+
 echo "== day/night (the cycle, and what the night costs) =="
 node tests/daynight.mjs
 echo

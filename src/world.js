@@ -24,7 +24,7 @@
 // reachability from scratch and is asserted in the test suite — the fixup is
 // verified, not trusted.
 
-import { makeRng } from "./rng.js?v=seven-0.20.0";
+import { makeRng } from "./rng.js?v=seven-0.21.0";
 
 export const CELL = 2.6; // world units per grid cell
 /**
@@ -51,6 +51,14 @@ export const ITEM_KINDS = Object.freeze(["flare", "tether", "lens", "husk"]);
 // ITEM, these carry no `itemKind` — a tree is always a tree, a deposit always
 // stone. There is no deception layer for these at all (see state.js/percept.js
 // comments): only carried/crafted ITEMS are ever subject to the lie.
+// DEADFALLS — the obstacle the day/night loop is priced against. A tangle of
+// fallen timber lying across a route: it BLOCKS, it takes real time to cut
+// through, and it pays in wood. The design note's rule is the load-bearing part
+// — "Nothing is walled off. Progress is gated by TIME" — so a deadfall is only
+// ever placed where the map stays fully connected WITHOUT clearing it. It is
+// always a shortcut, never a gate. Going round costs distance; cutting costs
+// daylight; you pay either way, and choosing which is the whole mechanic.
+export const DEADFALL_COUNT = 4;
 export const TREE_COUNT = 5;
 export const STONE_COUNT = 5;
 
@@ -61,6 +69,7 @@ export const FEATURE = Object.freeze({
   ITEM: "item",
   TREE: "tree",
   STONE: "stone",
+  DEADFALL: "deadfall",
 });
 
 // Survey markers get names, not numbers — a companion has to be able to say
@@ -382,11 +391,61 @@ export function generateWorld(seed = 1) {
     }
   }
 
+  // ---- DEADFALLS, placed LAST and never sealing anything --------------------
+  // After the repair pass, so nothing here can be undone by a later carve, and
+  // each one is accepted only if the whole map is still reachable with it in
+  // place. A deadfall that cuts the map in two would be a wall, and the design
+  // is explicit that nothing is walled off.
+  const deadfalls = [];
+  {
+    const reachAll = floodFill(blocked, camp.cx, camp.cz);
+    let open = 0;
+    for (let i = 0; i < blocked.length; i++) if (!blocked[i] && reachAll[i]) open++;
+    let guard2 = 0;
+    while (deadfalls.length < DEADFALL_COUNT && guard2++ < 4000) {
+      const cx = rng.int(4, GRID - 5);
+      const cz = rng.int(4, GRID - 5);
+      const horiz = rng.chance(0.5);
+      // A three-cell run, and every cell of it has to be open ground already.
+      const cells = [0, 1, 2].map((k) => (horiz ? { cx: cx + k, cz } : { cx, cz: cz + k }));
+      if (cells.some((c) => blocked[c.cz * GRID + c.cx])) continue;
+      if (Math.hypot(cx - camp.cx, cz - camp.cz) < 8) continue; // not on the doorstep
+      // NEVER ON TOP OF A FEATURE. The ring-clearing above runs before this, so
+      // a deadfall laid across a marker or a tree buries it: the cell reads as
+      // rock, the feature is unreachable, and the world validates as broken.
+      // Two cells of clearance, because a feature needs its own ring walkable.
+      if (features.some((f) => cells.some((c) => Math.abs(f.cx - c.cx) <= 2 && Math.abs(f.cz - c.cz) <= 2))) continue;
+      if (deadfalls.some((d) => Math.hypot(d.cx - cx, d.cz - cz) < 8)) continue;
+      // Lay it down, then ask the map whether it still holds together.
+      for (const c of cells) blocked[c.cz * GRID + c.cx] = 1;
+      const after = floodFill(blocked, camp.cx, camp.cz);
+      let stillOpen = 0;
+      for (let i = 0; i < blocked.length; i++) if (!blocked[i] && after[i]) stillOpen++;
+      // Every cell that was reachable before must still be reachable now, minus
+      // the three we just filled. Anything less means this one walls something
+      // off, so it does not get to exist.
+      if (stillOpen !== open - cells.length) {
+        for (const c of cells) blocked[c.cz * GRID + c.cx] = 0;
+        continue;
+      }
+      open = stillOpen;
+      deadfalls.push({
+        id: `df${deadfalls.length}`,
+        kind: FEATURE.DEADFALL,
+        cx, cz, horiz,
+        cells,
+        cleared: false,
+        ...cellToWorld(cx, cz, GRID),
+      });
+    }
+  }
+
   return {
     seed,
     grid: GRID,
     cell: CELL,
     blocked,
+    deadfalls,
     heightAt,
     camp: { id: "camp", kind: FEATURE.CAMP, cx: camp.cx, cz: camp.cz, ...cellToWorld(camp.cx, camp.cz, GRID) },
     monoliths,

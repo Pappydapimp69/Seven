@@ -17,9 +17,9 @@
 //     options (dbh#E4, wrong-sky#E2). And an ended run is never saved, so a
 //     "Resume" can't drop you back onto the frame you already lost.
 
-import { createRun } from "./state.js?v=seven-0.20.0";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.20.0";
-import { attachSites, serializeWoods, deserializeWoods } from "./woods.js?v=seven-0.20.0";
+import { createRun } from "./state.js?v=seven-0.21.0";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.21.0";
+import { attachSites, serializeWoods, deserializeWoods } from "./woods.js?v=seven-0.21.0";
 
 // SEVEN'S OWN KEYS, and this is not cosmetic. GitHub Pages serves every project
 // of one account from ONE origin — `pappydapimp69.github.io` — so /mirage/ and
@@ -52,6 +52,14 @@ export const SAVE_KEY = "seven:run";
 // so a v2 snapshot restored without it re-rolls on a different tick and the
 // resumed run silently forks — which is precisely how the divergence test
 // caught it.
+// v6: deadfalls. Clearing one opens cells in `world.blocked`, and a basin's
+// blocked grid is regenerated from the seed on every load — so which ones are
+// down travels in the payload, and deserialize re-opens their cells. Exactly
+// the planted-Stake problem: a thing the player CHANGED about a world that
+// nothing can rebuild. Also v6 because adding deadfall placement adds rng draws
+// to generateWorld, so every seed now makes a different basin and a v5 snapshot
+// would restore a position into rock.
+//
 // v5: the built fire, and wood that was never cut. `sim.fire` is a structure
 // the PLAYER added — it exists in no seed-generated world, so like a planted
 // Stake it has to travel in the payload or a resumed run wakes up beside cold
@@ -59,7 +67,7 @@ export const SAVE_KEY = "seven:run";
 // same reason `lostSince` does: dropped, it restores as undefined, and
 // `sim.wood + undefined` is NaN, which does not throw and does not fail a
 // round-trip — it just quietly shows the player a broken number.
-export const SAVE_VERSION = 5;
+export const SAVE_VERSION = 6;
 
 const store = () => (typeof localStorage === "undefined" ? null : localStorage);
 
@@ -290,6 +298,9 @@ export function serializeRun(sim) {
     // The built fire, whole. Same reason the pylons above are saved whole: it
     // exists in no seed-generated world, so nothing can rebuild it.
     fire: sim.fire ? { x: sim.fire.x, z: sim.fire.z, fuel: sim.fire.fuel, builtAt: sim.fire.builtAt ?? 0 } : null,
+    // Ids only. The cells come back from the regenerated world; what cannot be
+    // regenerated is the fact that somebody cut through them.
+    deadfallsCleared: (sim.deadfalls || []).filter((d) => d.cleared).map((d) => d.id),
     monoliths: packFlags(sim.monoliths, ["logged", "discovered", "foundBy"]),
     items: packFlags(sim.items, ["discovered", "taken"]),
     trees: packFlags(sim.trees, ["discovered", "chopped"]),
@@ -389,6 +400,17 @@ export function deserializeRun(data) {
   sim.gatherHold = { ...data.gatherHold };
   sim.time = data.time;
   sim.status = data.status;
+  // Re-open every deadfall the run had already cut. The world was rebuilt from
+  // the seed a moment ago, so all of them are standing again until this runs.
+  {
+    const downed = new Set(data.deadfallsCleared || []);
+    const grid = sim.world.grid;
+    for (const d of sim.deadfalls || []) {
+      if (!downed.has(d.id)) continue;
+      d.cleared = true;
+      for (const c of d.cells) sim.world.blocked[c.cz * grid + c.cx] = 0;
+    }
+  }
   sim.fire = data.fire
     ? { x: data.fire.x, z: data.fire.z, fuel: data.fire.fuel ?? 0, builtAt: data.fire.builtAt ?? 0 }
     : null;

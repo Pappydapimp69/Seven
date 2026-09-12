@@ -6,11 +6,11 @@
 // the one hallucinating. The only place a real number is ever printed is the
 // debrief, after the run is over.
 
-import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds, believedFireAt } from "./percept.js?v=seven-0.20.0";
-import { canWork, beatAt, holdFraction, PHASE } from "./woods.js?v=seven-0.20.0";
+import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds, believedFireAt } from "./percept.js?v=seven-0.21.0";
+import { canWork, beatAt, holdFraction, PHASE } from "./woods.js?v=seven-0.21.0";
 import { LOG_RADIUS, PYLON_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, gatherTarget, GATHER_HOLD_TIME, previewCraft, claimedEntryAt, pylonAt,
-  mossedAt, FIRE_FUEL_MAX, FIRE_COST, phaseOf,
-} from "./state.js?v=seven-0.20.0";
+  mossedAt, FIRE_FUEL_MAX, FIRE_COST, phaseOf, holdTimeFor,
+} from "./state.js?v=seven-0.21.0";
 
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 
@@ -367,9 +367,14 @@ export function createHud(sim, percept, opts = {}) {
       els.prompt.classList.add("show");
       els.fill.style.width = "0%";
     } else if (gatherable && sim.status === "playing") {
-      els.text.textContent = gatherable.gatherKind === "tree" ? "Hold to chop the tree" : "Hold to mine the stone";
+      els.text.textContent = gatherable.gatherKind === "tree" ? "Hold to chop the tree"
+        : gatherable.gatherKind === "stone" ? "Hold to mine the stone"
+        : "Hold to cut through the deadfall — this will take a while";
       els.prompt.classList.add("show");
-      const pct = hold && hold.targetId === gatherable.id ? (hold.progress / GATHER_HOLD_TIME) * 100 : 0;
+      // THE TARGET'S OWN TIME. Against the flat GATHER_HOLD_TIME a deadfall's
+      // bar filled in 1.2 seconds and then sat full for twenty more, which is a
+      // progress bar that lies about progress.
+      const pct = hold && hold.targetId === gatherable.id ? (hold.progress / holdTimeFor(gatherable)) * 100 : 0;
       els.fill.style.width = `${Math.min(100, Math.max(0, pct))}%`;
     } else if (near && sim.status === "playing") {
       els.text.textContent = `Survey ${near.name}`;

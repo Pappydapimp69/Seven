@@ -14,9 +14,9 @@
 // The sim's job is to keep an honest, testable record of what is TRUE; `percept.js`
 // is the only place allowed to lie about it.
 
-import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=seven-0.20.0";
-import { makeRng } from "./rng.js?v=seven-0.20.0";
-import { updateCompanions, companionRemark } from "./party.js?v=seven-0.20.0";
+import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=seven-0.21.0";
+import { makeRng } from "./rng.js?v=seven-0.21.0";
+import { updateCompanions, companionRemark } from "./party.js?v=seven-0.21.0";
 
 export const PARTY_SIZE = 6; // you + 5 companions — the spec's five NPCs, plus the player
 export const MAX_LUCIDITY = 100;
@@ -285,6 +285,13 @@ export const RESOURCE_SIGHT_RANGE = ITEM_SIGHT_RANGE; // same ground-clutter sig
 // real effort, short enough not to be a chore. Releasing early or switching
 // to a different tree/deposit resets progress to zero; see updateGatherHold.
 export const GATHER_HOLD_TIME = 1.2;
+// A DEADFALL IS THE SAME VERB AT A DIFFERENT PRICE. Not a new key, not a new
+// rung — you hold interact at it exactly as you hold it at a tree, and what
+// differs is that it takes most of a minute and it opens a route. That is the
+// design note's gating: "a fallen tree across the path needs cutting, cutting
+// takes hours, hours are daylight". The hold is the hours.
+export const DEADFALL_HOLD_TIME = 22;
+export const DEADFALL_WOOD = 5;
 // A bare-handed chop/mine yields a small random haul rather than a flat one —
 // a tree or deposit is worth reaching for on its own, not just as a Stake fee.
 export const GATHER_YIELD = Object.freeze({ min: 2, max: 3 });
@@ -602,6 +609,11 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
     // The built fire, or null. One per basin. NOT carried across basins: a fire
     // is a place you made, and you left it behind.
     fire: null,
+    // The basin's deadfalls, as the RUN's own copies — clearing one mutates
+    // world.blocked, and the world is regenerated from the seed on every load,
+    // so which ones are down has to travel in the save (see save.js) exactly
+    // like a planted Stake does.
+    deadfalls: (world.deadfalls || []).map((d) => ({ ...d, cells: d.cells.map((c) => ({ ...c })) })),
     // Monotonic slot-id counter. Ids used to be `slot{length}-{time}`, which
     // repeats the moment a use-then-pickup lands in the same 0.01s tick at the
     // same inventory length — and percept.itemLabels is keyed by slot id, so a
@@ -1815,6 +1827,40 @@ export function release(sim, slot) {
   return true;
 }
 
+/** How long the hold at this target takes. A deadfall is the expensive one. */
+export const holdTimeFor = (target) => (target && target.gatherKind === "deadfall" ? DEADFALL_HOLD_TIME : GATHER_HOLD_TIME);
+
+/** The uncleared deadfall in reach, if any. Blocked cells, so reach is generous. */
+export function deadfallAt(sim, actor = sim.player) {
+  if (!sim.deadfalls) return null;
+  return sim.deadfalls.find((d) => !d.cleared && dist2D(d, actor) <= GATHER_RADIUS + CELL) || null;
+}
+
+/**
+ * Cut a way through. Opens the cells for good, pays in wood, and costs the one
+ * thing the day is made of.
+ *
+ * Nothing is walled off: the generator only ever lays a deadfall where the map
+ * is still whole without it, so this is always a SHORTCUT being opened, never a
+ * gate being unlocked. Going round was available the whole time and cost
+ * distance instead.
+ */
+export function clearDeadfall(sim, actor = sim.player) {
+  const d = deadfallAt(sim, actor);
+  if (!d) return { ok: false, reason: "nothing-here" };
+  d.cleared = true;
+  const grid = sim.world.grid;
+  for (const c of d.cells) sim.world.blocked[c.cz * grid + c.cx] = 0;
+  // Same rule as a chopped tree: a hallucinating pair of hands brings nothing
+  // back, and the count they SEE moves anyway. The route opens either way — the
+  // timber is real whether or not the mind cutting it is.
+  if (actor.hallucinating) actor.phantomWood = (actor.phantomWood || 0) + DEADFALL_WOOD;
+  else sim.wood += DEADFALL_WOOD;
+  emit(sim, "gather", `The deadfall gives. The way through is open. (+${DEADFALL_WOOD})`,
+    { resource: "wood", amount: DEADFALL_WOOD, x: d.x, z: d.z });
+  return { ok: true, resource: "wood", amount: DEADFALL_WOOD };
+}
+
 export function gatherTarget(sim, actor = sim.player) {
   const nearTree = sim.trees
     .filter((t) => !t.chopped && t.discovered && dist2D(t, actor) <= GATHER_RADIUS)
@@ -1822,9 +1868,17 @@ export function gatherTarget(sim, actor = sim.player) {
   const nearStone = sim.stones
     .filter((s) => !s.mined && s.discovered && dist2D(s, actor) <= GATHER_RADIUS)
     .sort((a, b) => dist2D(a, actor) - dist2D(b, actor))[0];
-  const pick = [nearTree, nearStone].filter(Boolean).sort((a, b) => dist2D(a, actor) - dist2D(b, actor))[0];
+  // A deadfall is in the same list and competes on distance, like everything
+  // else. It does NOT outrank a tree standing next to it: a deadfall is a
+  // 22-second commitment, and silently preferring it over a 1.2-second chop
+  // because it happened to be a metre closer would be the resolver eating a
+  // cheap verb with an expensive one.
+  const nearFall = deadfallAt(sim, actor);
+  const pick = [nearTree, nearStone, nearFall].filter(Boolean)
+    .sort((a, b) => dist2D(a, actor) - dist2D(b, actor))[0];
   if (!pick) return null;
-  return { ...pick, gatherKind: pick === nearTree ? "tree" : "stone" };
+  const gatherKind = pick === nearTree ? "tree" : pick === nearStone ? "stone" : "deadfall";
+  return { ...pick, gatherKind };
 }
 
 export function gatherResource(sim, actor = sim.player) {
@@ -1881,8 +1935,9 @@ function updateGatherHold(sim, dt, interacting, actor = sim.player, hold = sim.g
     hold.progress = 0;
   }
   hold.progress += dt;
-  if (hold.progress >= GATHER_HOLD_TIME) {
-    gatherResource(sim, actor);
+  if (hold.progress >= holdTimeFor(target)) {
+    if (target.gatherKind === "deadfall") clearDeadfall(sim, actor);
+    else gatherResource(sim, actor);
     hold.targetId = null;
     hold.progress = 0;
   }
