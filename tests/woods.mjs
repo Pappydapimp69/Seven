@@ -18,6 +18,9 @@ import { buildCamp } from "../src/camp.js";
 import { createRun } from "../src/state.js";
 import { GRID, CELL, floodFill } from "../src/world.js";
 import { makeRng } from "../src/rng.js";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import { readFileSync } from "fs";
 
 let passed = 0;
@@ -79,6 +82,41 @@ check("the four places are far enough apart to be told apart", () => {
       assert(d > SITE_RADIUS * 4, `${SITES[a].id} and ${SITES[b].id} are only ${d.toFixed(1)}m apart`);
     }
   }
+});
+
+check("every place is drawn as a DIFFERENT place, not a fourth identical cairn", () => {
+  // The spacing check above is half the contract and was shipping as the whole
+  // of it. Standing far apart only helps if the places look like anything when
+  // you get there: `chronicle.js` perturbs `place` as one of six falsification
+  // kinds, so a false account swaps the creek for the ridge, and the player
+  // catches that only if those were different things to have stood at. Four
+  // copies of one cairn made a sixth of the lie unreadable — the same failure
+  // as a tell pitched below one display increment.
+  //
+  // Read as TEXT because render.js needs a DOM and this tier has none. That is
+  // a weaker check than looking at the scene, so the browser tier walks the
+  // real groups and asserts they differ; this one holds the contract that
+  // every site HAS a form, which is the part that breaks silently when a site
+  // is added.
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const src = fs.readFileSync(path.join(here, "../src/render.js"), "utf8");
+  const start = src.indexOf("const SITE_BODIES = {");
+  assert(start > 0, "render.js has no SITE_BODIES — the sites are being drawn generically again");
+  // Keys at the object's own indent level; a nested `foo() {` is deeper.
+  const block = src.slice(start, src.indexOf("\n  };", start));
+  const forms = new Set([...block.matchAll(/^    (\w+)\(\) \{/gm)].map((m) => m[1]));
+  for (const s of SITES) {
+    assert(forms.has(s.id), `site "${s.id}" has no body in SITE_BODIES — it will fall back to the generic cairn`);
+  }
+  eq(forms.size, SITES.length, `SITE_BODIES has ${forms.size} forms for ${SITES.length} sites`);
+});
+
+check("every site label is its own word", () => {
+  // The label is what a claim says out loud ("went down to the {place}"), so
+  // two sites sharing one makes the perturbation a no-op: the false account
+  // reads identically to the true one and the player is asked to catch nothing.
+  const labels = SITES.map((s) => s.label);
+  eq(new Set(labels).size, labels.length, `two sites share a label: ${labels.join(", ")}`);
 });
 
 check("every beat names a site that exists", () => {

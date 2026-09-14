@@ -6,10 +6,10 @@
 // list as the real ones.
 
 import * as THREE from "../lib/three.module.js";
-import { CELL, cellToWorld, gridOf } from "./world.js?v=seven-0.22.0";
-import { nightFactor } from "./state.js?v=seven-0.22.0";
-import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=seven-0.22.0";
-import { PYLON_RADIUS } from "./state.js?v=seven-0.22.0";
+import { CELL, cellToWorld, gridOf } from "./world.js?v=seven-0.23.0";
+import { nightFactor } from "./state.js?v=seven-0.23.0";
+import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=seven-0.23.0";
+import { PYLON_RADIUS } from "./state.js?v=seven-0.23.0";
 
 const PALETTE = {
   sky: 0x0a0f16,
@@ -541,19 +541,6 @@ export function createRenderer(canvas, sim) {
     trainerMark.userData.lamp.scale.setScalar(1 + Math.sin(t * 1.7) * 0.12);
   }
 
-  /**
-   * A worksite: a cairn with a pole in it. Camp only, and only in THE WOODS.
-   *
-   * It is a PLACE MARKER, not a prompt — it stands there all day whether or
-   * not the current beat happens here, because the player has to be able to
-   * learn where the creek is before they are sent to it. The ACTIVE one is lit;
-   * the rest are unlit stone. That difference is the only thing the renderer
-   * says about the day, and it says it in the world rather than on the HUD.
-   */
-  // A fire: a low cone of flame over a ring of stones, plus the light it throws.
-  // Everything that says how healthy it is — how tall, how bright, how far the
-  // light reaches — is driven off fuel below, because this game shows no meters
-  // and the fire IS the readout.
   // A deadfall: three trunks down across the ground, low enough to read as an
   // obstacle rather than a wall and solid enough that you believe it stops you.
   function makeFall() {
@@ -569,6 +556,10 @@ export function createRenderer(canvas, sim) {
     return g;
   }
 
+  // A fire: a low cone of flame over a ring of stones, plus the light it throws.
+  // Everything that says how healthy it is — how tall, how bright, how far the
+  // light reaches — is driven off fuel below, because this game shows no meters
+  // and the fire IS the readout.
   function makeFire() {
     const g = new THREE.Group();
     const ring = new THREE.Mesh(
@@ -591,14 +582,112 @@ export function createRenderer(canvas, sim) {
     return g;
   }
 
-  function makeSite() {
+  // The four site BODIES. Each says what the place is, because the chronicle
+  // lets a false account swap one fact's place for another real one ("went down
+  // to the ridge for water" when it was the creek) and the player can only
+  // catch that if the ridge and the creek are different things to have stood
+  // at. Four identical cairns made `place` — one of six perturbation kinds —
+  // unreadable, which is the same failure as a tell pitched below one display
+  // increment: the mechanism fires correctly into something nobody can see.
+  //
+  // These are BODIES ONLY. The pole and lamp above them are the active-beat
+  // indicator and are built once for every site, because that pair is the
+  // renderer's single statement about which beat is live and it must not start
+  // doubling as identity.
+  const SITE_BODIES = {
+    // A sunken run of water with stones along the bank.
+    creek() {
+      const g = new THREE.Group();
+      const water = new THREE.Mesh(
+        new THREE.BoxGeometry(CELL * 2.4, 0.12, CELL * 0.9),
+        new THREE.MeshStandardMaterial({ color: 0x3d5a6b, roughness: 0.25, metalness: 0.1, flatShading: true }),
+      );
+      water.position.y = 0.06;
+      water.rotation.y = 0.32;
+      g.add(water);
+      const stone = new THREE.MeshStandardMaterial({ color: 0x77726a, roughness: 0.95, flatShading: true });
+      for (let i = 0; i < 6; i++) {
+        const r = 0.16 + (i % 3) * 0.07;
+        const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(r, 0), stone);
+        const along = (i - 2.5) * 0.78;
+        rock.position.set(along * Math.cos(0.32), r * 0.6, along * Math.sin(0.32) + (i % 2 ? 0.85 : -0.85));
+        g.add(rock);
+      }
+      return g;
+    },
+    // Raised ground: a low outcrop you stand ON rather than beside.
+    ridge() {
+      const g = new THREE.Group();
+      const mat = new THREE.MeshStandardMaterial({ color: 0x6a6357, roughness: 1, flatShading: true });
+      for (let i = 0; i < 3; i++) {
+        const slab = new THREE.Mesh(new THREE.CylinderGeometry(1.5 - i * 0.38, 1.75 - i * 0.38, 0.42, 6), mat);
+        slab.position.y = 0.21 + i * 0.38;
+        slab.rotation.y = i * 0.5;
+        g.add(slab);
+      }
+      return g;
+    },
+    // Downed timber, in the same vocabulary as a basin deadfall so the two read
+    // as the same KIND of thing in two places.
+    deadfall() {
+      const g = new THREE.Group();
+      const mat = new THREE.MeshStandardMaterial({ color: 0x4a3a2a, roughness: 1, flatShading: true });
+      for (let i = 0; i < 3; i++) {
+        const log = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.4, CELL * 2.1, 5), mat);
+        log.rotation.z = Math.PI / 2;
+        log.position.set(0, 0.38 + i * 0.3, (i - 1) * 0.62);
+        log.rotation.y = (i - 1) * 0.22;
+        g.add(log);
+      }
+      return g;
+    },
+    // The camp's own hearth: a ring of stones, unlit. The BURNING fire is a
+    // separate object the player builds (makeFire); this is the place it goes.
+    fire() {
+      const g = new THREE.Group();
+      const mat = new THREE.MeshStandardMaterial({ color: 0x6b6660, roughness: 1, flatShading: true });
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.2, 0), mat);
+        rock.position.set(Math.cos(a) * 0.8, 0.14, Math.sin(a) * 0.8);
+        g.add(rock);
+      }
+      const ash = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.55, 0.55, 0.06, 8),
+        new THREE.MeshStandardMaterial({ color: 0x2e2a26, roughness: 1 }),
+      );
+      ash.position.y = 0.03;
+      g.add(ash);
+      return g;
+    },
+  };
+
+  /**
+   * A worksite: a body that says WHICH place, under a pole and lamp that say
+   * whether the current beat is here.
+   *
+   * It is a PLACE MARKER, not a prompt — it stands there all day whether or
+   * not the current beat happens here, because the player has to be able to
+   * learn where the creek is before they are sent to it. The ACTIVE one is lit;
+   * the rest are unlit stone. That difference is the only thing the renderer
+   * says about the day, and it says it in the world rather than on the HUD.
+   */
+  function makeSite(site) {
     const g = new THREE.Group();
-    const cairn = new THREE.Mesh(
-      new THREE.ConeGeometry(0.62, 0.9, 5),
-      new THREE.MeshStandardMaterial({ color: 0x6d6a63, roughness: 0.95, flatShading: true }),
-    );
-    cairn.position.y = 0.45;
-    g.add(cairn);
+    // An unknown id gets the old cairn rather than nothing — a site that fails
+    // to draw is worse than one that draws generically, and tests/woods.mjs
+    // asserts every real id has a body so this branch stays unreachable there.
+    const body = SITE_BODIES[site && site.id];
+    if (body) {
+      g.add(body());
+    } else {
+      const cairn = new THREE.Mesh(
+        new THREE.ConeGeometry(0.62, 0.9, 5),
+        new THREE.MeshStandardMaterial({ color: 0x6d6a63, roughness: 0.95, flatShading: true }),
+      );
+      cairn.position.y = 0.45;
+      g.add(cairn);
+    }
     const pole = new THREE.Mesh(
       new THREE.CylinderGeometry(0.05, 0.06, 2.1, 5),
       new THREE.MeshStandardMaterial({ color: 0x3a3128, roughness: 0.9 }),

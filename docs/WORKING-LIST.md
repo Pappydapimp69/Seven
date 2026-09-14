@@ -83,6 +83,22 @@ short on purpose.
       So: still opt-in, but now by choice rather than by measurement. The
       owner's call, not a test's.
 
+- [ ] **`tests/triggers.mjs` measures recall against the phrasings the triggers
+      were written for, so 14/14 is optimistic.** The matcher is whole-phrase
+      substring in both directions (`q.includes(w) || w.includes(q)`), which
+      means a trigger fires only on wording that contains one of its keys
+      verbatim. Found while adding the 0.23.0 place-distinguishability trigger:
+      the first draft used whole phrases and fired on NONE of the natural ways
+      to describe the work that had just produced it. Shortening the keys fixed
+      that one, but the back-test could not have caught it — it feeds each
+      trigger a phrasing derived from the trigger.
+      Spot check: `changing the fov default` fires nothing, though the very
+      first trigger is about changing a default and cites the FOV incident by
+      name. So the index's real recall on unseen wording is unmeasured and
+      lower than the number printed.
+      Worth doing: score recall against phrasings written WITHOUT looking at the
+      trigger, or loosen the matcher to token overlap and re-measure precision.
+
 - [ ] **The shared intake queue holds held proposals, and the count moves.**
       This said 22 for a long time; on 2026-09-12 the queue was empty in the
       morning and held 5 by the evening, all from other sessions. So the number

@@ -76,6 +76,13 @@ from nothing, not from another cairn. Pin them to real objects (a creek, felled
 timber, raised ground) and the coordinates stop being authored at all. Needs:
 the objects to exist, and a rule for a world that has no valid spot for one.
 
+> HALF BUILT, 0.23.0 — see `docs/blueprint-0.23-four-places-that-look-like-places.md`.
+> Each site now draws as the thing it is named after, so `place` (one of six
+> chronicle perturbation kinds) is readable at last. The COORDINATES are still
+> authored, deliberately: the camp is the one authored map, so hand-typed cells
+> are correct there. Pinning to procedurally-placed objects is a TRAVERSE
+> problem and is what is left of this item.
+
 **Landmarks and regions are different things, and the traverse wants both.** A
 landmark is a POINT you stand at — answers "where am I going", and is what makes
 a wrong-place claim catchable. A region is an EXTENT you are inside — answers
