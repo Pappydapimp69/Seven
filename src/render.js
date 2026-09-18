@@ -6,10 +6,10 @@
 // list as the real ones.
 
 import * as THREE from "../lib/three.module.js";
-import { CELL, cellToWorld, gridOf } from "./world.js?v=seven-0.23.0";
-import { nightFactor } from "./state.js?v=seven-0.23.0";
-import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=seven-0.23.0";
-import { PYLON_RADIUS } from "./state.js?v=seven-0.23.0";
+import { CELL, cellToWorld, gridOf } from "./world.js?v=seven-0.24.0";
+import { nightFactor } from "./state.js?v=seven-0.24.0";
+import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=seven-0.24.0";
+import { PYLON_RADIUS } from "./state.js?v=seven-0.24.0";
 
 const PALETTE = {
   sky: 0x0a0f16,
@@ -17,7 +17,18 @@ const PALETTE = {
   fogLost: 0x2a1d2b, // the basin goes wrong-coloured when the lead does
   ground: 0x333c4b,
   groundHi: 0x475364,
-  rock: 0x1b212b,
+  // Lifted from 0x1b212b, which was the real reason the basin looked flat. At
+  // that value a spire returns almost nothing to any light in the scene, so
+  // facets, rim and fog all landed inside one or two sRGB steps and a stand of
+  // them rendered as a single cutout. This is still dark and still cold — it is
+  // the same hue — but it is far enough off the floor to HAVE a lit side.
+  rock: 0x39424f,
+  // Two more, for per-instance variation across the spire field. One mass in
+  // one colour reads as a repeated stamp however many instances it has; the
+  // shading below picks a point on this range from each cell's own hash, so it
+  // is deterministic and costs no rng.
+  rockCool: 0x2e3a4a,
+  rockWarm: 0x474337,
   monolith: 0x59657a,
   monolithLogged: 0x7fd6c0,
   pylon: 0x2a3550,
@@ -88,6 +99,20 @@ export function createRenderer(canvas, sim) {
   const grid = gridOf(sim.world);
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  // NO TONE CURVE, and this was tried the other way first.
+  //
+  // ACES was the obvious reach for a scene that lives in the bottom eighth of
+  // the range — it is what everything else uses. It made this one WORSE, and
+  // the reason is worth keeping: a filmic curve's toe DARKENS shadows on its
+  // way to compressing highlights, and a basin at dusk is nothing but shadow.
+  // There were no highlights to buy the trade with, so it spent contrast the
+  // scene could not spare and the spires went from dark cones to solid cutouts.
+  // Screenshots either side, same seed and same camera, settled it.
+  //
+  // The plain sRGB transfer function already lifts darks harder than ACES does
+  // here. The range this scene was missing is not in the curve — it is in the
+  // content, which was authored near-black. That is fixed below, in the rock.
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(PALETTE.sky);
@@ -132,14 +157,85 @@ export function createRenderer(canvas, sim) {
   const sun = new THREE.DirectionalLight(isCamp ? 0xfff0d8 : 0xbfd0e6, isCamp ? 1.15 : 0.55);
   sun.position.set(-40, 60, 30);
   scene.add(sun);
+  // A RIM, opposite the sun and low. The basin's problem was never brightness —
+  // it was that a dark cone in front of dark fog has no edge, so a stand of
+  // spires reads as one flat mass however many of them there are. A cool light
+  // from behind catches the far side of each silhouette and puts a line between
+  // them. Deliberately weak: this is separation, not illumination, and pushing
+  // it turns an oppressive basin into a lit set.
+  const rim = new THREE.DirectionalLight(isCamp ? 0xbcd2e8 : 0x6f86a8, isCamp ? 0.35 : 0.55);
+  rim.position.set(46, 22, -38);
+  scene.add(rim);
   // A single carried lamp — cheaper than one light per companion, and it makes
   // the party's own pool of light the thing you navigate by.
   const lamp = new THREE.PointLight(0xffdcb0, 1.9, 44, 1.5);
   // NIGHTFALL, held as the values the scene was BUILT with rather than as a
   // second copy of them. The camp and the woods run no cycle (nightFactor knows
   // that), so this is inert there without the renderer needing to ask.
-  const dayLit = { sky: sky.intensity, sun: sun.intensity, fog: scene.fog.density, lamp: lamp.intensity };
+  const dayLit = { sky: sky.intensity, sun: sun.intensity, rim: rim.intensity, fog: scene.fog.density, lamp: lamp.intensity };
   rig.add(lamp);
+
+  // ---- the sky, as a gradient rather than a colour --------------------------
+  //
+  // `scene.background` was a flat Color, and the update loop then overwrote it
+  // with black on every frame — so PALETTE.sky was dead the moment the first
+  // frame ran, and the basin's whole upper half was one value. A single value
+  // above the treeline reads as a wall, and it wastes the one place in the
+  // frame where depth is free: the horizon.
+  //
+  // A closed sphere on the inside, with a vertical two-stop gradient. It is one
+  // extra draw call, no texture, and the colours are uniforms so nightfall
+  // drives them instead of a second copy of the palette.
+  const SKY = isCamp
+    ? { low: new THREE.Color(0xa8bccb), high: new THREE.Color(0x5f7f9e) }
+    : { low: new THREE.Color(0x2a3646), high: new THREE.Color(0x070b12) };
+  const skyMat = new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    depthWrite: false,
+    fog: false,
+    uniforms: {
+      low: { value: SKY.low.clone() },
+      high: { value: SKY.high.clone() },
+      // Where the gradient's midpoint sits, as a height above the eye. Small,
+      // because the interesting band is just above the treeline.
+      spread: { value: 120.0 },
+    },
+    vertexShader: `
+      varying vec3 vWorld;
+      void main() {
+        vWorld = (modelMatrix * vec4(position, 1.0)).xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 low;
+      uniform vec3 high;
+      uniform float spread;
+      varying vec3 vWorld;
+      void main() {
+        // smoothstep rather than a linear mix: a straight ramp puts a visible
+        // mach band across the sky at this value range, and the eye finds it
+        // immediately on a flat-shaded scene with no texture anywhere else.
+        float t = smoothstep(-0.12, 1.0, vWorld.y / spread);
+        gl_FragColor = vec4(mix(low, high, t), 1.0);
+      }
+    `,
+  });
+  // 380, not 420. The camera's far plane IS 420, so a dome of that radius sits
+  // exactly on it — the horizon band lands in the worst depth precision the
+  // buffer has, and whether it survives the depth test is down to rounding.
+  // It happened to draw during this work, which is the kind of "working" that
+  // stops working on someone else's GPU.
+  const skyDome = new THREE.Mesh(new THREE.SphereGeometry(380, 24, 16), skyMat);
+  // Follows the eye, so the horizon never slides away from the player. Render
+  // first and without depth so everything else draws over it.
+  skyDome.renderOrder = -1;
+  skyDome.frustumCulled = false;
+  scene.add(skyDome);
+  // The clear colour still shows for one frame before the dome draws, and on
+  // any pixel the dome somehow misses, so it matches the horizon rather than
+  // being black.
+  scene.background = SKY.low.clone();
 
   // ---- terrain -------------------------------------------------------------
   const span = grid * CELL;
@@ -158,16 +254,31 @@ export function createRenderer(canvas, sim) {
       const h = sim.world.heightAt(x / CELL + grid / 2, z / CELL + grid / 2);
       pos.setY(i, h);
       c.copy(lo).lerp(hi, Math.min(1, Math.max(0, (h + 2) / 7)));
-      colors[i * 3] = c.r;
-      colors[i * 3 + 1] = c.g;
-      colors[i * 3 + 2] = c.b;
+      // A TONAL SCATTER, deterministic from the vertex's own cell. Height alone
+      // is a smooth field, so lerping colour along it produced a smooth wash —
+      // the basin floor read as a sheet of plastic with a gradient on it, which
+      // is the one surface in frame the eye has nothing else to hold onto. This
+      // is small enough not to look like noise and large enough to give the
+      // ground a grain. Hashed, not random: the same seed draws the same floor.
+      const gx = Math.round(x / CELL + grid / 2);
+      const gz = Math.round(z / CELL + grid / 2);
+      const j = ((gx * 73856093) ^ (gz * 19349663)) >>> 0;
+      const shade = 0.88 + ((j % 100) / 100) * 0.24;
+      colors[i * 3] = c.r * shade;
+      colors[i * 3 + 1] = c.g * shade;
+      colors[i * 3 + 2] = c.b * shade;
     }
     groundGeo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
     groundGeo.computeVertexNormals();
   }
   const ground = new THREE.Mesh(
     groundGeo,
-    new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 }),
+    // FLAT SHADING, like everything else in the scene. Smooth normals over a
+    // gentle heightfield give every triangle almost the same response, so the
+    // floor lit as one tone no matter how much relief the terrain actually had
+    // — and it was the only smooth-shaded surface among flat-shaded spires,
+    // trees and stones, which is why it read as a different material entirely.
+    new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, flatShading: true }),
   );
   scene.add(ground);
 
@@ -304,11 +415,19 @@ export function createRenderer(canvas, sim) {
     for (let cz = 0; cz < grid; cz++) for (let cx = 0; cx < grid; cx++) if (isSpire(cx, cz)) count++;
     const rocks = new THREE.InstancedMesh(
       new THREE.ConeGeometry(CELL * 0.72, 1, 6),
-      new THREE.MeshStandardMaterial({ color: PALETTE.rock, roughness: 1, flatShading: true }),
+      // roughness just off 1: a perfectly rough surface has no directional
+      // response at all, so the rim light had nothing to catch and the facets
+      // stayed equal. 0.92 is still matte rock and it lets an edge exist.
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92, flatShading: true }),
       count,
     );
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    const tint = new THREE.Color();
+    const rockCool = new THREE.Color(PALETTE.rockCool);
+    const rockWarm = new THREE.Color(PALETTE.rockWarm);
+    const rockBase = new THREE.Color(PALETTE.rock);
     let n = 0;
     for (let cz = 0; cz < grid; cz++) {
       for (let cx = 0; cx < grid; cx++) {
@@ -319,16 +438,34 @@ export function createRenderer(canvas, sim) {
         const j = ((cx * 73856093) ^ (cz * 19349663)) >>> 0;
         const h = 3.4 + ((j % 100) / 100) * 5.2;
         const yaw = ((j >>> 7) % 360) * (Math.PI / 180);
-        q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+        // A FEW DEGREES OFF VERTICAL, and a width that is not 1:1. Every spire
+        // being a perfectly upright cone of the same footprint is what made a
+        // field of them read as a repeating tile rather than as terrain — the
+        // eye locks onto the shared axis immediately. All of it comes off the
+        // same cell hash, so it is stable across reloads of a seed and adds no
+        // rng draw to a sim that counts them.
+        const tiltX = (((j >>> 11) % 100) / 100 - 0.5) * 0.14;
+        const tiltZ = (((j >>> 17) % 100) / 100 - 0.5) * 0.14;
+        const wide = 0.82 + ((j >>> 23) % 100) / 100 * 0.42;
+        e.set(tiltX, yaw, tiltZ);
+        q.setFromEuler(e);
         m.compose(
           new THREE.Vector3(x, terrainHeight(x, z) + h / 2 - 0.4, z),
           q,
-          new THREE.Vector3(1, h, 1),
+          new THREE.Vector3(wide, h, wide * (0.9 + ((j >>> 5) % 100) / 100 * 0.2)),
         );
-        rocks.setMatrixAt(n++, m);
+        rocks.setMatrixAt(n, m);
+        // Taller spires trend cooler, shorter ones warmer — it is the cheapest
+        // cue that the field has near and far in it, and it survives fog, which
+        // a hue-only scatter does not.
+        const t = (h - 3.4) / 5.2;
+        tint.copy(rockBase).lerp(t > 0.5 ? rockCool : rockWarm, Math.abs(t - 0.5) * 0.9);
+        rocks.setColorAt(n, tint);
+        n++;
       }
     }
     rocks.instanceMatrix.needsUpdate = true;
+    if (rocks.instanceColor) rocks.instanceColor.needsUpdate = true;
     scene.add(rocks);
   }
 
@@ -342,7 +479,12 @@ export function createRenderer(canvas, sim) {
     const MAX = 620;
     const stones = new THREE.InstancedMesh(
       new THREE.IcosahedronGeometry(0.34, 0),
-      new THREE.MeshStandardMaterial({ color: 0x39424f, roughness: 1, flatShading: true }),
+      // Lighter than the floor it sits on, and lighter than it used to be. This
+      // was 0x39424f, chosen against a near-black rock — and the spire lift
+      // above moved PALETTE.rock to exactly that value, so the litter would
+      // have become the same colour as the thing it exists to contrast with.
+      // A ground stone's whole job is to pass the camera and be SEEN passing.
+      new THREE.MeshStandardMaterial({ color: 0x5a6472, roughness: 1, flatShading: true }),
       MAX,
     );
     const m = new THREE.Matrix4();
@@ -810,10 +952,20 @@ export function createRenderer(canvas, sim) {
     const night = nightFactor(sim);
     sky.intensity = dayLit.sky * (1 - 0.72 * night);
     sun.intensity = dayLit.sun * (1 - 0.85 * night);
+    // The rim falls FURTHER than the sun at night. It is a sky light, and the
+    // point of the dark is that shape stops being free — what separates two
+    // silhouettes after dusk should be the lamp you are carrying.
+    rim.intensity = dayLit.rim * (1 - 0.93 * night);
     scene.fog.density = dayLit.fog * (1 + 0.9 * night);
     lamp.intensity = dayLit.lamp * (1 + 0.55 * night);
+    // The sky darkens toward the horizon colour's own shadow rather than to
+    // black: a night sky that is pure black has no horizon, and losing the
+    // horizon is what made the old nights read as a void instead of a place.
+    skyMat.uniforms.low.value.copy(SKY.low).multiplyScalar(1 - 0.82 * night);
+    skyMat.uniforms.high.value.copy(SKY.high).multiplyScalar(1 - 0.6 * night);
+    skyDome.position.set(eye.x, 0, eye.z);
     if (scene.background && scene.background.isColor) {
-      scene.background.setHex(isCamp ? 0x8fa2b4 : 0x000000).multiplyScalar(1 - 0.8 * night);
+      scene.background.copy(skyMat.uniforms.low.value);
     }
     const dis = distortion(percept, sim);
 
