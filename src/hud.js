@@ -6,11 +6,11 @@
 // the one hallucinating. The only place a real number is ever printed is the
 // debrief, after the run is over.
 
-import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds } from "./percept.js?v=seven-0.18.0";
-import { canWork, beatAt, holdFraction, PHASE } from "./woods.js?v=seven-0.18.0";
+import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds, believedFireAt } from "./percept.js?v=seven-0.24.0";
+import { canWork, beatAt, holdFraction, PHASE } from "./woods.js?v=seven-0.24.0";
 import { LOG_RADIUS, PYLON_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, gatherTarget, GATHER_HOLD_TIME, previewCraft, claimedEntryAt, pylonAt,
-  mossedAt,
-} from "./state.js?v=seven-0.18.0";
+  mossedAt, FIRE_FUEL_MAX, FIRE_COST, phaseOf, holdTimeFor,
+} from "./state.js?v=seven-0.24.0";
 
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 
@@ -43,6 +43,7 @@ export function createHud(sim, percept, opts = {}) {
     doses: document.getElementById("doseCount"),
     compass: document.getElementById("compass"),
     clock: document.getElementById("clock"),
+    dayLabel: document.getElementById("dayLabel"),
     subtitles: document.getElementById("subtitles"),
     prompt: document.getElementById("actionPrompt"),
     vignette: document.getElementById("vignette"),
@@ -341,6 +342,7 @@ export function createHud(sim, percept, opts = {}) {
       return;
     }
     const pylon = pylonAt(sim, actor) || believedPylonAt(viewer, sim, actor);
+    const fire = believedFireAt(viewer, sim, actor);
     if (pylon && sim.status === "playing") {
       const together = sim.party.filter(
         (c) => Math.hypot(c.x - pylon.x, c.z - pylon.z) <= PYLON_RADIUS,
@@ -350,14 +352,29 @@ export function createHud(sim, percept, opts = {}) {
         : `Set hands on the pylon — ${together} of you in range, one use only`;
       els.prompt.classList.add("show");
       els.fill.style.width = "0%";
+    } else if (fire && sim.status === "playing") {
+      // Under the pylon rung and above everything else you can be standing on.
+      // A pylon is one-use and permanently losable, so it still outranks this;
+      // a fire is losable too — walk away and it goes out — which puts it above
+      // an item lying on the ground that will still be there later.
+      // BELIEVED, so the prompt reads identically over a fire that is not
+      // there. What differs is that feeding it buys nothing.
+      els.text.textContent = fire.fuel > FIRE_FUEL_MAX * 0.35 ? "Feed the fire" : "The fire is low — feed it";
+      els.prompt.classList.add("show");
+      els.fill.style.width = "0%";
     } else if (pickup && sim.status === "playing") {
       els.text.textContent = `Pick up ${ITEM_INFO[pickup.shownKind].label}`;
       els.prompt.classList.add("show");
       els.fill.style.width = "0%";
     } else if (gatherable && sim.status === "playing") {
-      els.text.textContent = gatherable.gatherKind === "tree" ? "Hold to chop the tree" : "Hold to mine the stone";
+      els.text.textContent = gatherable.gatherKind === "tree" ? "Hold to chop the tree"
+        : gatherable.gatherKind === "stone" ? "Hold to mine the stone"
+        : "Hold to cut through the deadfall — this will take a while";
       els.prompt.classList.add("show");
-      const pct = hold && hold.targetId === gatherable.id ? (hold.progress / GATHER_HOLD_TIME) * 100 : 0;
+      // THE TARGET'S OWN TIME. Against the flat GATHER_HOLD_TIME a deadfall's
+      // bar filled in 1.2 seconds and then sat full for twenty more, which is a
+      // progress bar that lies about progress.
+      const pct = hold && hold.targetId === gatherable.id ? (hold.progress / holdTimeFor(gatherable)) * 100 : 0;
       els.fill.style.width = `${Math.min(100, Math.max(0, pct))}%`;
     } else if (near && sim.status === "playing") {
       els.text.textContent = `Survey ${near.name}`;
@@ -373,6 +390,14 @@ export function createHud(sim, percept, opts = {}) {
       // sees this same offer, presses it, and nothing happens — which is what
       // being unreliable is supposed to feel like from the inside.
       els.text.textContent = `Nothing here — strike ${strikeable.name} from the record`;
+      els.prompt.classList.add("show");
+      els.fill.style.width = "0%";
+    } else if (!sim.fire && (percept.shownWood ?? sim.wood) >= FIRE_COST.wood && sim.status === "playing") {
+      // The bottom rung, matching main.js's interact chain. Offered off the
+      // SHOWN count, so a mind that believes it has wood is offered the fire —
+      // and finds out it has not by the refusal, which is the same shape as
+      // every other lie here: the offer is honest-looking, the world is not.
+      els.text.textContent = "Build a fire here";
       els.prompt.classList.add("show");
       els.fill.style.width = "0%";
     } else {
@@ -436,7 +461,11 @@ export function createHud(sim, percept, opts = {}) {
     el.survey.classList.toggle("complete", logged >= sim.monoliths.length);
     if (el.found) el.found.textContent = `${discoveredCount(sim)} / ${sim.monoliths.length}`;
     el.doses.textContent = String(sim.doses);
-    if (el.wood) el.wood.textContent = String(sim.wood);
+    // THE COUNT THIS MIND BELIEVES IT HAS, not the one that exists. Wood cut
+    // while hallucinating never entered sim.wood; showing the true number here
+    // would hand the player a free lucidity readout — chop, watch the counter
+    // not move, know. See percept.shownWood.
+    if (el.wood) el.wood.textContent = String(percept.shownWood ?? sim.wood);
     if (el.stone) el.stone.textContent = String(sim.stone);
 
     const yaw = perceivedYaw(percept, sim);
@@ -453,6 +482,15 @@ export function createHud(sim, percept, opts = {}) {
     const left = Math.max(0, TIME_LIMIT - sim.time);
     el.clock.textContent = `${String(Math.floor(left / 60)).padStart(2, "0")}:${String(Math.floor(left % 60)).padStart(2, "0")}`;
     el.clock.classList.toggle("low", left < 120);
+    // WHICH DAY, AND WHETHER IT IS DARK. Not a meter — a day number and a word,
+    // the same way the roster says "falling behind" rather than 41/100. The
+    // camp and the woods run no cycle, and phaseOf is only consulted when one
+    // is actually running.
+    if (el.dayLabel && !sim.noDrain && !sim.woods) {
+      const ph = phaseOf(sim.time);
+      el.dayLabel.textContent = ph.night ? `NIGHT ${ph.day}` : `DAY ${ph.day}`;
+      el.dayLabel.classList.toggle("night", ph.night);
+    }
 
     const dis = distortion(percept, sim);
     el.vignette.style.opacity = String(Math.min(0.92, dis * 0.9));

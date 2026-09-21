@@ -2399,6 +2399,15 @@ check("a gone companion stops following and goes its own way", () => {
 check("companions volunteer remarks, and a gone one says gone things", () => {
   const sim = createRun({ seed: 46 });
   sim.time = FULL_DRAIN_AT;
+  // NO DRAIN, and stating that is the point. This is about what a mind SAYS,
+  // never about whether the party survives long enough to be heard — and it
+  // needs ~260 unattended seconds to do its counting. An unattended party is
+  // lost in 187 of them in daylight (measured), so the margin was already gone
+  // before nights existed; the first nightfall cuts it to 87 and the run ends
+  // mid-window, `tick` returns early, and the failure reads as "a gone
+  // companion never spoke". The companion under test is forced gone explicitly
+  // a few lines down, so drain was never what made this test work.
+  sim.noDrain = true;
   let normal = 0;
   advance(sim, 60);
   normal = sim.companions.length; // remarks are emitted as events; count over a window

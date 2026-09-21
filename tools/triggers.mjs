@@ -29,6 +29,17 @@
 
 export const TRIGGERS = [
   {
+    // Keys are short on purpose. The first draft used whole phrases ("new
+    // marker", "adding a place") and fired on NONE of the natural ways to
+    // describe the work that produced it — "adding a new worksite marker to
+    // the camp" contains neither. The matcher is whole-phrase substring in
+    // both directions, so a key only fires if it appears verbatim.
+    when: ["worksite", "landmark", "marker", "a place", "another site", "tell apart", "tell them apart", "distinguish", "look the same"],
+    ask: "At the moment the player needs to tell this from the others, is anything different about it BUT ITS POSITION?",
+    then: "Any mechanic that names it — a claim to catch, a direction to follow, a memory to test — is unreadable until the thing itself looks different. Give it a form, then assert in the LIVE SCENE that the forms differ; asserting the data differs proves nothing about what is drawn.",
+    from: "seven 0.23.0: four identical cairns made `place` — one of six chronicle perturbation kinds — impossible to catch, while the code's own comment claimed spacing had solved it",
+  },
+  {
     when: ["changing a constant", "changing a default", "tuning a value", "new default"],
     ask: "Is this value ALSO written somewhere else — a pre-selected control, a static class in markup, a pre-load copy, a test asserting the literal?",
     then: "Move every copy together, and assert the copies against EACH OTHER on a cleared profile rather than each against a number.",

@@ -6,9 +6,10 @@
 // list as the real ones.
 
 import * as THREE from "../lib/three.module.js";
-import { CELL, GRID, cellToWorld } from "./world.js?v=seven-0.18.0";
-import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=seven-0.18.0";
-import { PYLON_RADIUS } from "./state.js?v=seven-0.18.0";
+import { CELL, cellToWorld, gridOf } from "./world.js?v=seven-0.24.0";
+import { nightFactor } from "./state.js?v=seven-0.24.0";
+import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=seven-0.24.0";
+import { PYLON_RADIUS } from "./state.js?v=seven-0.24.0";
 
 const PALETTE = {
   sky: 0x0a0f16,
@@ -16,7 +17,18 @@ const PALETTE = {
   fogLost: 0x2a1d2b, // the basin goes wrong-coloured when the lead does
   ground: 0x333c4b,
   groundHi: 0x475364,
-  rock: 0x1b212b,
+  // Lifted from 0x1b212b, which was the real reason the basin looked flat. At
+  // that value a spire returns almost nothing to any light in the scene, so
+  // facets, rim and fog all landed inside one or two sRGB steps and a stand of
+  // them rendered as a single cutout. This is still dark and still cold — it is
+  // the same hue — but it is far enough off the floor to HAVE a lit side.
+  rock: 0x39424f,
+  // Two more, for per-instance variation across the spire field. One mass in
+  // one colour reads as a repeated stamp however many instances it has; the
+  // shading below picks a point on this range from each cell's own hash, so it
+  // is deterministic and costs no rng.
+  rockCool: 0x2e3a4a,
+  rockWarm: 0x474337,
   monolith: 0x59657a,
   monolithLogged: 0x7fd6c0,
   pylon: 0x2a3550,
@@ -80,8 +92,27 @@ function verticalFov(aspect, hfov = DEFAULT_HFOV) {
 }
 
 export function createRenderer(canvas, sim) {
+  // The grid of the world being drawn, not the basin constant: the camp has its
+  // own, and reading `cellKind` at the wrong stride draws a different map
+  // entirely — every cell shifted, with nothing thrown. `world.js` no longer
+  // exports GRID to this module, so a missed site is a ReferenceError.
+  const grid = gridOf(sim.world);
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  // NO TONE CURVE, and this was tried the other way first.
+  //
+  // ACES was the obvious reach for a scene that lives in the bottom eighth of
+  // the range — it is what everything else uses. It made this one WORSE, and
+  // the reason is worth keeping: a filmic curve's toe DARKENS shadows on its
+  // way to compressing highlights, and a basin at dusk is nothing but shadow.
+  // There were no highlights to buy the trade with, so it spent contrast the
+  // scene could not spare and the spires went from dark cones to solid cutouts.
+  // Screenshots either side, same seed and same camera, settled it.
+  //
+  // The plain sRGB transfer function already lifts darks harder than ACES does
+  // here. The range this scene was missing is not in the curve — it is in the
+  // content, which was authored near-black. That is fixed below, in the rock.
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(PALETTE.sky);
@@ -119,20 +150,96 @@ export function createRenderer(canvas, sim) {
   rig.add(camera);
   scene.add(rig);
 
-  scene.add(isCamp
+  const sky = isCamp
     ? new THREE.HemisphereLight(0xcfe0f2, 0x6a6555, 1.5)
-    : new THREE.HemisphereLight(0x5d708c, 0x1d2230, 1.05));
+    : new THREE.HemisphereLight(0x5d708c, 0x1d2230, 1.05);
+  scene.add(sky);
   const sun = new THREE.DirectionalLight(isCamp ? 0xfff0d8 : 0xbfd0e6, isCamp ? 1.15 : 0.55);
   sun.position.set(-40, 60, 30);
   scene.add(sun);
+  // A RIM, opposite the sun and low. The basin's problem was never brightness —
+  // it was that a dark cone in front of dark fog has no edge, so a stand of
+  // spires reads as one flat mass however many of them there are. A cool light
+  // from behind catches the far side of each silhouette and puts a line between
+  // them. Deliberately weak: this is separation, not illumination, and pushing
+  // it turns an oppressive basin into a lit set.
+  const rim = new THREE.DirectionalLight(isCamp ? 0xbcd2e8 : 0x6f86a8, isCamp ? 0.35 : 0.55);
+  rim.position.set(46, 22, -38);
+  scene.add(rim);
   // A single carried lamp — cheaper than one light per companion, and it makes
   // the party's own pool of light the thing you navigate by.
   const lamp = new THREE.PointLight(0xffdcb0, 1.9, 44, 1.5);
+  // NIGHTFALL, held as the values the scene was BUILT with rather than as a
+  // second copy of them. The camp and the woods run no cycle (nightFactor knows
+  // that), so this is inert there without the renderer needing to ask.
+  const dayLit = { sky: sky.intensity, sun: sun.intensity, rim: rim.intensity, fog: scene.fog.density, lamp: lamp.intensity };
   rig.add(lamp);
 
+  // ---- the sky, as a gradient rather than a colour --------------------------
+  //
+  // `scene.background` was a flat Color, and the update loop then overwrote it
+  // with black on every frame — so PALETTE.sky was dead the moment the first
+  // frame ran, and the basin's whole upper half was one value. A single value
+  // above the treeline reads as a wall, and it wastes the one place in the
+  // frame where depth is free: the horizon.
+  //
+  // A closed sphere on the inside, with a vertical two-stop gradient. It is one
+  // extra draw call, no texture, and the colours are uniforms so nightfall
+  // drives them instead of a second copy of the palette.
+  const SKY = isCamp
+    ? { low: new THREE.Color(0xa8bccb), high: new THREE.Color(0x5f7f9e) }
+    : { low: new THREE.Color(0x2a3646), high: new THREE.Color(0x070b12) };
+  const skyMat = new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    depthWrite: false,
+    fog: false,
+    uniforms: {
+      low: { value: SKY.low.clone() },
+      high: { value: SKY.high.clone() },
+      // Where the gradient's midpoint sits, as a height above the eye. Small,
+      // because the interesting band is just above the treeline.
+      spread: { value: 120.0 },
+    },
+    vertexShader: `
+      varying vec3 vWorld;
+      void main() {
+        vWorld = (modelMatrix * vec4(position, 1.0)).xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 low;
+      uniform vec3 high;
+      uniform float spread;
+      varying vec3 vWorld;
+      void main() {
+        // smoothstep rather than a linear mix: a straight ramp puts a visible
+        // mach band across the sky at this value range, and the eye finds it
+        // immediately on a flat-shaded scene with no texture anywhere else.
+        float t = smoothstep(-0.12, 1.0, vWorld.y / spread);
+        gl_FragColor = vec4(mix(low, high, t), 1.0);
+      }
+    `,
+  });
+  // 380, not 420. The camera's far plane IS 420, so a dome of that radius sits
+  // exactly on it — the horizon band lands in the worst depth precision the
+  // buffer has, and whether it survives the depth test is down to rounding.
+  // It happened to draw during this work, which is the kind of "working" that
+  // stops working on someone else's GPU.
+  const skyDome = new THREE.Mesh(new THREE.SphereGeometry(380, 24, 16), skyMat);
+  // Follows the eye, so the horizon never slides away from the player. Render
+  // first and without depth so everything else draws over it.
+  skyDome.renderOrder = -1;
+  skyDome.frustumCulled = false;
+  scene.add(skyDome);
+  // The clear colour still shows for one frame before the dome draws, and on
+  // any pixel the dome somehow misses, so it matches the horizon rather than
+  // being black.
+  scene.background = SKY.low.clone();
+
   // ---- terrain -------------------------------------------------------------
-  const span = GRID * CELL;
-  const groundGeo = new THREE.PlaneGeometry(span, span, GRID, GRID);
+  const span = grid * CELL;
+  const groundGeo = new THREE.PlaneGeometry(span, span, grid, grid);
   groundGeo.rotateX(-Math.PI / 2);
   {
     const pos = groundGeo.attributes.position;
@@ -144,23 +251,38 @@ export function createRenderer(canvas, sim) {
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
       const z = pos.getZ(i);
-      const h = sim.world.heightAt(x / CELL + GRID / 2, z / CELL + GRID / 2);
+      const h = sim.world.heightAt(x / CELL + grid / 2, z / CELL + grid / 2);
       pos.setY(i, h);
       c.copy(lo).lerp(hi, Math.min(1, Math.max(0, (h + 2) / 7)));
-      colors[i * 3] = c.r;
-      colors[i * 3 + 1] = c.g;
-      colors[i * 3 + 2] = c.b;
+      // A TONAL SCATTER, deterministic from the vertex's own cell. Height alone
+      // is a smooth field, so lerping colour along it produced a smooth wash —
+      // the basin floor read as a sheet of plastic with a gradient on it, which
+      // is the one surface in frame the eye has nothing else to hold onto. This
+      // is small enough not to look like noise and large enough to give the
+      // ground a grain. Hashed, not random: the same seed draws the same floor.
+      const gx = Math.round(x / CELL + grid / 2);
+      const gz = Math.round(z / CELL + grid / 2);
+      const j = ((gx * 73856093) ^ (gz * 19349663)) >>> 0;
+      const shade = 0.88 + ((j % 100) / 100) * 0.24;
+      colors[i * 3] = c.r * shade;
+      colors[i * 3 + 1] = c.g * shade;
+      colors[i * 3 + 2] = c.b * shade;
     }
     groundGeo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
     groundGeo.computeVertexNormals();
   }
   const ground = new THREE.Mesh(
     groundGeo,
-    new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 }),
+    // FLAT SHADING, like everything else in the scene. Smooth normals over a
+    // gentle heightfield give every triangle almost the same response, so the
+    // floor lit as one tone no matter how much relief the terrain actually had
+    // — and it was the only smooth-shaded surface among flat-shaded spires,
+    // trees and stones, which is why it read as a different material entirely.
+    new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, flatShading: true }),
   );
   scene.add(ground);
 
-  const terrainHeight = (x, z) => sim.world.heightAt(x / CELL + GRID / 2, z / CELL + GRID / 2);
+  const terrainHeight = (x, z) => sim.world.heightAt(x / CELL + grid / 2, z / CELL + grid / 2);
 
   // ---- what a blocked cell LOOKS like --------------------------------------
   // A basin has one answer: a rock spire. The camp has four, and it needs them —
@@ -172,9 +294,9 @@ export function createRenderer(canvas, sim) {
   // `cellKind` is camp-only. A world without it takes the original path below,
   // unchanged.
   const KIND = { NONE: 0, CABIN: 1, TREELINE: 2, WOOD: 3, PATH: 4 };
-  const kindAt = (cx, cz) => (sim.world.cellKind ? sim.world.cellKind[cz * GRID + cx] : KIND.NONE);
+  const kindAt = (cx, cz) => (sim.world.cellKind ? sim.world.cellKind[cz * grid + cx] : KIND.NONE);
   const isSpire = (cx, cz) => {
-    const i = cz * GRID + cx;
+    const i = cz * grid + cx;
     if (!sim.world.blocked[i]) return false;
     return kindAt(cx, cz) === KIND.NONE;   // anything tagged draws as itself
   };
@@ -194,19 +316,19 @@ export function createRenderer(canvas, sim) {
     // CABINS. One box per tagged cell would read as a wall of cubes, so
     // contiguous runs are merged into a single building per rectangle and only
     // the run's first cell places geometry.
-    const seen = new Uint8Array(GRID * GRID);
-    for (let cz = 0; cz < GRID; cz++) {
-      for (let cx = 0; cx < GRID; cx++) {
-        if (kindAt(cx, cz) !== KIND.CABIN || seen[cz * GRID + cx]) continue;
-        let x1 = cx; while (x1 + 1 < GRID && kindAt(x1 + 1, cz) === KIND.CABIN) x1++;
+    const seen = new Uint8Array(grid * grid);
+    for (let cz = 0; cz < grid; cz++) {
+      for (let cx = 0; cx < grid; cx++) {
+        if (kindAt(cx, cz) !== KIND.CABIN || seen[cz * grid + cx]) continue;
+        let x1 = cx; while (x1 + 1 < grid && kindAt(x1 + 1, cz) === KIND.CABIN) x1++;
         let z1 = cz;
-        outer: while (z1 + 1 < GRID) {
+        outer: while (z1 + 1 < grid) {
           for (let x = cx; x <= x1; x++) if (kindAt(x, z1 + 1) !== KIND.CABIN) break outer;
           z1++;
         }
-        for (let z = cz; z <= z1; z++) for (let x = cx; x <= x1; x++) seen[z * GRID + x] = 1;
+        for (let z = cz; z <= z1; z++) for (let x = cx; x <= x1; x++) seen[z * grid + x] = 1;
 
-        const a = cellToWorld(cx, cz), b = cellToWorld(x1, z1);
+        const a = cellToWorld(cx, cz, grid), b = cellToWorld(x1, z1, grid);
         const w = Math.abs(b.x - a.x) + CELL, d = Math.abs(b.z - a.z) + CELL;
         const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
         const ground = terrainHeight(mx, mz);
@@ -233,11 +355,11 @@ export function createRenderer(canvas, sim) {
     const crowns = new THREE.InstancedMesh(new THREE.ConeGeometry(1.5, 4.4, 6), leafMat, treeCount);
     const m = new THREE.Matrix4(), q = new THREE.Quaternion();
     let n = 0;
-    for (let cz = 0; cz < GRID; cz++) {
-      for (let cx = 0; cx < GRID; cx++) {
+    for (let cz = 0; cz < grid; cz++) {
+      for (let cx = 0; cx < grid; cx++) {
         const k = kindAt(cx, cz);
         if (k !== KIND.TREELINE && k !== KIND.WOOD) continue;
-        const { x, z } = cellToWorld(cx, cz);
+        const { x, z } = cellToWorld(cx, cz, grid);
         // Deterministic jitter from the cell index — the same camp every time,
         // without touching the sim's rng.
         const j = ((cx * 73856093) ^ (cz * 19349663)) >>> 0;
@@ -264,10 +386,10 @@ export function createRenderer(canvas, sim) {
     for (let i = 0; i < sim.world.cellKind.length; i++) if (sim.world.cellKind[i] === KIND.PATH) pathCount++;
     const dirt = new THREE.InstancedMesh(pathGeo, dirtMat, pathCount);
     let pn = 0;
-    for (let cz = 0; cz < GRID; cz++) {
-      for (let cx = 0; cx < GRID; cx++) {
+    for (let cz = 0; cz < grid; cz++) {
+      for (let cx = 0; cx < grid; cx++) {
         if (kindAt(cx, cz) !== KIND.PATH) continue;
-        const { x, z } = cellToWorld(cx, cz);
+        const { x, z } = cellToWorld(cx, cz, grid);
         m.makeRotationX(-Math.PI / 2);
         // Sample the cell's CORNERS and clear the highest of them. Placing the
         // quad at the cell-centre height buried it: the ground is an
@@ -290,34 +412,60 @@ export function createRenderer(canvas, sim) {
   // ---- rock spires (one instanced mesh for every UNTAGGED blocked cell) -----
   {
     let count = 0;
-    for (let cz = 0; cz < GRID; cz++) for (let cx = 0; cx < GRID; cx++) if (isSpire(cx, cz)) count++;
+    for (let cz = 0; cz < grid; cz++) for (let cx = 0; cx < grid; cx++) if (isSpire(cx, cz)) count++;
     const rocks = new THREE.InstancedMesh(
       new THREE.ConeGeometry(CELL * 0.72, 1, 6),
-      new THREE.MeshStandardMaterial({ color: PALETTE.rock, roughness: 1, flatShading: true }),
+      // roughness just off 1: a perfectly rough surface has no directional
+      // response at all, so the rim light had nothing to catch and the facets
+      // stayed equal. 0.92 is still matte rock and it lets an edge exist.
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92, flatShading: true }),
       count,
     );
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    const tint = new THREE.Color();
+    const rockCool = new THREE.Color(PALETTE.rockCool);
+    const rockWarm = new THREE.Color(PALETTE.rockWarm);
+    const rockBase = new THREE.Color(PALETTE.rock);
     let n = 0;
-    for (let cz = 0; cz < GRID; cz++) {
-      for (let cx = 0; cx < GRID; cx++) {
+    for (let cz = 0; cz < grid; cz++) {
+      for (let cx = 0; cx < grid; cx++) {
         if (!isSpire(cx, cz)) continue;
-        const { x, z } = cellToWorld(cx, cz);
+        const { x, z } = cellToWorld(cx, cz, grid);
         // Deterministic pseudo-variation from the cell index — no rng needed, and
         // it stays identical across reloads of the same seed.
         const j = ((cx * 73856093) ^ (cz * 19349663)) >>> 0;
         const h = 3.4 + ((j % 100) / 100) * 5.2;
         const yaw = ((j >>> 7) % 360) * (Math.PI / 180);
-        q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+        // A FEW DEGREES OFF VERTICAL, and a width that is not 1:1. Every spire
+        // being a perfectly upright cone of the same footprint is what made a
+        // field of them read as a repeating tile rather than as terrain — the
+        // eye locks onto the shared axis immediately. All of it comes off the
+        // same cell hash, so it is stable across reloads of a seed and adds no
+        // rng draw to a sim that counts them.
+        const tiltX = (((j >>> 11) % 100) / 100 - 0.5) * 0.14;
+        const tiltZ = (((j >>> 17) % 100) / 100 - 0.5) * 0.14;
+        const wide = 0.82 + ((j >>> 23) % 100) / 100 * 0.42;
+        e.set(tiltX, yaw, tiltZ);
+        q.setFromEuler(e);
         m.compose(
           new THREE.Vector3(x, terrainHeight(x, z) + h / 2 - 0.4, z),
           q,
-          new THREE.Vector3(1, h, 1),
+          new THREE.Vector3(wide, h, wide * (0.9 + ((j >>> 5) % 100) / 100 * 0.2)),
         );
-        rocks.setMatrixAt(n++, m);
+        rocks.setMatrixAt(n, m);
+        // Taller spires trend cooler, shorter ones warmer — it is the cheapest
+        // cue that the field has near and far in it, and it survives fog, which
+        // a hue-only scatter does not.
+        const t = (h - 3.4) / 5.2;
+        tint.copy(rockBase).lerp(t > 0.5 ? rockCool : rockWarm, Math.abs(t - 0.5) * 0.9);
+        rocks.setColorAt(n, tint);
+        n++;
       }
     }
     rocks.instanceMatrix.needsUpdate = true;
+    if (rocks.instanceColor) rocks.instanceColor.needsUpdate = true;
     scene.add(rocks);
   }
 
@@ -331,7 +479,12 @@ export function createRenderer(canvas, sim) {
     const MAX = 620;
     const stones = new THREE.InstancedMesh(
       new THREE.IcosahedronGeometry(0.34, 0),
-      new THREE.MeshStandardMaterial({ color: 0x39424f, roughness: 1, flatShading: true }),
+      // Lighter than the floor it sits on, and lighter than it used to be. This
+      // was 0x39424f, chosen against a near-black rock — and the spire lift
+      // above moved PALETTE.rock to exactly that value, so the litter would
+      // have become the same colour as the thing it exists to contrast with.
+      // A ground stone's whole job is to pass the camera and be SEEN passing.
+      new THREE.MeshStandardMaterial({ color: 0x5a6472, roughness: 1, flatShading: true }),
       MAX,
     );
     const m = new THREE.Matrix4();
@@ -340,14 +493,14 @@ export function createRenderer(canvas, sim) {
     let n = 0;
     // Deterministic scatter from the cell index, so the same seed lays out the
     // same stones on every reload without consuming the sim's rng stream.
-    for (let cz = 1; cz < GRID - 1 && n < MAX; cz++) {
-      for (let cx = 1; cx < GRID - 1 && n < MAX; cx++) {
-        if (sim.world.blocked[cz * GRID + cx]) continue;
+    for (let cz = 1; cz < grid - 1 && n < MAX; cz++) {
+      for (let cx = 1; cx < grid - 1 && n < MAX; cx++) {
+        if (sim.world.blocked[cz * grid + cx]) continue;
         const j = ((cx * 2654435761) ^ (cz * 40503)) >>> 0;
         if (j % 5 !== 0) continue; // ~20% of open cells get one
         const ox = (((j >>> 3) % 100) / 100 - 0.5) * CELL;
         const oz = (((j >>> 11) % 100) / 100 - 0.5) * CELL;
-        const { x, z } = cellToWorld(cx, cz);
+        const { x, z } = cellToWorld(cx, cz, grid);
         const s = 0.5 + ((j >>> 17) % 100) / 140;
         q.setFromAxisAngle(up, ((j >>> 5) % 360) * (Math.PI / 180));
         m.compose(
@@ -387,7 +540,7 @@ export function createRenderer(canvas, sim) {
   // ---- monoliths, pylons, figures: pooled and rebuilt from perception ------
   const monolithGeo = new THREE.BoxGeometry(1.5, 7.4, 1.1);
   const ringGeo = new THREE.TorusGeometry(PYLON_RADIUS, 0.09, 6, 40);
-  const pool = { monoliths: new Map(), pylons: new Map(), figures: new Map(), items: new Map(), trees: new Map(), stones: new Map(), sites: new Map() };
+  const pool = { monoliths: new Map(), pylons: new Map(), figures: new Map(), items: new Map(), trees: new Map(), stones: new Map(), sites: new Map(), fires: new Map(), falls: new Map() };
 
   function makeMonolith() {
     const g = new THREE.Group();
@@ -530,8 +683,130 @@ export function createRenderer(canvas, sim) {
     trainerMark.userData.lamp.scale.setScalar(1 + Math.sin(t * 1.7) * 0.12);
   }
 
+  // A deadfall: three trunks down across the ground, low enough to read as an
+  // obstacle rather than a wall and solid enough that you believe it stops you.
+  function makeFall() {
+    const g = new THREE.Group();
+    const mat = new THREE.MeshStandardMaterial({ color: 0x4a3a2a, roughness: 1, flatShading: true });
+    for (let i = 0; i < 3; i++) {
+      const log = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.5, CELL * 2.6, 5), mat);
+      log.rotation.z = Math.PI / 2;
+      log.position.set(0, 0.45 + i * 0.34, (i - 1) * 0.7);
+      log.rotation.y = (i - 1) * 0.18;
+      g.add(log);
+    }
+    return g;
+  }
+
+  // A fire: a low cone of flame over a ring of stones, plus the light it throws.
+  // Everything that says how healthy it is — how tall, how bright, how far the
+  // light reaches — is driven off fuel below, because this game shows no meters
+  // and the fire IS the readout.
+  function makeFire() {
+    const g = new THREE.Group();
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.72, 0.16, 4, 9),
+      new THREE.MeshStandardMaterial({ color: 0x6b6660, roughness: 1, flatShading: true }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.12;
+    g.add(ring);
+    const flame = new THREE.Mesh(
+      new THREE.ConeGeometry(0.5, 1.2, 6),
+      new THREE.MeshBasicMaterial({ color: 0xffa63a }),
+    );
+    flame.position.y = 0.7;
+    g.add(flame);
+    const glow = new THREE.PointLight(0xffa03c, 2.2, 22, 2);
+    glow.position.y = 1.1;
+    g.add(glow);
+    g.userData = { flame, glow };
+    return g;
+  }
+
+  // The four site BODIES. Each says what the place is, because the chronicle
+  // lets a false account swap one fact's place for another real one ("went down
+  // to the ridge for water" when it was the creek) and the player can only
+  // catch that if the ridge and the creek are different things to have stood
+  // at. Four identical cairns made `place` — one of six perturbation kinds —
+  // unreadable, which is the same failure as a tell pitched below one display
+  // increment: the mechanism fires correctly into something nobody can see.
+  //
+  // These are BODIES ONLY. The pole and lamp above them are the active-beat
+  // indicator and are built once for every site, because that pair is the
+  // renderer's single statement about which beat is live and it must not start
+  // doubling as identity.
+  const SITE_BODIES = {
+    // A sunken run of water with stones along the bank.
+    creek() {
+      const g = new THREE.Group();
+      const water = new THREE.Mesh(
+        new THREE.BoxGeometry(CELL * 2.4, 0.12, CELL * 0.9),
+        new THREE.MeshStandardMaterial({ color: 0x3d5a6b, roughness: 0.25, metalness: 0.1, flatShading: true }),
+      );
+      water.position.y = 0.06;
+      water.rotation.y = 0.32;
+      g.add(water);
+      const stone = new THREE.MeshStandardMaterial({ color: 0x77726a, roughness: 0.95, flatShading: true });
+      for (let i = 0; i < 6; i++) {
+        const r = 0.16 + (i % 3) * 0.07;
+        const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(r, 0), stone);
+        const along = (i - 2.5) * 0.78;
+        rock.position.set(along * Math.cos(0.32), r * 0.6, along * Math.sin(0.32) + (i % 2 ? 0.85 : -0.85));
+        g.add(rock);
+      }
+      return g;
+    },
+    // Raised ground: a low outcrop you stand ON rather than beside.
+    ridge() {
+      const g = new THREE.Group();
+      const mat = new THREE.MeshStandardMaterial({ color: 0x6a6357, roughness: 1, flatShading: true });
+      for (let i = 0; i < 3; i++) {
+        const slab = new THREE.Mesh(new THREE.CylinderGeometry(1.5 - i * 0.38, 1.75 - i * 0.38, 0.42, 6), mat);
+        slab.position.y = 0.21 + i * 0.38;
+        slab.rotation.y = i * 0.5;
+        g.add(slab);
+      }
+      return g;
+    },
+    // Downed timber, in the same vocabulary as a basin deadfall so the two read
+    // as the same KIND of thing in two places.
+    deadfall() {
+      const g = new THREE.Group();
+      const mat = new THREE.MeshStandardMaterial({ color: 0x4a3a2a, roughness: 1, flatShading: true });
+      for (let i = 0; i < 3; i++) {
+        const log = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.4, CELL * 2.1, 5), mat);
+        log.rotation.z = Math.PI / 2;
+        log.position.set(0, 0.38 + i * 0.3, (i - 1) * 0.62);
+        log.rotation.y = (i - 1) * 0.22;
+        g.add(log);
+      }
+      return g;
+    },
+    // The camp's own hearth: a ring of stones, unlit. The BURNING fire is a
+    // separate object the player builds (makeFire); this is the place it goes.
+    fire() {
+      const g = new THREE.Group();
+      const mat = new THREE.MeshStandardMaterial({ color: 0x6b6660, roughness: 1, flatShading: true });
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.2, 0), mat);
+        rock.position.set(Math.cos(a) * 0.8, 0.14, Math.sin(a) * 0.8);
+        g.add(rock);
+      }
+      const ash = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.55, 0.55, 0.06, 8),
+        new THREE.MeshStandardMaterial({ color: 0x2e2a26, roughness: 1 }),
+      );
+      ash.position.y = 0.03;
+      g.add(ash);
+      return g;
+    },
+  };
+
   /**
-   * A worksite: a cairn with a pole in it. Camp only, and only in THE WOODS.
+   * A worksite: a body that says WHICH place, under a pole and lamp that say
+   * whether the current beat is here.
    *
    * It is a PLACE MARKER, not a prompt — it stands there all day whether or
    * not the current beat happens here, because the player has to be able to
@@ -539,14 +814,22 @@ export function createRenderer(canvas, sim) {
    * the rest are unlit stone. That difference is the only thing the renderer
    * says about the day, and it says it in the world rather than on the HUD.
    */
-  function makeSite() {
+  function makeSite(site) {
     const g = new THREE.Group();
-    const cairn = new THREE.Mesh(
-      new THREE.ConeGeometry(0.62, 0.9, 5),
-      new THREE.MeshStandardMaterial({ color: 0x6d6a63, roughness: 0.95, flatShading: true }),
-    );
-    cairn.position.y = 0.45;
-    g.add(cairn);
+    // An unknown id gets the old cairn rather than nothing — a site that fails
+    // to draw is worse than one that draws generically, and tests/woods.mjs
+    // asserts every real id has a body so this branch stays unreachable there.
+    const body = SITE_BODIES[site && site.id];
+    if (body) {
+      g.add(body());
+    } else {
+      const cairn = new THREE.Mesh(
+        new THREE.ConeGeometry(0.62, 0.9, 5),
+        new THREE.MeshStandardMaterial({ color: 0x6d6a63, roughness: 0.95, flatShading: true }),
+      );
+      cairn.position.y = 0.45;
+      g.add(cairn);
+    }
     const pole = new THREE.Mesh(
       new THREE.CylinderGeometry(0.05, 0.06, 2.1, 5),
       new THREE.MeshStandardMaterial({ color: 0x3a3128, roughness: 0.9 }),
@@ -663,6 +946,27 @@ export function createRenderer(canvas, sim) {
     elapsed += dt;
     const eye = opts.eye || sim.player;
     const vp = opts.viewport || null;
+    // The night is a WORLD fact, so it is read without a character: a fire keeps
+    // the night off the mind standing in it (nightFactor(sim, ch)), it does not
+    // hold the sky up. The local light a fire throws is drawn with the fire.
+    const night = nightFactor(sim);
+    sky.intensity = dayLit.sky * (1 - 0.72 * night);
+    sun.intensity = dayLit.sun * (1 - 0.85 * night);
+    // The rim falls FURTHER than the sun at night. It is a sky light, and the
+    // point of the dark is that shape stops being free — what separates two
+    // silhouettes after dusk should be the lamp you are carrying.
+    rim.intensity = dayLit.rim * (1 - 0.93 * night);
+    scene.fog.density = dayLit.fog * (1 + 0.9 * night);
+    lamp.intensity = dayLit.lamp * (1 + 0.55 * night);
+    // The sky darkens toward the horizon colour's own shadow rather than to
+    // black: a night sky that is pure black has no horizon, and losing the
+    // horizon is what made the old nights read as a void instead of a place.
+    skyMat.uniforms.low.value.copy(SKY.low).multiplyScalar(1 - 0.82 * night);
+    skyMat.uniforms.high.value.copy(SKY.high).multiplyScalar(1 - 0.6 * night);
+    skyDome.position.set(eye.x, 0, eye.z);
+    if (scene.background && scene.background.isColor) {
+      scene.background.copy(skyMat.uniforms.low.value);
+    }
     const dis = distortion(percept, sim);
 
     if (vp) {
@@ -770,6 +1074,36 @@ export function createRenderer(canvas, sim) {
 
     // The day's worksites. Camp only, and only once a day has been started —
     // `world.sites` exists nowhere else and `sim.woods` gates the lighting.
+    // THE FIRE THIS EYE SEES — percept.shownFire, never sim.fire. A far-gone
+    // mind is shown a whole fire where there is none, and it has to be drawn
+    // exactly like a real one or the difference is the tell.
+    // Deadfalls still standing. Not lied about — a deadfall is geometry you walk
+    // into, and percept.js lies about what things ARE, never about whether the
+    // ground is solid.
+    const standing = (sim.deadfalls || []).filter((d) => !d.cleared);
+    syncPool(pool.falls, standing, makeFall);
+    for (const obj of pool.falls.values()) {
+      obj.position.y = terrainHeight(obj.position.x, obj.position.z);
+      const d = standing.find((x) => Math.abs(x.x - obj.position.x) < 0.01 && Math.abs(x.z - obj.position.z) < 0.01);
+      if (d) obj.rotation.y = d.horiz ? 0 : Math.PI / 2;
+    }
+    const shownFire = percept.shownFire;
+    syncPool(pool.fires, shownFire ? [{ id: "fire", x: shownFire.x, z: shownFire.z }] : [], makeFire);
+    // GUARDED ON shownFire, not on the pool being non-empty. The fire a mind
+    // sees can vanish between frames — recovery ends the fabrication outright —
+    // and the pool is not guaranteed to be empty on the same frame, so reading
+    // fuel off a null here threw the moment a hallucination ended.
+    for (const obj of shownFire ? pool.fires.values() : []) {
+      obj.position.y = terrainHeight(obj.position.x, obj.position.z);
+      const f = Math.max(0, Math.min(1, shownFire.fuel / 100));
+      const { flame, glow } = obj.userData;
+      // Height and light both fall with the fuel, and a spent fire keeps a low
+      // ember rather than vanishing — you can still see where it was.
+      flame.scale.set(0.45 + f * 0.75, 0.3 + f * 1.1, 0.45 + f * 0.75);
+      flame.material.color.setHex(f > 0.35 ? 0xffa63a : 0xd2541c);
+      glow.intensity = 0.25 + f * 2.6;
+      glow.distance = 8 + f * 16;
+    }
     syncPool(pool.sites, sim.world.sites || [], makeSite);
     const activeSite = sim.woods?.activeSiteId || null;
     for (const obj of pool.sites.values()) {

@@ -29,6 +29,7 @@ import {
 import {
   createPercept, updatePercept, perceivedCompanions, MONSTER_TUNING,
 } from "../src/percept.js";
+import { worldToCell, cellToWorld, generateWorld } from "../src/world.js";
 
 let passed = 0;
 const failures = [];
@@ -75,8 +76,8 @@ function onScreen(eye, target) {
 }
 
 /** Past the orientation window, so nothing under test is masked by grace. */
-function liveRun(seed) {
-  const sim = createRun({ seed });
+function liveRun(seed, dense = false) {
+  const sim = createRun({ seed, world: dense ? generateWorld(seed, { dense: true }) : null });
   sim.time = 400;
   return sim;
 }
@@ -319,9 +320,26 @@ check("a flicker never touches the sim's truth about the companion", () => {
 // under and left, in the same beat, every time.
 // ---------------------------------------------------------------------------
 
+/** The nearest open cell to a world point — a character inside rock cannot path. */
+function nearestOpen(world, { x, z }) {
+  const g = world.grid;
+  const { cx, cz } = worldToCell(x, z, g);
+  const open = (nx, nz) => nx >= 0 && nz >= 0 && nx < g && nz < g && !world.blocked[nz * g + nx];
+  if (open(cx, cz)) return { x, z };
+  for (let r = 1; r < g; r++) {
+    for (let dz = -r; dz <= r; dz++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+        if (open(cx + dx, cz + dz)) return cellToWorld(cx + dx, cz + dz, g);
+      }
+    }
+  }
+  throw new Error("no open ground anywhere near the spawn point");
+}
+
 /** One companion breaks at `startDist` from a standing lead; run `seconds`. */
-function breakdown(seed, startDist, seconds) {
-  const sim = liveRun(seed);
+function breakdown(seed, startDist, seconds, { dense = false } = {}) {
+  const sim = liveRun(seed, dense);
   const p = sim.player;
   p.x = 0; p.z = 0; p.yaw = 0;
   sim.companions.forEach((c, i) => {
@@ -331,8 +349,28 @@ function breakdown(seed, startDist, seconds) {
   });
   const victim = sim.companions[0];
   const bearing = (seed / 17) * Math.PI * 2;
-  victim.x = Math.cos(bearing) * startDist;
-  victim.z = Math.sin(bearing) * startDist;
+  // ON OPEN GROUND, and this is not a detail.
+  //
+  // These three lines used to teleport the victim to a bearing at a fixed
+  // radius and trust the ground. On a 78%-walkable basin roughly one seed in
+  // five lands them INSIDE ROCK, where `findPath` has no start cell, `c.path`
+  // is set to the empty array and never refilled, and the companion stands
+  // still for the whole episode. Every assertion below then reads 0.0u of
+  // drift and draws a conclusion about behaviour from a character that was
+  // never able to move.
+  //
+  // It weakened all three checks in the same direction and made none of them
+  // fail: the dwell check ("stays where it can be witnessed") passes trivially
+  // at 0.0u, the neighbourhood check's median is deflated by the zeros, and
+  // the departure check counts a walled-in companion as one who declined to
+  // wander. It also reads as a MAP regression rather than a harness one — on
+  // ground made 63% walkable by the density pass the same bug fires on five
+  // seeds in twelve instead of two, which was filed as "density breaks
+  // companion drift" and very nearly cost the density pass its default.
+  const wanted = { x: Math.cos(bearing) * startDist, z: Math.sin(bearing) * startDist };
+  const spot = nearestOpen(sim.world, wanted);
+  victim.x = spot.x;
+  victim.z = spot.z;
   const from = { x: victim.x, z: victim.z };
   beginHallucinating(sim, victim);
 
@@ -370,12 +408,53 @@ check("but they DO wander off — the dwell is a beat, not a leash", () => {
   // The design is that a gone companion abandons the party for an errand they
   // invented. Holding them near the lead forever would be a different (worse)
   // game, so this asserts the departure still happens.
+  //
+  // Displacement at the end of the episode, as it always was. A peak-based
+  // reading was tried and REVERTED: the two round trips that seemed to justify
+  // it (travel 125u, come home within 5u) only occur when the victim spawns
+  // inside rock, and with that fixed no seed of twelve has a peak past the
+  // departure line and a final inside it. Swapping peak for final changed no
+  // verdict, which means the distinction is currently unmeasurable here — so
+  // the simpler reading stays until something makes it matter.
   let left = 0;
   for (let seed = 1; seed <= 12; seed++) {
     const r = breakdown(seed, 10, 70);
     if (r.samples[r.samples.length - 1].fromBreak > 8) left++;
   }
-  atLeast(left, 8, "gone companions are no longer wandering off at all");
+  // 11 of 12 as measured. The bar sits at 10 so it is a real floor rather than
+  // a transcription of today's number, and it is stricter than the 8 it
+  // replaced — which was only ever met because the spawn bug above fed it
+  // zeros from companions that could not move.
+  atLeast(left, 10, "gone companions are no longer wandering off at all");
+});
+
+check("and they still wander on ground that is mostly rock", () => {
+  // The question the density pass raised, asked directly instead of inferred
+  // from a basin-wide walkability number. A companion on 63%-walkable ground
+  // has far less room, and the worry was that rock turns the dwell into a
+  // leash by default.
+  //
+  // It does not: 9 of 12 seeds clear the same 8-unit departure, against 11 on
+  // the open basin. What looked like a density regression was the spawn bug —
+  // more rock means more seeds teleported into it, and with the ground checked
+  // the same run scores 9 instead of 5. Density costs two seeds, not the
+  // wholesale collapse it appeared to cause.
+  // The seeds that do not clear it are worth chasing and are NOT asserted
+  // away: on a dense basin a companion can sit on open ground holding one
+  // invented goal for the whole episode and travel under a unit. Unexplained.
+  let left = 0;
+  for (let seed = 1; seed <= 12; seed++) {
+    const r = breakdown(seed, 10, 70, { dense: true });
+    // The ground has to BE dense, or this check quietly re-runs the one above.
+    // Swapping `dense: true` for `false` left it green, so the flag was doing
+    // nothing an assertion could see.
+    let open = 0;
+    for (const b of r.sim.world.blocked) if (!b) open++;
+    const pct = (open / (r.sim.world.grid * r.sim.world.grid)) * 100;
+    assert(pct < 72, `seed ${seed}: this check is running on ${pct.toFixed(0)}%-walkable ground, which is not dense`);
+    if (r.samples[r.samples.length - 1].fromBreak > 8) left++;
+  }
+  atLeast(left, 8, "a gone companion cannot leave on dense ground — the dwell became a leash");
 });
 
 check("a phantom errand stays in the neighbourhood instead of crossing the basin", () => {

@@ -24,10 +24,21 @@
 // reachability from scratch and is asserted in the test suite — the fixup is
 // verified, not trusted.
 
-import { makeRng } from "./rng.js?v=seven-0.18.0";
+import { makeRng } from "./rng.js?v=seven-0.24.0";
 
 export const CELL = 2.6; // world units per grid cell
-export const GRID = 46; // cells per side
+/**
+ * Cells per side OF A BASIN.
+ *
+ * This is not "the grid size" — the camp has its own, larger one (camp.js
+ * CAMP_GRID), and every world already carries its own in `world.grid`. That
+ * field used to be decorative: it was written into the returned shape and
+ * nothing read it, while every consumer imported this constant instead. One
+ * truth in two homes, and only one of them would ever move. The helpers below
+ * now take the grid explicitly or read it off the world, so this constant is
+ * only ever the BASIN's answer.
+ */
+export const GRID = 46;
 export const MONOLITH_COUNT = 6;
 export const PYLON_COUNT = 5;
 export const ITEM_COUNT = 6;
@@ -40,6 +51,65 @@ export const ITEM_KINDS = Object.freeze(["flare", "tether", "lens", "husk"]);
 // ITEM, these carry no `itemKind` — a tree is always a tree, a deposit always
 // stone. There is no deception layer for these at all (see state.js/percept.js
 // comments): only carried/crafted ITEMS are ever subject to the lie.
+
+// DEADFALLS — the obstacle the day/night loop is priced against. A tangle of
+// fallen timber lying across a route: it BLOCKS, it takes real time to cut
+// through, and it pays in wood. The design note's rule is the load-bearing part
+// — "Nothing is walled off. Progress is gated by TIME" — so a deadfall is only
+// ever placed where the map stays fully connected WITHOUT clearing it. It is
+// always a shortcut, never a gate. Going round costs distance; cutting costs
+// daylight; you pay either way, and choosing which is the whole mechanic.
+export const DEADFALL_COUNT = 4;
+// How much further you must walk to go ROUND one before it counts as an
+// obstacle at all. On the old 78%-walkable basin almost nothing cleared this
+// bar — an obstacle that is free to ignore is scenery.
+export const DEADFALL_MIN_DETOUR = 6;
+
+// ---- HOW FAR IS TOO FAR, in cells of walking from camp --------------------
+//
+// The old contract was binary: every feature REACHABLE, at any cost, enforced by
+// a repair pass that carves a corridor to anything the flood fill misses. That
+// guarantee is why this generator can ship without hand inspection, and it is
+// also why dense ground cannot survive here — "reachable" says nothing about
+// price, so a map where everything is a long hard walk and a map where
+// everything is a stroll both pass identically.
+//
+// A budget is the weaker, more useful contract: reachable EVENTUALLY, at a cost
+// this says out loud. It subsumes reachability (unreachable is infinite
+// distance) while making expense visible, which is what a traverse needs —
+// "you can always go further; you may not get back before dark".
+//
+// 3x the grid's side. A straight crossing is ~46 cells; this allows a route
+// that doubles back and detours heavily before anything is called too far.
+// Measured on the open basin: the worst walk to a feature runs 54-71 cells, so
+// nothing here is near the bar — the budget exists to price density, not to
+// police the map as it stands.
+export const DISTANCE_BUDGET = GRID * 3;
+
+// DENSITY — what the budget BUYS, and why it is OFF by default.
+//
+// Each round fills a slice of open cells and keeps it only if every feature is
+// still inside the budget; a rejected round is rolled back WHOLE. Swept at
+// 0.22/6, 0.12/14, 0.08/24 and 0.05/40 fill-per-round: every setting lands at
+// 62-64% walkable, but the gentler climbs get further into the budget before a
+// round is refused (worst walk 72 cells at 0.22, 87 at 0.12), so the fill is
+// small and the rounds few.
+//
+// Then the measurement that decided the default. Density breaks companion drift
+// monotonically: a gone companion drifts 8 units from where they broke on 24 of
+// 24 seeds with density off, on 7 of 12 at one round, on 5 of 12 at two. The
+// suite wants 8. Deadfalls are innocent — the same test passes with density off
+// and deadfalls on.
+//
+// "They DO wander off — the dwell is a beat, not a leash" is a design
+// assertion, not a fixture: a gone companion who cannot leave is a different
+// and worse game. So the survey basin stays open and this pass waits for the
+// map that wants it — the traverse, where a cut path through dense forest is
+// the point. `generateWorld(seed, { dense: true })` turns it on, and the
+// deadfall detour gate with it.
+export const DENSITY_ROUNDS = 4;
+export const DENSITY_FILL = 0.12;
+
 export const TREE_COUNT = 5;
 export const STONE_COUNT = 5;
 
@@ -50,6 +120,7 @@ export const FEATURE = Object.freeze({
   ITEM: "item",
   TREE: "tree",
   STONE: "stone",
+  DEADFALL: "deadfall",
 });
 
 // Survey markers get names, not numbers — a companion has to be able to say
@@ -66,15 +137,39 @@ const MONOLITH_NAMES = [
   "the Black Mouth",
 ];
 
-/** Grid <-> world helpers. Cell (0,0) is the NW corner; the grid is centred on the origin. */
-export function cellToWorld(cx, cz) {
-  return { x: (cx - GRID / 2 + 0.5) * CELL, z: (cz - GRID / 2 + 0.5) * CELL };
-}
-export function worldToCell(x, z) {
-  return { cx: Math.floor(x / CELL + GRID / 2), cz: Math.floor(z / CELL + GRID / 2) };
+/**
+ * `grid` is REQUIRED on every helper that needs it, and checked.
+ *
+ * The tempting shape is `grid = GRID` as a default. It is the wrong shape here:
+ * a call site that forgets the argument would then place a camp feature using
+ * the BASIN's grid, which is not an error anywhere — it is a valid number that
+ * puts the thing tens of metres from where the map says it is, and the only
+ * symptom is a world that looks subtly wrong. Throwing turns every missed call
+ * site into a stack trace at the first frame instead.
+ */
+function needGrid(grid, who) {
+  if (!Number.isInteger(grid) || grid <= 0) {
+    throw new Error(`${who}: grid must be a positive integer, got ${grid} — pass the world's own grid (world.grid), not a default`);
+  }
+  return grid;
 }
 
-const inBounds = (cx, cz) => cx >= 0 && cz >= 0 && cx < GRID && cz < GRID;
+/** Grid <-> world helpers. Cell (0,0) is the NW corner; the grid is centred on the origin. */
+export function cellToWorld(cx, cz, grid) {
+  const g = needGrid(grid, "cellToWorld");
+  return { x: (cx - g / 2 + 0.5) * CELL, z: (cz - g / 2 + 0.5) * CELL };
+}
+export function worldToCell(x, z, grid) {
+  const g = needGrid(grid, "worldToCell");
+  return { cx: Math.floor(x / CELL + g / 2), cz: Math.floor(z / CELL + g / 2) };
+}
+
+/** The grid a world was built on. Never guessed — an absent one is a bug. */
+export function gridOf(world) {
+  return needGrid(world && world.grid, "gridOf");
+}
+
+const inBounds = (cx, cz, grid) => cx >= 0 && cz >= 0 && cx < grid && cz < grid;
 
 // Cheap seeded value noise — enough for a rolling basin floor. Sampled by the
 // renderer for terrain height and by the sim for "how deep in the fog are you".
@@ -123,7 +218,7 @@ function blockedGrid(rng) {
     let cz = rng.int(3, GRID - 4);
     const len = rng.int(6, 26);
     for (let s = 0; s < len; s++) {
-      if (inBounds(cx, cz)) blocked[at(cx, cz)] = 1;
+      if (inBounds(cx, cz, GRID)) blocked[at(cx, cz)] = 1;
       const d = rng.int(0, 3);
       cx += d === 0 ? 1 : d === 1 ? -1 : 0;
       cz += d === 2 ? 1 : d === 3 ? -1 : 0;
@@ -144,16 +239,51 @@ function blockedGrid(rng) {
       if (p === gapAt) continue;
       const cx = horiz ? p : fixed;
       const cz = horiz ? fixed : p;
-      if (inBounds(cx, cz)) blocked[at(cx, cz)] = 1;
+      if (inBounds(cx, cz, GRID)) blocked[at(cx, cz)] = 1;
     }
   }
   return blocked;
 }
 
+/**
+ * Walking distance in cells from one cell to every other, -1 where unreachable.
+ *
+ * The same BFS as floodFill, counting steps instead of only marking them. It
+ * exists because "can the party get there" and "what does getting there cost"
+ * are different questions and only the first one had an answer — see
+ * DISTANCE_BUDGET. Four-way, so it understates a diagonal walk; every consumer
+ * compares two of these to each other, and both sides understate identically.
+ */
+export function distanceField(blocked, startCx, startCz) {
+  const GRID = needGrid(Math.round(Math.sqrt(blocked.length)), "distanceField");
+  const dist = new Int32Array(GRID * GRID).fill(-1);
+  if (!inBounds(startCx, startCz, GRID) || blocked[startCz * GRID + startCx]) return dist;
+  const start = startCz * GRID + startCx;
+  dist[start] = 0;
+  const queue = [start];
+  for (let head = 0; head < queue.length; head++) {
+    const idx = queue[head];
+    const cx = idx % GRID, cz = (idx - cx) / GRID;
+    for (const [nx, nz] of [[cx + 1, cz], [cx - 1, cz], [cx, cz + 1], [cx, cz - 1]]) {
+      if (!inBounds(nx, nz, GRID)) continue;
+      const ni = nz * GRID + nx;
+      if (dist[ni] !== -1 || blocked[ni]) continue;
+      dist[ni] = dist[idx] + 1;
+      queue.push(ni);
+    }
+  }
+  return dist;
+}
+
 /** Flood fill from a cell; returns a Uint8Array marking the reachable component. */
 export function floodFill(blocked, startCx, startCz) {
+  // The stride comes from the ARRAY, not from a constant or an argument: the
+  // grid is already unambiguously encoded in its length, and deriving it here
+  // means no caller can pass one that disagrees with the map it is filling.
+  const GRID = needGrid(Math.round(Math.sqrt(blocked.length)), "floodFill");
+  if (GRID * GRID !== blocked.length) throw new Error(`floodFill: blocked is ${blocked.length} cells, which is not square`);
   const seen = new Uint8Array(GRID * GRID);
-  if (!inBounds(startCx, startCz) || blocked[startCz * GRID + startCx]) return seen;
+  if (!inBounds(startCx, startCz, GRID) || blocked[startCz * GRID + startCx]) return seen;
   const queue = [startCz * GRID + startCx];
   seen[queue[0]] = 1;
   for (let head = 0; head < queue.length; head++) {
@@ -161,7 +291,7 @@ export function floodFill(blocked, startCx, startCz) {
     const cx = idx % GRID, cz = (idx - cx) / GRID;
     const nbrs = [[cx + 1, cz], [cx - 1, cz], [cx, cz + 1], [cx, cz - 1]];
     for (const [nx, nz] of nbrs) {
-      if (!inBounds(nx, nz)) continue;
+      if (!inBounds(nx, nz, GRID)) continue;
       const ni = nz * GRID + nx;
       if (seen[ni] || blocked[ni]) continue;
       seen[ni] = 1;
@@ -199,7 +329,7 @@ function openNear(blocked, cx, cz) {
       for (let dx = -r; dx <= r; dx++) {
         if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
         const nx = cx + dx, nz = cz + dz;
-        if (inBounds(nx, nz) && !blocked[nz * GRID + nx]) return { cx: nx, cz: nz };
+        if (inBounds(nx, nz, GRID) && !blocked[nz * GRID + nx]) return { cx: nx, cz: nz };
       }
     }
   }
@@ -210,7 +340,7 @@ function openNear(blocked, cx, cz) {
  * Generate an area. Returns a plain data object — no live references, so a
  * world can be serialised, diffed in tests, or handed to a worker.
  */
-export function generateWorld(seed = 1) {
+export function generateWorld(seed = 1, { dense = false } = {}) {
   const rng = makeRng(seed);
   const blocked = blockedGrid(rng);
   const heightAt = makeHeightField(rng);
@@ -255,14 +385,14 @@ export function generateWorld(seed = 1) {
     name: names[i],
     cx: c.cx,
     cz: c.cz,
-    ...cellToWorld(c.cx, c.cz),
+    ...cellToWorld(c.cx, c.cz, GRID),
   }));
   const pylons = picks.slice(MONOLITH_COUNT, MONOLITH_COUNT + PYLON_COUNT).map((c, i) => ({
     id: `p${i}`,
     kind: FEATURE.PYLON,
     cx: c.cx,
     cz: c.cz,
-    ...cellToWorld(c.cx, c.cz),
+    ...cellToWorld(c.cx, c.cz, GRID),
   }));
   // Item kinds: a guaranteed one of each, then a random remainder, then a
   // shuffle. Cycling `i % 3` guaranteed coverage but made every basin on every
@@ -288,7 +418,7 @@ export function generateWorld(seed = 1) {
     itemKind: bag[i],
     cx: c.cx,
     cz: c.cz,
-    ...cellToWorld(c.cx, c.cz),
+    ...cellToWorld(c.cx, c.cz, GRID),
   }));
   const treeStart = MONOLITH_COUNT + PYLON_COUNT + ITEM_COUNT;
   const trees = picks.slice(treeStart, treeStart + TREE_COUNT).map((c, i) => ({
@@ -296,7 +426,7 @@ export function generateWorld(seed = 1) {
     kind: FEATURE.TREE,
     cx: c.cx,
     cz: c.cz,
-    ...cellToWorld(c.cx, c.cz),
+    ...cellToWorld(c.cx, c.cz, GRID),
   }));
   const stoneStart = treeStart + TREE_COUNT;
   const stones = picks.slice(stoneStart, stoneStart + STONE_COUNT).map((c, i) => ({
@@ -304,7 +434,7 @@ export function generateWorld(seed = 1) {
     kind: FEATURE.STONE,
     cx: c.cx,
     cz: c.cz,
-    ...cellToWorld(c.cx, c.cz),
+    ...cellToWorld(c.cx, c.cz, GRID),
   }));
 
   // ---- CONNECTIVITY REPAIR PASS (explicit, then re-verified) ----------------
@@ -342,13 +472,126 @@ export function generateWorld(seed = 1) {
     }
   }
 
+  // ---- DENSITY, SPENT AGAINST THE BUDGET -----------------------------------
+  // What the budget is FOR. Under the old binary contract this pass could not
+  // exist: "reachable" is satisfied by a single winding corridor, so there was
+  // no way to say how much closing the ground had cost and therefore no way to
+  // know when to stop. With a budget there is — fill a slice, ask what the
+  // longest walk to a feature now is, and keep the slice only if it is still
+  // affordable.
+  //
+  // Rolled back WHOLE on rejection rather than cell by cell. A partial round
+  // leaves the map in a state no measurement was taken of, which is how a
+  // generator ends up shipping worlds nothing ever validated.
+  if (dense) {
+    for (let round = 0; round < DENSITY_ROUNDS; round++) {
+      const before = Uint8Array.from(blocked);
+      // Never wall in the camp, never bury a feature's ring, never touch the rim.
+      const protectedCells = new Set();
+      for (const f of [...features, camp]) {
+        for (let dz = -2; dz <= 2; dz++) {
+          for (let dx = -2; dx <= 2; dx++) protectedCells.add((f.cz + dz) * GRID + (f.cx + dx));
+        }
+      }
+      let filled = 0;
+      for (let cz = 2; cz < GRID - 2; cz++) {
+        for (let cx = 2; cx < GRID - 2; cx++) {
+          const i = cz * GRID + cx;
+          if (blocked[i] || protectedCells.has(i)) continue;
+          if (Math.hypot(cx - camp.cx, cz - camp.cz) < 7) continue;
+          if (!rng.chance(DENSITY_FILL)) continue;
+          blocked[i] = 1;
+          filled++;
+        }
+      }
+      if (!filled) break;
+      const d = distanceField(blocked, camp.cx, camp.cz);
+      const affordable = features.every((f) => {
+        const v = d[f.cz * GRID + f.cx];
+        return v >= 0 && v <= DISTANCE_BUDGET;
+      });
+      if (!affordable) { blocked.set(before); break; }
+    }
+  }
+
+  // ---- DEADFALLS, placed LAST and never sealing anything --------------------
+  // After the repair pass, so nothing here can be undone by a later carve, and
+  // each one is accepted only if the whole map is still reachable with it in
+  // place. A deadfall that cuts the map in two would be a wall, and the design
+  // is explicit that nothing is walled off.
+  const deadfalls = [];
+  {
+    const reachAll = floodFill(blocked, camp.cx, camp.cz);
+    let open = 0;
+    for (let i = 0; i < blocked.length; i++) if (!blocked[i] && reachAll[i]) open++;
+    let guard2 = 0;
+    while (deadfalls.length < DEADFALL_COUNT && guard2++ < 4000) {
+      const cx = rng.int(4, GRID - 5);
+      const cz = rng.int(4, GRID - 5);
+      const horiz = rng.chance(0.5);
+      // A three-cell run, and every cell of it has to be open ground already.
+      const cells = [0, 1, 2].map((k) => (horiz ? { cx: cx + k, cz } : { cx, cz: cz + k }));
+      if (cells.some((c) => blocked[c.cz * GRID + c.cx])) continue;
+      if (Math.hypot(cx - camp.cx, cz - camp.cz) < 8) continue; // not on the doorstep
+      // NEVER ON TOP OF A FEATURE. The ring-clearing above runs before this, so
+      // a deadfall laid across a marker or a tree buries it: the cell reads as
+      // rock, the feature is unreachable, and the world validates as broken.
+      // Two cells of clearance, because a feature needs its own ring walkable.
+      if (features.some((f) => cells.some((c) => Math.abs(f.cx - c.cx) <= 2 && Math.abs(f.cz - c.cz) <= 2))) continue;
+      if (deadfalls.some((d) => Math.hypot(d.cx - cx, d.cz - cz) < 8)) continue;
+      // Lay it down, then ask the map two questions: does it still hold
+      // together, and does going round actually COST anything.
+      const beforeDist = distanceField(blocked, camp.cx, camp.cz);
+      for (const c of cells) blocked[c.cz * GRID + c.cx] = 1;
+      const after = floodFill(blocked, camp.cx, camp.cz);
+      let stillOpen = 0;
+      for (let i = 0; i < blocked.length; i++) if (!blocked[i] && after[i]) stillOpen++;
+      // Every cell that was reachable before must still be reachable now, minus
+      // the three we just filled. Anything less means this one walls something
+      // off, so it does not get to exist.
+      if (stillOpen !== open - cells.length) {
+        for (const c of cells) blocked[c.cz * GRID + c.cx] = 0;
+        continue;
+      }
+      // AN OBSTACLE THAT IS FREE TO IGNORE IS SCENERY. Measured against the
+      // features the party actually walks to, not the map in general: a
+      // deadfall across a corner of empty field costs nobody anything, however
+      // pinched the corner looks.
+      const afterDist = distanceField(blocked, camp.cx, camp.cz);
+      const detour = features.reduce((worstD, f) => {
+        const i = f.cz * GRID + f.cx;
+        const b = beforeDist[i], a2 = afterDist[i];
+        return (b >= 0 && a2 >= 0) ? Math.max(worstD, a2 - b) : worstD;
+      }, 0);
+      // Only on dense ground. On the open basin almost nothing clears this bar
+      // (0.2 deadfalls per world, measured), and gating there would delete the
+      // feature rather than improve it — an obstacle that is free to ignore is
+      // scenery, but no obstacle at all is worse.
+      if (dense && detour < DEADFALL_MIN_DETOUR) {
+        for (const c of cells) blocked[c.cz * GRID + c.cx] = 0;
+        continue;
+      }
+      open = stillOpen;
+      deadfalls.push({
+        id: `df${deadfalls.length}`,
+        kind: FEATURE.DEADFALL,
+        cx, cz, horiz,
+        detour, // cells of extra walking it costs to go round — diagnostic
+        cells,
+        cleared: false,
+        ...cellToWorld(cx, cz, GRID),
+      });
+    }
+  }
+
   return {
     seed,
     grid: GRID,
     cell: CELL,
     blocked,
+    deadfalls,
     heightAt,
-    camp: { id: "camp", kind: FEATURE.CAMP, cx: camp.cx, cz: camp.cz, ...cellToWorld(camp.cx, camp.cz) },
+    camp: { id: "camp", kind: FEATURE.CAMP, cx: camp.cx, cz: camp.cz, ...cellToWorld(camp.cx, camp.cz, GRID) },
     monoliths,
     pylons,
     items,
@@ -360,9 +603,10 @@ export function generateWorld(seed = 1) {
 
 /** True if a world-space point is inside a blocked cell (or out of bounds). */
 export function isBlockedAt(world, x, z) {
-  const { cx, cz } = worldToCell(x, z);
-  if (!inBounds(cx, cz)) return true;
-  return !!world.blocked[cz * GRID + cx];
+  const grid = gridOf(world);
+  const { cx, cz } = worldToCell(x, z, grid);
+  if (!inBounds(cx, cz, grid)) return true;
+  return !!world.blocked[cz * grid + cx];
 }
 
 /**
@@ -390,19 +634,49 @@ export function moveWithCollision(world, pos, dx, dz, radius = 0.55) {
  * pass above is verified, not trusted.
  * Returns { ok, unreachable: [featureId] }.
  */
-export function validate(world) {
-  const reach = floodFill(world.blocked, world.camp.cx, world.camp.cz);
+export function validate(world, { budget = DISTANCE_BUDGET } = {}) {
+  const grid = gridOf(world);
+  // DISTANCES, not a flood fill. Same traversal, one more number per cell, and
+  // that number is the whole point: `reachable` is `distance !== -1`, so this
+  // still answers the old question while also answering how dear the answer is.
+  const dist = distanceField(world.blocked, world.camp.cx, world.camp.cz);
+  const reach = dist;
   const unreachable = [];
+  const overBudget = [];
+  let worst = 0;
+  let worstId = null;
   for (const f of [...world.monoliths, ...world.pylons, ...world.items, ...world.trees, ...world.stones]) {
-    if (!reach[f.cz * GRID + f.cx]) unreachable.push(f.id);
+    const d = dist[f.cz * grid + f.cx];
+    if (d < 0) {
+      // UNREACHABLE IS INFINITE DISTANCE, so it fails the budget too. Reported
+      // in both lists on purpose: a caller that only reads `withinBudget` must
+      // not be told a walled-in marker is affordable. The budget is a WEAKER
+      // contract than reachability, and a weaker contract still has to hold
+      // wherever the stronger one does.
+      unreachable.push(f.id);
+      overBudget.push({ id: f.id, cells: Infinity });
+      continue;
+    }
+    if (d > worst) { worst = d; worstId = f.id; }
+    if (d > budget) overBudget.push({ id: f.id, cells: d });
   }
   let open = 0;
   for (let i = 0; i < world.blocked.length; i++) if (!world.blocked[i]) open++;
   let reached = 0;
-  for (let i = 0; i < reach.length; i++) if (reach[i]) reached++;
+  for (let i = 0; i < reach.length; i++) if (reach[i] >= 0) reached++;
   return {
+    // `ok` still means what it always meant, and every existing caller keeps
+    // working. The budget is reported ALONGSIDE it rather than folded into it:
+    // a world where a marker is a very long walk is not broken, it is hard, and
+    // conflating those two is how a difficulty question turns into a crash.
     ok: unreachable.length === 0,
     unreachable,
+    // Reachable, but dear. A generator that wants dense ground reads these.
+    overBudget,
+    withinBudget: overBudget.length === 0,
+    budget,
+    worstDistance: worst,
+    worstId,
     openCells: open,
     reachableCells: reached,
     // Fraction of walkable ground the party can actually get to. Not a pass/fail
@@ -417,17 +691,29 @@ export function validate(world) {
 // repath several times a second each, and two fresh typed arrays per call is
 // avoidable garbage in the long-run simulations. Safe because findPath is
 // synchronous, single-threaded, and never re-entrant.
-const PATH_PREV = new Int32Array(GRID * GRID);
-const PATH_SEEN = new Uint8Array(GRID * GRID);
+// SIZED TO THE WORLD, not to GRID. Sized to the basin they silently truncated
+// every path on the camp's larger grid: the BFS would run off the end of `seen`,
+// read undefined, and return null or a path through a wall — a companion that
+// stops following, with nothing thrown.
+let PATH_PREV = new Int32Array(GRID * GRID);
+let PATH_SEEN = new Uint8Array(GRID * GRID);
+function scratch(cells) {
+  if (PATH_PREV.length < cells) {
+    PATH_PREV = new Int32Array(cells);
+    PATH_SEEN = new Uint8Array(cells);
+  }
+}
 
 /** Grid path (BFS) between two cells, as an array of {cx,cz}. Used by NPC AI. */
 export function findPath(world, from, to) {
+  const GRID = gridOf(world);
   const startIdx = from.cz * GRID + from.cx;
   const goalIdx = to.cz * GRID + to.cx;
   if (startIdx === goalIdx) return [];
+  scratch(GRID * GRID);
   const prev = PATH_PREV.fill(-1);
   const seen = PATH_SEEN.fill(0);
-  if (!inBounds(from.cx, from.cz) || world.blocked[startIdx]) return null;
+  if (!inBounds(from.cx, from.cz, GRID) || world.blocked[startIdx]) return null;
   const queue = [startIdx];
   seen[startIdx] = 1;
   for (let head = 0; head < queue.length; head++) {
@@ -435,7 +721,7 @@ export function findPath(world, from, to) {
     if (idx === goalIdx) break;
     const cx = idx % GRID, cz = (idx - cx) / GRID;
     for (const [nx, nz] of [[cx + 1, cz], [cx - 1, cz], [cx, cz + 1], [cx, cz - 1]]) {
-      if (!inBounds(nx, nz)) continue;
+      if (!inBounds(nx, nz, GRID)) continue;
       const ni = nz * GRID + nx;
       if (seen[ni] || world.blocked[ni]) continue;
       seen[ni] = 1;

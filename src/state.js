@@ -14,9 +14,9 @@
 // The sim's job is to keep an honest, testable record of what is TRUE; `percept.js`
 // is the only place allowed to lie about it.
 
-import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=seven-0.18.0";
-import { makeRng } from "./rng.js?v=seven-0.18.0";
-import { updateCompanions, companionRemark } from "./party.js?v=seven-0.18.0";
+import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=seven-0.24.0";
+import { makeRng } from "./rng.js?v=seven-0.24.0";
+import { updateCompanions, companionRemark } from "./party.js?v=seven-0.24.0";
 
 export const PARTY_SIZE = 6; // you + 5 companions — the spec's five NPCs, plus the player
 export const MAX_LUCIDITY = 100;
@@ -102,6 +102,57 @@ export function graceMultiplier(t) {
   const into = t - LUCIDITY_GRACE;
   return into >= LUCIDITY_RAMP ? 1 : into / LUCIDITY_RAMP;
 }
+// ---------------------------------------------------------------------------
+// DAY AND NIGHT. A day is the unit (docs/IDEAS.md, THE WOODS design note): you
+// have daylight, you decide what to spend it on, and night raises the rate
+// substantially.
+//
+// DAY_LENGTH IS DERIVED FROM LUCIDITY_GRACE, NOT TYPED AGAIN. They have to be
+// the same number — the opening calm is exactly "day one is quiet", and the
+// first thing that ever bites is the first nightfall. Written as two literals
+// they would drift the first time either was tuned, and the drift would be
+// invisible: grace ending mid-afternoon or a night that costs nothing.
+//
+// Nothing here is save state. The cycle is a pure function of `sim.time`, which
+// is already saved, so a resumed run wakes at the same hour by construction —
+// no field to forget, no schema to bump.
+// ---------------------------------------------------------------------------
+export const DAY_LENGTH = LUCIDITY_GRACE;
+export const NIGHT_LENGTH = 150;
+export const CYCLE_LENGTH = DAY_LENGTH + NIGHT_LENGTH;
+export const NIGHT_DRAIN_MULT = 2.2;
+export const NIGHT_SLIP_MULT = 2.2;
+export const FIRE_WARMTH = 9; // stand this close to a burning fire and the night lets go
+
+/** Which day it is, 1-based. */
+export const dayOf = (t) => Math.floor(t / CYCLE_LENGTH) + 1;
+/** How far into the current day/night, 0..1, for the renderer and the HUD. */
+export const phaseOf = (t) => {
+  const into = t % CYCLE_LENGTH;
+  return into < DAY_LENGTH
+    ? { night: false, day: dayOf(t), frac: into / DAY_LENGTH }
+    : { night: true, day: dayOf(t), frac: (into - DAY_LENGTH) / NIGHT_LENGTH };
+};
+
+/**
+ * How hard the night is bearing on this mind, 0..1.
+ *
+ * 0 in daylight, 0 in the camp (which suppresses the whole cycle the same way
+ * it suppresses drain), and 0 standing in the warmth of a fire that is actually
+ * burning — which is the entire reason to build one. Ramped over the first and
+ * last twenty seconds so nightfall is felt rather than flicked, and so nothing
+ * downstream has to special-case the boundary tick.
+ */
+export function nightFactor(sim, ch = null) {
+  if (sim.noDrain || sim.woods) return 0;
+  const ph = phaseOf(sim.time);
+  if (!ph.night) return 0;
+  const EDGE = 20 / NIGHT_LENGTH;
+  const ramp = Math.min(1, Math.min(ph.frac, 1 - ph.frac) / EDGE);
+  if (ch && sim.fire && sim.fire.fuel > 0 && dist2D(sim.fire, ch) <= FIRE_WARMTH) return 0;
+  return Math.max(0, ramp);
+}
+
 export const ISOLATION_DIST = 13; // units from the party centroid before you count as alone
 export const ISOLATION_MULT = 1.9; // walking off alone burns you down fastest
 export const CONTAGION_DIST = 9; // seeing someone come apart costs you
@@ -234,6 +285,13 @@ export const RESOURCE_SIGHT_RANGE = ITEM_SIGHT_RANGE; // same ground-clutter sig
 // real effort, short enough not to be a chore. Releasing early or switching
 // to a different tree/deposit resets progress to zero; see updateGatherHold.
 export const GATHER_HOLD_TIME = 1.2;
+// A DEADFALL IS THE SAME VERB AT A DIFFERENT PRICE. Not a new key, not a new
+// rung — you hold interact at it exactly as you hold it at a tree, and what
+// differs is that it takes most of a minute and it opens a route. That is the
+// design note's gating: "a fallen tree across the path needs cutting, cutting
+// takes hours, hours are daylight". The hold is the hours.
+export const DEADFALL_HOLD_TIME = 22;
+export const DEADFALL_WOOD = 5;
 // A bare-handed chop/mine yields a small random haul rather than a flat one —
 // a tree or deposit is worth reaching for on its own, not just as a Stake fee.
 export const GATHER_YIELD = Object.freeze({ min: 2, max: 3 });
@@ -241,6 +299,22 @@ export const GATHER_YIELD = Object.freeze({ min: 2, max: 3 });
 // "stake" case). With 5 of each per basin that's at most 2 stakes a run,
 // scarce enough to matter, not so scarce it's never worth reaching for.
 export const STAKE_COST = Object.freeze({ wood: 2, stone: 2 });
+
+// ---------------------------------------------------------------------------
+// FIRE. Not a place, not a carried item — a structure the player BUILDS, whose
+// position is decided at the moment they build it. It follows the planted Stake
+// (see useItem's "stake" case): it exists in no seed-generated world, so it
+// lives on `sim` and is serialised whole rather than rebuilt from a seed.
+//
+// It is also the first thing the player ADDS to the world. Everything else is
+// taken out of one.
+// ---------------------------------------------------------------------------
+export const FIRE_COST = Object.freeze({ wood: 2 });
+export const FIRE_FUEL_MAX = 100;
+export const FIRE_BURN_RATE = 0.55; // fuel per second — a built fire is ~3min unfed
+export const FIRE_FEED_COST = 1;    // wood per feed
+export const FIRE_FEED = 35;        // fuel per feed
+export const FIRE_RADIUS = 6;       // how close you stand to build on, or feed, a fire
 
 // A short campaign: winning a basin before the last one advances to a fresh
 // basin instead of ending the run — see checkEndings(). Callers that don't
@@ -532,6 +606,14 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
     // crafting fuel, never carried or used on their own. Carry forward too.
     wood: carryOver ? carryOver.wood : 0,
     stone: carryOver ? carryOver.stone : 0,
+    // The built fire, or null. One per basin. NOT carried across basins: a fire
+    // is a place you made, and you left it behind.
+    fire: null,
+    // The basin's deadfalls, as the RUN's own copies — clearing one mutates
+    // world.blocked, and the world is regenerated from the seed on every load,
+    // so which ones are down has to travel in the save (see save.js) exactly
+    // like a planted Stake does.
+    deadfalls: (world.deadfalls || []).map((d) => ({ ...d, cells: d.cells.map((c) => ({ ...c })) })),
     // Monotonic slot-id counter. Ids used to be `slot{length}-{time}`, which
     // repeats the moment a use-then-pickup lands in the same 0.01s tick at the
     // same inventory length — and percept.itemLabels is keyed by slot id, so a
@@ -769,13 +851,18 @@ export function tickLucidity(sim, ch, dt) {
   // into the meter, never restores lucidity directly, so it can't substitute
   // for a pylon — just buy time to reach one.
   if (ch.steadyUntil > sim.time) mult *= ITEM_INFO.tether.steadyMult;
+  // NIGHT. The rate rises; a fire in reach holds it off. No new rng draw — the
+  // multiplier only scales a rate and a threshold, so the stream position and
+  // the draw count are exactly what they were in daylight.
+  const night = nightFactor(sim, ch);
+  if (night > 0) mult *= 1 + (NIGHT_DRAIN_MULT - 1) * night;
 
   // Slip check, using the draw taken at the top. Gated on the same grace window
   // as the drain — the opening calm means calm, not "calm unless unlucky".
   if (
     !ch.hallucinating &&
     sim.time >= (ch.microCooldownUntil || 0) &&
-    slipRoll < (MICRO_RATE[bandOf(ch.lucidity)] || 0) * dt
+    slipRoll < (MICRO_RATE[bandOf(ch.lucidity)] || 0) * dt * (1 + (NIGHT_SLIP_MULT - 1) * night)
   ) {
     beginMicroEpisode(sim, ch, slipDur);
     return 0;
@@ -884,6 +971,9 @@ export function beginHallucinating(sim, ch) {
 export function recover(sim, ch, cause) {
   ch.hallucinating = false;
   ch.hallucination = null;
+  // The wood they thought they had was never cut. Coming back is where the
+  // count reconciles — shown snaps to true, and it does so silently.
+  ch.phantomWood = 0;
   // CLEAR THE SLIP WINDOW TOO. This function predates micro-episodes and only
   // ever knew how to end the bottomed-out kind of hallucination. Pulling
   // somebody out of a SLIP from outside — a pylon firing around them, a dose —
@@ -1737,6 +1827,40 @@ export function release(sim, slot) {
   return true;
 }
 
+/** How long the hold at this target takes. A deadfall is the expensive one. */
+export const holdTimeFor = (target) => (target && target.gatherKind === "deadfall" ? DEADFALL_HOLD_TIME : GATHER_HOLD_TIME);
+
+/** The uncleared deadfall in reach, if any. Blocked cells, so reach is generous. */
+export function deadfallAt(sim, actor = sim.player) {
+  if (!sim.deadfalls) return null;
+  return sim.deadfalls.find((d) => !d.cleared && dist2D(d, actor) <= GATHER_RADIUS + CELL) || null;
+}
+
+/**
+ * Cut a way through. Opens the cells for good, pays in wood, and costs the one
+ * thing the day is made of.
+ *
+ * Nothing is walled off: the generator only ever lays a deadfall where the map
+ * is still whole without it, so this is always a SHORTCUT being opened, never a
+ * gate being unlocked. Going round was available the whole time and cost
+ * distance instead.
+ */
+export function clearDeadfall(sim, actor = sim.player) {
+  const d = deadfallAt(sim, actor);
+  if (!d) return { ok: false, reason: "nothing-here" };
+  d.cleared = true;
+  const grid = sim.world.grid;
+  for (const c of d.cells) sim.world.blocked[c.cz * grid + c.cx] = 0;
+  // Same rule as a chopped tree: a hallucinating pair of hands brings nothing
+  // back, and the count they SEE moves anyway. The route opens either way — the
+  // timber is real whether or not the mind cutting it is.
+  if (actor.hallucinating) actor.phantomWood = (actor.phantomWood || 0) + DEADFALL_WOOD;
+  else sim.wood += DEADFALL_WOOD;
+  emit(sim, "gather", `The deadfall gives. The way through is open. (+${DEADFALL_WOOD})`,
+    { resource: "wood", amount: DEADFALL_WOOD, x: d.x, z: d.z });
+  return { ok: true, resource: "wood", amount: DEADFALL_WOOD };
+}
+
 export function gatherTarget(sim, actor = sim.player) {
   const nearTree = sim.trees
     .filter((t) => !t.chopped && t.discovered && dist2D(t, actor) <= GATHER_RADIUS)
@@ -1744,9 +1868,17 @@ export function gatherTarget(sim, actor = sim.player) {
   const nearStone = sim.stones
     .filter((s) => !s.mined && s.discovered && dist2D(s, actor) <= GATHER_RADIUS)
     .sort((a, b) => dist2D(a, actor) - dist2D(b, actor))[0];
-  const pick = [nearTree, nearStone].filter(Boolean).sort((a, b) => dist2D(a, actor) - dist2D(b, actor))[0];
+  // A deadfall is in the same list and competes on distance, like everything
+  // else. It does NOT outrank a tree standing next to it: a deadfall is a
+  // 22-second commitment, and silently preferring it over a 1.2-second chop
+  // because it happened to be a metre closer would be the resolver eating a
+  // cheap verb with an expensive one.
+  const nearFall = deadfallAt(sim, actor);
+  const pick = [nearTree, nearStone, nearFall].filter(Boolean)
+    .sort((a, b) => dist2D(a, actor) - dist2D(b, actor))[0];
   if (!pick) return null;
-  return { ...pick, gatherKind: pick === nearTree ? "tree" : "stone" };
+  const gatherKind = pick === nearTree ? "tree" : pick === nearStone ? "stone" : "deadfall";
+  return { ...pick, gatherKind };
 }
 
 export function gatherResource(sim, actor = sim.player) {
@@ -1759,7 +1891,17 @@ export function gatherResource(sim, actor = sim.player) {
     const t = sim.trees.find((x) => x.id === pick.id);
     t.chopped = true;
     const n = sim.rng.int(GATHER_YIELD.min, GATHER_YIELD.max);
-    sim.wood += n;
+    // A HALLUCINATING PAIR OF HANDS BRINGS BACK NOTHING. The draw above is
+    // unconditional — the yield is rolled whatever the state, or a chopper who
+    // was under would burn one fewer draw than one who was not and re-phase
+    // every other mind in the tick. What changes is where the wood goes: the
+    // count they will SEE (percept.shownWood) rather than the count that exists.
+    // Note this is the first crack in "wood and stone carry no deception layer"
+    // — deliberately. The Stake gate below still reads TRUE wood, so the one
+    // craft that can never come out false stays that way; what lies is the
+    // number, not the recipe.
+    if (actor.hallucinating) actor.phantomWood = (actor.phantomWood || 0) + n;
+    else sim.wood += n;
     // x/z ride along on the event so the HUD can animate the haul from the
     // node's own world position to the Wood pill, instead of the counter
     // just silently ticking up.
@@ -1793,8 +1935,9 @@ function updateGatherHold(sim, dt, interacting, actor = sim.player, hold = sim.g
     hold.progress = 0;
   }
   hold.progress += dt;
-  if (hold.progress >= GATHER_HOLD_TIME) {
-    gatherResource(sim, actor);
+  if (hold.progress >= holdTimeFor(target)) {
+    if (target.gatherKind === "deadfall") clearDeadfall(sim, actor);
+    else gatherResource(sim, actor);
     hold.targetId = null;
     hold.progress = 0;
   }
@@ -2094,6 +2237,73 @@ export function craftItem(sim, prefer = -1, believed = null) {
   return { ok: true, kind: "stake", real: true };
 }
 
+/**
+ * Build a fire where the actor is standing. One per basin.
+ *
+ * Costs TRUE wood. A mind that has been "gathering" while under has a shown
+ * count well above what it has, so this is one of the two places the lie
+ * settles up (the other is the Stake): the offer comes from what they see, the
+ * refusal comes from what is there.
+ */
+export function buildFire(sim, actor = sim.player) {
+  // NOT A CRAFT RECIPE. It was one for about ten minutes: `findCraftMatch`
+  // returns the FIRST match, so a fire that outranked the Stake made the Stake
+  // unreachable wherever both were affordable — five tests went red at once,
+  // which is the resolver starvation this codebase already has a rule about,
+  // one level down from the prompt ladder. A fire has its OWN rung on the
+  // interact verb instead, at the bottom where it can starve nothing.
+  if (sim.status !== "playing") return { ok: false, reason: "over" };
+  if (sim.fire) return { ok: false, reason: "already" };
+  if (sim.wood < FIRE_COST.wood) return { ok: false, reason: "no-wood" };
+  sim.wood -= FIRE_COST.wood;
+  sim.fire = { x: actor.x, z: actor.z, fuel: FIRE_FUEL_MAX, builtAt: sim.time };
+  emit(sim, "fire", "The kindling catches. A fire, for as long as you feed it.", { who: actor.id });
+  return { ok: true };
+}
+
+/** The built fire, if the actor is standing close enough to work it. */
+export function fireAt(sim, actor = sim.player) {
+  if (!sim.fire) return null;
+  return dist2D(sim.fire, actor) <= FIRE_RADIUS ? sim.fire : null;
+}
+
+/**
+ * Feed the fire. Spends TRUE wood whether or not there is a fire to feed.
+ *
+ * That asymmetry is the whole mechanic and it is deliberate. The sim never asks
+ * whether anyone is hallucinating here — it just takes the wood and, if a real
+ * fire is in reach, banks the fuel. Deciding whether to OFFER the verb belongs
+ * to percept, which is the only module allowed to lie. A lucid lead is never
+ * prompted to feed empty ground; a brittle one is, and pays for it.
+ */
+export function feedFire(sim, actor = sim.player) {
+  if (sim.status !== "playing") return { ok: false, reason: "over" };
+  if (sim.wood < FIRE_FEED_COST) return { ok: false, reason: "no-wood" };
+  sim.wood -= FIRE_FEED_COST;
+  const f = fireAt(sim, actor);
+  if (!f) {
+    // No event, no line. Feeding a fire that is not there has to look exactly
+    // like feeding one that is, or the subtitle is the tell.
+    return { ok: true, fed: false };
+  }
+  f.fuel = Math.min(FIRE_FUEL_MAX, f.fuel + FIRE_FEED);
+  return { ok: true, fed: true };
+}
+
+/**
+ * Burn the fire down. No rng: fuel gates nothing that draws, so this decides
+ * how things LOOK and how cold the night is, never the stream position.
+ *
+ * A spent fire keeps its object with `fuel: 0` rather than being deleted. It is
+ * still a place — the place you built it — and percept needs somewhere to put
+ * the fire a far-gone mind still sees. Same reason a dead pylon stays a pylon.
+ */
+export function tickFire(sim, dt) {
+  if (!sim.fire || sim.fire.fuel <= 0) return;
+  sim.fire.fuel = Math.max(0, sim.fire.fuel - FIRE_BURN_RATE * dt);
+  if (sim.fire.fuel === 0) emit(sim, "fire", "The fire is out.", {});
+}
+
 /** Everyone at camp, or close enough to walk in together. */
 export function partyAtCamp(sim) {
   return sim.party.filter((c) => dist2D(c, sim.world.camp) <= 9).length;
@@ -2282,6 +2492,7 @@ export function tick(sim, dt, input = {}) {
     discover(sim);
   }
 
+  tickFire(sim, step);
   for (const ch of sim.party) tickLucidity(sim, ch, step);
 
   // Unprompted chatter is the other half of the sensor: a companion who is

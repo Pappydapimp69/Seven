@@ -23,7 +23,7 @@
 // wrong length — the failure surfaces somewhere far away as a NaN position or
 // an invisible floor. The returned object is asserted field-for-field in tests.
 
-import { CELL, GRID, FEATURE, cellToWorld, floodFill } from "./world.js?v=seven-0.18.0";
+import { CELL, FEATURE, cellToWorld, floodFill, gridOf } from "./world.js?v=seven-0.24.0";
 
 /**
  * The reserved seed that means "this is the camp, not a basin".
@@ -61,8 +61,19 @@ export const CELL_KIND = Object.freeze({
   PATH: 4,       // walkable, but drawn as dirt rather than grass
 });
 
-const at = (cx, cz) => cz * GRID + cx;
-const inBounds = (cx, cz) => cx >= 0 && cz >= 0 && cx < GRID && cz < GRID;
+/**
+ * The camp's own grid, in cells per side. NOT the basin's `GRID`.
+ *
+ * Same number today — the camp is a centred square inside a basin-sized grid —
+ * but it is the camp's answer, not the basin's. Every world already carried
+ * `world.grid` and nothing read it; consumers read it now (world.js), and this
+ * is what the camp puts there. Changing either map's size stops being a change
+ * to the other's.
+ */
+export const CAMP_GRID = 46;
+
+const at = (cx, cz) => cz * CAMP_GRID + cx;
+const inBounds = (cx, cz) => cx >= 0 && cz >= 0 && cx < CAMP_GRID && cz < CAMP_GRID;
 
 // The camp occupies a centred square smaller than a full basin — big enough to
 // wander and get slightly turned around in, small enough that the treeline is
@@ -73,7 +84,7 @@ const inBounds = (cx, cz) => cx >= 0 && cz >= 0 && cx < GRID && cz < GRID;
 // area goes from ~784 cells to ~1600 — four times the ground, and enough of it
 // that a pylon can be genuinely off in the trees rather than underfoot.
 const MARGIN = 3;                       // cells of forest wall on every side
-const LO = MARGIN, HI = GRID - MARGIN;  // inclusive playable bounds
+const LO = MARGIN, HI = CAMP_GRID - MARGIN;  // inclusive playable bounds
 
 /**
  * A flat-ish floor. The basin's heightfield bowls toward the middle so the rim
@@ -82,8 +93,8 @@ const LO = MARGIN, HI = GRID - MARGIN;  // inclusive playable bounds
  * like a tabletop. Deterministic — no rng at all, since the camp never varies.
  */
 function campHeight(cx, cz) {
-  const u = (cx / GRID - 0.5) * Math.PI * 2;
-  const v = (cz / GRID - 0.5) * Math.PI * 2;
+  const u = (cx / CAMP_GRID - 0.5) * Math.PI * 2;
+  const v = (cz / CAMP_GRID - 0.5) * Math.PI * 2;
   return Math.sin(u * 0.7) * 0.32 + Math.cos(v * 0.6) * 0.28;
 }
 
@@ -142,14 +153,14 @@ const THIN_WOOD = Object.freeze([
  * look at them.
  */
 export function buildCamp() {
-  const blocked = new Uint8Array(GRID * GRID);
-  const cellKind = new Uint8Array(GRID * GRID);
+  const blocked = new Uint8Array(CAMP_GRID * CAMP_GRID);
+  const cellKind = new Uint8Array(CAMP_GRID * CAMP_GRID);
   const mark = (cx, cz, kind) => { if (inBounds(cx, cz)) cellKind[at(cx, cz)] = kind; };
 
   // 1. Forest wall. Everything outside the playable square is solid trees. This
   //    is the map boundary and it is absolute — there is no way out of camp.
-  for (let cz = 0; cz < GRID; cz++) {
-    for (let cx = 0; cx < GRID; cx++) {
+  for (let cz = 0; cz < CAMP_GRID; cz++) {
+    for (let cx = 0; cx < CAMP_GRID; cx++) {
       if (cx < LO || cx > HI || cz < LO || cz > HI) { blocked[at(cx, cz)] = 1; cellKind[at(cx, cz)] = CELL_KIND.TREELINE; }
     }
   }
@@ -195,7 +206,7 @@ export function buildCamp() {
   }
 
   const place = (id, kind, cx, cz, extra = {}) => ({
-    id, kind, cx, cz, ...cellToWorld(cx, cz), ...extra,
+    id, kind, cx, cz, ...cellToWorld(cx, cz, CAMP_GRID), ...extra,
   });
 
   // TWO pylons, both mossed. One stands on the path where anyone walking to the
@@ -213,18 +224,22 @@ export function buildCamp() {
 
   return {
     seed: CAMP_SEED,
-    grid: GRID,
+    grid: CAMP_GRID,
     cell: CELL,
     blocked,
     cellKind,
     heightAt: campHeight,
-    camp: { id: "camp", kind: FEATURE.CAMP, ...spawnCell, ...cellToWorld(spawnCell.cx, spawnCell.cz) },
+    camp: { id: "camp", kind: FEATURE.CAMP, ...spawnCell, ...cellToWorld(spawnCell.cx, spawnCell.cz, CAMP_GRID) },
     // A camp has no survey markers and no raw materials. The tutorial spawns
     // exactly what each objective needs and nothing else, so these are empty by
     // design rather than by omission — an item lying around before its
     // objective is the out-of-order pickup the pinning discipline exists to
     // prevent (brain: wrong-sky#E8 — objective-critical targets stay
     // existence-gated; only the pylons are effect-gated).
+    // The camp has no deadfalls — nothing blocks the walk in — but the field has
+    // to exist, because every consumer takes a world without asking where it
+    // came from and `tests/camp.mjs` pins the shape field for field.
+    deadfalls: [],
     monoliths: [],
     pylons,
     items: [],
@@ -232,8 +247,8 @@ export function buildCamp() {
     stones: [],
     repairs: 0,
     // Camp-only. Ignored by every consumer that does not know about them.
-    spawn: { ...spawnCell, ...cellToWorld(spawnCell.cx, spawnCell.cz) },
-    trainer: { ...trainerCell, ...cellToWorld(trainerCell.cx, trainerCell.cz) },
+    spawn: { ...spawnCell, ...cellToWorld(spawnCell.cx, spawnCell.cz, CAMP_GRID) },
+    trainer: { ...trainerCell, ...cellToWorld(trainerCell.cx, trainerCell.cz, CAMP_GRID) },
   };
 }
 
@@ -247,11 +262,12 @@ export function buildCamp() {
  * measured from the real grid rather than assumed, and asserted in tests.
  */
 export function longestWalk(world) {
+  const grid = gridOf(world);
   const reach = floodFill(world.blocked, world.camp.cx, world.camp.cz);
   let best = 0;
-  for (let cz = 0; cz < GRID; cz++) {
-    for (let cx = 0; cx < GRID; cx++) {
-      if (!reach[at(cx, cz)]) continue;
+  for (let cz = 0; cz < grid; cz++) {
+    for (let cx = 0; cx < grid; cx++) {
+      if (!reach[cz * grid + cx]) continue;
       const d = Math.hypot(cx - world.camp.cx, cz - world.camp.cz) * CELL;
       if (d > best) best = d;
     }

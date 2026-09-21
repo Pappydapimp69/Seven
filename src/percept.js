@@ -12,9 +12,9 @@
 // without booting a browser.
 
 import { HALLUCINATION, BAND, bandOf, ITEM_INFO, LUCIDITY_GRACE, CORROBORATE_RADIUS,
-  LINK_RANGE, PING_RANGE,
-} from "./state.js?v=seven-0.18.0";
-import { ITEM_KINDS } from "./world.js?v=seven-0.18.0";
+  LINK_RANGE, PING_RANGE, FIRE_FUEL_MAX, FIRE_BURN_RATE, FIRE_FEED, FIRE_RADIUS,
+} from "./state.js?v=seven-0.24.0";
+import { ITEM_KINDS } from "./world.js?v=seven-0.24.0";
 
 const PHANTOM_NAMES = ["the Sixth Stone", "the Watching Slab", "the Other Cairn", "the Hollow Tooth"];
 const PHANTOM_COMPANIONS = ["ODEN", "MARIS", "THE SEVENTH"];
@@ -39,6 +39,12 @@ export function createPercept(eye = null) {
     phantomCompanions: [],
     phantomPylons: [],
     deadPylonsLookLive: new Set(),
+    // THE FIRE THIS EYE SEES, and the wood it believes it has. Both are
+    // derived every tick from sim + this mind's state; neither is ever written
+    // back. See updateFalseFire.
+    shownFire: null,
+    phantomFire: null,
+    shownWood: 0,
     compassOffset: 0,
     swayPhase: 0,
     whisper: null,
@@ -825,8 +831,80 @@ function updateDoubledParty(percept, sim, p, dt, lying) {
 }
 
 /** Advance the perceived world. Call once per tick, after state.tick. */
+/**
+ * The fire, as this mind sees it — and the wood it thinks it has.
+ *
+ * Below BAND.BRITTLE a mind with no live fire is shown one anyway, and the
+ * fabrication BEHAVES: it burns down at the real rate, so it asks to be fed on
+ * the same schedule a real one would. That consistency is the point. A lie that
+ * behaved wrongly would be a bug the player could see; this one can only be
+ * caught by morning, or by the wood running out.
+ *
+ * Same rule the design note already gives pylons — "a far-gone mind sees dead
+ * pylons as live: even the honest instrument stops being honest exactly when
+ * you need it" — and the same threshold everything else uses, read from
+ * bandOf() rather than re-typed as a number.
+ */
+function updateFalseFire(percept, sim, p, dt) {
+  const real = sim.fire || null;
+  const live = real && real.fuel > 0;
+  const band = bandOf(p.lucidity);
+  const farGone = band === BAND.BRITTLE || band === BAND.GONE;
+
+  // IT ONLY LIES ABOUT A FIRE THAT EXISTS. Fabricating one from nothing put a
+  // "Feed the fire" prompt on empty ground the moment the lead went under, and
+  // a prompt that appears only while hallucinating IS a lucidity readout — the
+  // exact thing paintPrompt's strike rung is written to avoid. So the lie is
+  // the narrower one the design note actually states, and the one
+  // deadPylonsLookLive already implements: a far-gone mind sees a DEAD fire as
+  // live. Never a fire where the player never built one.
+  if (live || !farGone || !real) {
+    percept.phantomFire = null;
+    percept.shownFire = real;
+    return;
+  }
+  // Their own fire, in the place they built it, still burning as far as they
+  // can tell. They will feed it all night.
+  if (!percept.phantomFire) {
+    percept.phantomFire = { x: real.x, z: real.z, fuel: FIRE_FUEL_MAX * 0.6 };
+  }
+  percept.phantomFire.fuel = Math.max(0, percept.phantomFire.fuel - FIRE_BURN_RATE * dt);
+  percept.shownFire = percept.phantomFire;
+}
+
+/**
+ * Tell this percept the lead just fed a fire that was not there.
+ *
+ * The sim spent the wood and returned `fed: false`; it does not know or care
+ * why. This is the other half — the phantom takes the fuel, exactly as a real
+ * fire would, because a fire that visibly ignored being fed is a tell.
+ */
+/**
+ * The fire this mind believes it is standing at, real or not.
+ *
+ * BELIEVED, not real — the same rule the pylon prompt follows. If the verb only
+ * appeared over a fire that exists, its absence over a fabricated one would be
+ * a perfect lucidity readout: press, nothing offered, therefore you are gone.
+ * The offer has to look identical; what differs is that the wood buys nothing.
+ */
+export function believedFireAt(percept, sim, actor) {
+  const f = percept.shownFire;
+  if (!f) return null;
+  return Math.hypot(f.x - actor.x, f.z - actor.z) <= FIRE_RADIUS ? f : null;
+}
+
+export function notePhantomFeed(percept) {
+  if (!percept.phantomFire) return;
+  percept.phantomFire.fuel = Math.min(FIRE_FUEL_MAX, percept.phantomFire.fuel + FIRE_FEED);
+}
+
 export function updatePercept(percept, sim, dt) {
   const p = eyeOf(percept, sim);
+  // Derived, never written back: the count this mind believes it has. Wood cut
+  // while hallucinating never entered `sim.wood` at all (gatherResource), so
+  // the gap only opens while under and closes on recovery.
+  percept.shownWood = sim.wood + (p.phantomWood || 0);
+  updateFalseFire(percept, sim, p, dt);
   // Set only on the tick a hallucination begins — the same beat
   // seedHallucination gets to place its phantoms before anything else reacts
   // to them. The monster flicker gets one tick's grace too: it must not fire

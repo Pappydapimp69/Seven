@@ -16,7 +16,7 @@
 // difficulty for a human who is shown markers that do not exist and told by their
 // own party that everything is fine — costs it almost nothing.
 
-import { createRun, tick, logMarker, trueLogCount, debrief, activatePylon, callCompanion, LOG_RADIUS, PYLON_RADIUS, FULL_DRAIN_AT } from "../src/state.js";
+import { createRun, tick, logMarker, trueLogCount, debrief, activatePylon, callCompanion, LOG_RADIUS, PYLON_RADIUS, FULL_DRAIN_AT, DAY_LENGTH, nightFactor, buildFire, feedFire, FIRE_COST, FIRE_WARMTH, FIRE_FUEL_MAX, FIRE_FEED_COST } from "../src/state.js";
 import { createPercept, updatePercept } from "../src/percept.js";
 import { findPath, worldToCell, cellToWorld, floodFill, GRID } from "../src/world.js";
 
@@ -43,7 +43,7 @@ function sweepPoints(sim) {
           }
         }
       }
-      if (found) pts.push({ ...found, ...cellToWorld(found.cx, found.cz), visited: false });
+      if (found) pts.push({ ...found, ...cellToWorld(found.cx, found.cz, sim.world.grid), visited: false });
     }
   }
   return pts;
@@ -53,8 +53,16 @@ function sweepPoints(sim) {
  * Drive one run to a terminal state.
  * @param policy "careful" | "reckless" | "deceived" — see the constants below
  */
-function playRun(seed, policy, difficulty = "standard") {
+function playRun(seed, policy, difficulty = "standard", startAt = 0) {
   const sim = createRun({ seed, difficulty });
+  // START THE CLOCK WHERE THE CALLER ASKS. The five oracle rows all finish
+  // inside the opening daylight, so none of them has ever met a nightfall —
+  // which is why they report identical numbers and cannot tell two policies
+  // apart. A row that begins at dusk measures the same bot against the
+  // mechanic, and changes no game constant to do it.
+  sim.time = startAt;
+  if (policy === "camper") sim.wood = FIRE_COST.wood + 6; // see the camper branch below
+  let nightSeconds = 0;
   const sweep = sweepPoints(sim);
   const cooldown = new Map(); // pylon id -> sim time it becomes selectable again
   let path = null;
@@ -98,6 +106,7 @@ function playRun(seed, policy, difficulty = "standard") {
   // second-guesses. But its win rate is the only one in this file that has been
   // paid for, and it is the only one difficulty tuning is allowed to read.
   const lied = policy === "deceived";
+  const careLike = policy === "careful" || policy === "camper";
   const percept = lied ? createPercept(sim.player) : null;
   if (lied) {
     // Start the clock where the basin actually starts lying. The first ~90
@@ -128,7 +137,7 @@ function playRun(seed, policy, difficulty = "standard") {
     // under has to feel like nothing being wrong, or none of the rest of this
     // is being measured at all.
     const selfLow = believesLies() ? false : sim.player.lucidity < 25 || sim.player.hallucinating;
-    if ((policy === "careful" || lied) && (partyWorst < REST_TRIGGER || selfLow)) {
+    if ((careLike || lied) && (partyWorst < REST_TRIGGER || selfLow)) {
       if (believesLies()) {
         // Relief, as it APPEARS. Phantom pylons first — FALSE_ANCHOR makes them
         // the nearest thing on screen, and they back off as you approach — then
@@ -204,6 +213,7 @@ function playRun(seed, policy, difficulty = "standard") {
     }
   };
   const step = (input) => {
+    if (nightFactor(sim) > 0) nightSeconds += DT;
     tick(sim, DT, input);
     if (percept) updatePercept(percept, sim, DT);
     ticksDone++;
@@ -213,6 +223,37 @@ function playRun(seed, policy, difficulty = "standard") {
   while (sim.status === "playing") {
     guard();
     repath -= DT;
+
+    // THE CAMPER. A third policy, and the only one that uses the counterplay the
+    // night was built around: when it gets dark, light a fire and stay in it.
+    //
+    // It is HANDED its wood at the start rather than gathering it. That is
+    // deliberate and it is a limitation worth naming: "does a fire save you from
+    // the night" and "can a bot find enough wood before dusk" are two different
+    // questions, and the second one is a level-design question this map cannot
+    // answer yet — there is no path, no deadfall, nothing that makes wood a
+    // route. Isolating the first is what makes camper-vs-careful a controlled
+    // comparison instead of a measurement of the bot's foraging.
+    if (policy === "camper") {
+      if (!sim.fire && nightFactor(sim) > 0 && sim.wood >= FIRE_COST.wood) buildFire(sim);
+      if (sim.fire && sim.fire.fuel > 0 && nightFactor(sim) > 0) {
+        const d = dist(sim.fire, sim.player);
+        if (d > FIRE_WARMTH * 0.5) {
+          // Walk back to the light. Nothing else matters while it is dark.
+          const dx = sim.fire.x - sim.player.x, dz = sim.fire.z - sim.player.z;
+          const len = Math.hypot(dx, dz) || 1;
+          step({ move: { x: dx / len, z: dz / len }, yaw: Math.atan2(dx, -dz) });
+          continue;
+        }
+        if (sim.fire.fuel < FIRE_FUEL_MAX * 0.5 && sim.wood >= FIRE_FEED_COST) feedFire(sim);
+        // Call the crew into the warmth — a fire only helps the minds standing
+        // in it, which is the whole reason it is a party decision.
+        const out = sim.companions.filter((c) => !c.hallucinating && dist(c, sim.fire) > FIRE_WARMTH)[0];
+        if (out) callCompanion(sim, out.id);
+        step({ move: { x: 0, z: 0 }, yaw: 0 });
+        continue;
+      }
+    }
     // HOLD THE PRIME. The bot re-decides its goal every second, which was
     // harmless when a pylon fired the instant you stood in it — and fatal once
     // it takes two: it would set hands on a pylon, call somebody, then wander
@@ -301,12 +342,13 @@ function playRun(seed, policy, difficulty = "standard") {
     // an empty array is a computed answer and must not trigger a recompute every
     // tick (see the same distinction in party.js).
     if (path === null) {
-      path = findPath(sim.world, worldToCell(sim.player.x, sim.player.z), worldToCell(goal.x, goal.z)) || [];
-      if (!path.length) path = [worldToCell(goal.x, goal.z)]; // already in the goal cell
+      const g = sim.world.grid;
+      path = findPath(sim.world, worldToCell(sim.player.x, sim.player.z, g), worldToCell(goal.x, goal.z, g)) || [];
+      if (!path.length) path = [worldToCell(goal.x, goal.z, g)]; // already in the goal cell
     }
     // Path exhausted: steer straight at the goal for the last few metres.
     const node = path[0];
-    const aim = node ? cellToWorld(node.cx, node.cz) : goal;
+    const aim = node ? cellToWorld(node.cx, node.cz, sim.world.grid) : goal;
     const dx = aim.x - sim.player.x;
     const dz = aim.z - sim.player.z;
     const len = Math.hypot(dx, dz) || 1;
@@ -343,7 +385,16 @@ function playRun(seed, policy, difficulty = "standard") {
       step({ move: { x: 0, z: 0 }, yaw });
     }
   }
-  return { ...debrief(sim), draws: sim.stats.draws || 0, pylonsLeft: sim.pylons.filter((p) => !p.spent).length };
+  return {
+    ...debrief(sim),
+    draws: sim.stats.draws || 0,
+    pylonsLeft: sim.pylons.filter((p) => !p.spent).length,
+    // What the harness could not see before: how much of the run was spent in
+    // the dark, and whether the counterplay was ever reached for.
+    nightSeconds,
+    fireBuilt: sim.fire ? 1 : 0,
+    fireFuel: sim.fire ? sim.fire.fuel : 0,
+  };
 }
 
 const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
@@ -361,7 +412,8 @@ function summarise(label, reports) {
       `  dissolved ${dissolved}  dark ${dark}  discredited ${discredited}` +
       `  found ${avg((r) => r.found)}/6  logged ${avg((r) => r.logged)}/6  false ${avg((r) => r.falseLogs)}` +
       `  slips ${avg((r) => r.slips)}  struck ${avg((r) => r.strikes)}  left-in ${avg((r) => r.badLogs)}` +
-      `  time ${avg((r) => r.time)}s  party-seconds-lost ${(goneSecs.reduce((a, b) => a + b, 0) / n).toFixed(0)}`,
+      `  time ${avg((r) => r.time)}s  party-seconds-lost ${(goneSecs.reduce((a, b) => a + b, 0) / n).toFixed(0)}` +
+      `  night ${avg((r) => r.nightSeconds)}s  fires ${avg((r) => r.fireBuilt)}`,
   );
   return { n, wins, dissolved, dark, winRate: wins / n };
 }
@@ -387,6 +439,23 @@ const br = summarise("bleak/reck", bleakReck);
 const gentle = [];
 for (let seed = 1; seed <= Math.min(SEEDS, 20); seed++) gentle.push(playRun(seed, "careful", "gentle"));
 summarise("gentle/care", gentle);
+
+console.log("");
+// THE ROWS THAT CAN SEE A NIGHT. Same bots, same seeds, same constants — the
+// run simply starts at dusk instead of dawn. Without these the whole day/night
+// mechanic is invisible to this harness: every row above finishes in daylight,
+// which is exactly why they all report the same number.
+const nightCare = [];
+const nightReck = [];
+for (let seed = 1; seed <= Math.min(SEEDS, 20); seed++) {
+  nightCare.push(playRun(seed, "careful", "standard", DAY_LENGTH));
+  nightReck.push(playRun(seed, "reckless", "standard", DAY_LENGTH));
+}
+const nightCamp = [];
+for (let seed = 1; seed <= Math.min(SEEDS, 20); seed++) nightCamp.push(playRun(seed, "camper", "standard", DAY_LENGTH));
+summarise("care@night", nightCare);
+summarise("reck@night", nightReck);
+summarise("camp@night", nightCamp);
 
 console.log("");
 const deceived = [];

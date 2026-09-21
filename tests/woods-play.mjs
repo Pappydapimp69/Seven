@@ -73,6 +73,41 @@ const A = (c, m) => { if (!c) fails.push(m); };
   A(start.names.every((n) => /^[A-Z]{4,8}$/.test(n)), `a generated name is malformed: ${start.names.join(",")}`);
   A(start.drew > 40, `the camp barely drew (${start.drew} calls) — geometry is missing`);
 
+  // --- the four places are four DIFFERENT places ------------------------
+  // `tests/woods.mjs` holds the contract (every site has a form); this holds
+  // the result, in the live scene, because a form can exist and still draw the
+  // same thing four times. The signature is geometry type plus vertex count per
+  // child, which is what actually differs between a creek and a ridge and is
+  // stable across material tweaks.
+  const shapes = await page.evaluate(() => {
+    const M = window.__seven;
+    M.advance(0.2);
+    const scene = M.renderer.scene;
+    const ids = M.sim.world.sites.map((s) => s.id);
+    const sigs = {};
+    scene.traverse((o) => {
+      const item = o.userData && o.userData.item;
+      if (!item || !ids.includes(item.id) || !o.userData.lamp) return;
+      const parts = [];
+      o.traverse((c) => {
+        if (!c.geometry) return;
+        const pos = c.geometry.attributes && c.geometry.attributes.position;
+        parts.push(`${c.geometry.type}:${pos ? pos.count : 0}`);
+      });
+      sigs[item.id] = parts.sort().join("|");
+    });
+    return sigs;
+  });
+  const seen = Object.keys(shapes);
+  A(seen.length === 4, `found ${seen.length} site markers in the scene, not 4`);
+  for (const [id, sig] of Object.entries(shapes)) {
+    A(sig && sig.length > 0, `site "${id}" drew no geometry at all`);
+  }
+  const distinct = new Set(Object.values(shapes));
+  A(distinct.size === seen.length,
+    `the sites are not tellable apart — ${seen.length} places, ${distinct.size} distinct shapes: ` +
+    Object.entries(shapes).map(([k, v]) => `${k}=${v.slice(0, 40)}`).join("  "));
+
   // --- the prompt appears where the work is, and nowhere else ------------
   const prompts = await page.evaluate(() => {
     const M = window.__seven;
