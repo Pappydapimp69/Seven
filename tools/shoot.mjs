@@ -47,6 +47,9 @@ const VIEWS = [
   { name: "depth",  seed: 1234, yaw: 2.4,  pitch: 0.04,  advance: 2,   night: false },
   { name: "night",  seed: 1234, yaw: 0.6,  pitch: -0.05, advance: 2,   night: true },
   { name: "camp",   seed: null, yaw: 0.9,  pitch: -0.02, advance: 2,   night: false },
+  // Standing off the trainer, looking at him. The one view where a figure has
+  // to read as a person rather than as a marker.
+  { name: "trainer", seed: null, yaw: 0.0, pitch: -0.02, advance: 2, night: false, atTrainer: true },
 ];
 
 const server = serve();
@@ -76,7 +79,7 @@ for (const v of VIEWS) {
   if (entered !== true) { console.log(`  ${v.name}: skipped — ${entered}`); continue; }
   await page.waitForFunction(() => !!window.__seven.sim, null, { timeout: 15000 });
 
-  await page.evaluate(({ yaw, pitch, advance, night }) => {
+  const aimRes = await page.evaluate(({ yaw, pitch, advance, night, atTrainer }) => {
     const M = window.__seven; const sim = M.sim;
     // Stand at spawn, facing a fixed bearing. Not the camera's own drift — a
     // captured frame has to be reproducible from the sim, not from timing.
@@ -86,11 +89,55 @@ for (const v of VIEWS) {
     const home = sim.world.spawn || sim.world.camp;
     sim.player.x = home.x;
     sim.player.z = home.z;
-    sim.player.yaw = yaw;
+    // FRAMING BY POSITION, NOT BY ROTATION — and that is the whole trick here.
+    //
+    // Aiming the camera was three separate failures. `sim.player.yaw = x` is
+    // erased by the page's own rAF loop, which keeps stepping the sim with the
+    // real input while an evaluate returns; an intent yaw passed to advance()
+    // goes the same way; and driving the input layer through debugMouseLook
+    // needs a sensitivity this harness has no business knowing. Every one of
+    // them produced a screenshot of empty field that looked exactly like a
+    // subject failing to draw.
+    //
+    // The default facing is yaw 0, which is -z. So do not turn the camera at
+    // all: stand SOUTH of whatever the view is about and it is already in
+    // frame. No input layer, nothing for the loop to overwrite, and the shot
+    // is reproducible from position alone.
+    if (atTrainer && sim.trainer) {
+      // Four cells south and two west. Both numbers come off the blocked grid,
+      // not off a round guess: nine units put the camera inside the tree at
+      // (39,26), and standing square behind it left that same trunk filling
+      // the middle of the frame with the trainer directly behind it. Two cells
+      // west clears the sightline.
+      sim.player.x = sim.trainer.x - 5.2;
+      sim.player.z = sim.trainer.z + 10.4;
+    }
     sim.player.pitch = pitch;
     if (night) sim.time = 400;      // past the day's grace, into the dark
     M.advance(advance);
+    // YAW GOES THROUGH THE INPUT LAYER, and nothing else works.
+    //
+    // The page's own rAF loop is still running while this evaluate returns, and
+    // it steps the sim every frame with the REAL input — whose yaw is 0. So
+    // `sim.player.yaw = x` is erased before the screenshot, and so is an intent
+    // yaw passed to advance(). Three shots were read as "the trainer is not
+    // drawing" before a debug line printed the yaw actually in effect: 0, for
+    // every view, including the basin ones that had been asking for 0.6.
+    //
+    // debugMouseLook feeds the input layer the way a mouse does, which is the
+    // one path the loop will not overwrite. Sensitivity is a user setting, so
+    // rather than assume a mapping this closes the loop: nudge, read back,
+    // repeat. It converges in a handful of passes and cannot silently no-op —
+    // if the yaw never approaches the target, the harness says so.
+    return { yaw: sim.player.yaw, x: sim.player.x, z: sim.player.z };
   }, v);
+  const aimed = aimRes;
+  const aim = await page.evaluate(() => {
+    const s = window.__seven.sim;
+    return { px: +s.player.x.toFixed(1), pz: +s.player.z.toFixed(1), yaw: +s.player.yaw.toFixed(3),
+             tr: s.trainer ? `${s.trainer.x.toFixed(1)},${s.trainer.z.toFixed(1)}` : "none" };
+  });
+  console.log(`    [view] ${v.name}: standing ${aim.px},${aim.pz} facing -z${aim.tr !== "none" ? ` · trainer ${aim.tr}` : ""}`);
 
   // Let the compositor settle without asserting on wall-clock: two rAFs.
   await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));

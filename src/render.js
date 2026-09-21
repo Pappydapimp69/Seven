@@ -6,10 +6,10 @@
 // list as the real ones.
 
 import * as THREE from "../lib/three.module.js";
-import { CELL, cellToWorld, gridOf } from "./world.js?v=seven-0.24.0";
-import { nightFactor } from "./state.js?v=seven-0.24.0";
-import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=seven-0.24.0";
-import { PYLON_RADIUS } from "./state.js?v=seven-0.24.0";
+import { CELL, cellToWorld, gridOf } from "./world.js?v=seven-0.25.0";
+import { nightFactor } from "./state.js?v=seven-0.25.0";
+import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=seven-0.25.0";
+import { PYLON_RADIUS } from "./state.js?v=seven-0.25.0";
 
 const PALETTE = {
   sky: 0x0a0f16,
@@ -644,41 +644,79 @@ export function createRenderer(canvas, sim) {
   }
 
   /**
-   * A marker over the trainer, so "walk over to him" names somebody you can
-   * pick out. Without it the objective points at one of six identical figures
-   * standing in a field and the player has to guess which.
+   * THE TRAINER, as a person.
    *
-   * Deliberately DIEGETIC-ish and camp-only: a lantern on a pole, not a
-   * floating waypoint arrow. It is a thing at a place, which is the same
-   * grammar as everything else in this game, and it never appears in a basin.
+   * This was a 3.2-unit pole with a glowing octahedron on top and nothing else
+   * — the marker WAS the character. Its own comment said the marker existed so
+   * the objective would not "point at one of six identical figures standing in
+   * a field", but campParty() stands the companions around the spawn yard at
+   * the WEST end and the trainer is at the EAST end, so there was never a
+   * figure there to mark. A player walked eighty metres to a lamp on a stick.
+   *
+   * Built distinct from BUILDS on every axis a silhouette carries, because the
+   * one thing he must never read as is a sixth crew member:
+   *   - TALLER than the tallest build (1.16) by a clear margin
+   *   - a COAT: a tapered cylinder to the ground, where every companion is a
+   *     capsule that stops at the shins
+   *   - a flat WIDE BRIM, which is the read at distance — no build has one,
+   *     and a cone hood is the nearest thing and looks nothing like it
+   *   - the LANTERN in his hand rather than floating over him, so the light
+   *     that makes him findable is a thing he is carrying
+   * He is also the only figure in the game with no `tint` from the palette's
+   * body range, so he cannot be mistaken for a companion under fog either.
    */
   let trainerMark = null;
   function ensureTrainerMark(at) {
     if (!at) { if (trainerMark) trainerMark.visible = false; return; }
     if (!trainerMark) {
       const g = new THREE.Group();
-      const pole = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.07, 0.09, 3.2, 6),
-        new THREE.MeshStandardMaterial({ color: 0x3a3128, roughness: 0.9 }),
-      );
-      pole.position.y = 1.6;
-      g.add(pole);
-      const lamp = new THREE.Mesh(
-        new THREE.OctahedronGeometry(0.3, 0),
-        new THREE.MeshBasicMaterial({ color: 0xffd489 }),
-      );
-      lamp.position.y = 3.25;
+      const cloth = new THREE.MeshStandardMaterial({ color: 0x3c4a44, roughness: 0.95, flatShading: true });
+      const dark = new THREE.MeshStandardMaterial({ color: 0x241f1a, roughness: 1, flatShading: true });
+      const skin = new THREE.MeshStandardMaterial({ color: 0x9a8b78, roughness: 0.85 });
+
+      // A long coat, narrow at the shoulder and flared to the ground.
+      const coat = new THREE.Mesh(new THREE.CylinderGeometry(0.30, 0.52, 1.72, 8), cloth);
+      coat.position.y = 0.86;
+      g.add(coat);
+      // Shoulders, so the coat has somebody in it.
+      const shoulders = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.18, 0.34), cloth);
+      shoulders.position.y = 1.72;
+      g.add(shoulders);
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.19, 12, 10), skin);
+      head.position.y = 1.98;
+      g.add(head);
+      // THE BRIM. This is the whole silhouette at eighty metres.
+      const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.46, 0.045, 12), dark);
+      brim.position.y = 2.12;
+      g.add(brim);
+      const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.22, 0.24, 10), dark);
+      crown.position.y = 2.24;
+      g.add(crown);
+
+      // The lantern, held out at his side.
+      const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.5, 6), cloth);
+      arm.position.set(0.38, 1.5, 0.05);
+      arm.rotation.z = 0.35;
+      g.add(arm);
+      const hook = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.018, 4, 8), dark);
+      hook.position.set(0.5, 1.26, 0.05);
+      g.add(hook);
+      const lamp = new THREE.Mesh(new THREE.OctahedronGeometry(0.17, 0), new THREE.MeshBasicMaterial({ color: 0xffd489 }));
+      lamp.position.set(0.5, 1.12, 0.05);
       g.add(lamp);
       const glow = new THREE.PointLight(0xffc879, 1.6, 16, 2);
-      glow.position.y = 3.25;
+      glow.position.set(0.5, 1.12, 0.05);
       g.add(glow);
+
       g.userData.lamp = lamp;
       scene.add(g);
       trainerMark = g;
     }
     trainerMark.visible = true;
     trainerMark.position.set(at.x, terrainHeight(at.x, at.z), at.z);
-    // A slow pulse, so it reads as lit rather than as a decal.
+    // Face down the path, toward the spawn end the player walks in from.
+    trainerMark.rotation.y = Math.PI * 0.5;
+    // A slow pulse on the lantern, so it reads as lit rather than as a decal.
     const t = performance.now() / 1000;
     trainerMark.userData.lamp.scale.setScalar(1 + Math.sin(t * 1.7) * 0.12);
   }

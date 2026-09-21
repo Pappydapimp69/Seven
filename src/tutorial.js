@@ -53,6 +53,25 @@ export function outranks(verb) {
 }
 
 /**
+ * The trainer's name.
+ *
+ * He was the string "TRAINER" and nothing else, which made the one fixed
+ * character in the game the only person in it without a name.
+ *
+ * NINE LETTERS, AND THAT IS THE POINT. `makeRoster` discards any composed name
+ * longer than `NAME_MAX` (8), so the roster generator cannot produce this one —
+ * a structural guarantee rather than a statistical one. Sampling four thousand
+ * seeds and finding no collision says nothing about the four thousand and
+ * first; a length rule says something about all of them. tests/tutorial.mjs
+ * asserts the rule, not a sample.
+ *
+ * It also reads as not-crew, which is what he is. The five are VOSS, IREN,
+ * HALDER, NKEM, PAO — clipped, carried overnight, compared one against another.
+ * He is none of those things and should not sound like he could be swapped.
+ */
+export const TRAINER_NAME = "ABERNATHY";
+
+/**
  * THE WALK IN — seven objectives, ONE session, ONE map.
  *
  * These used to be seven separate runs: each `startStage` built a fresh basin,
@@ -78,7 +97,7 @@ export const OBJECTIVES = Object.freeze([
     id: "walk-in",
     title: "The walk in",
     verb: "move",
-    brief: "You are late. The trainer is waiting at the far end of the path — walk over to him.",
+    brief: `You are late. ${TRAINER_NAME} is waiting at the far end of the path — walk over to him.`,
     // A PLACE, not a distance. "Cover 30m" is satisfied by pacing in a circle
     // and teaches nothing; walking the length of the camp to a person who is
     // waiting for you teaches the map and introduces the man in one action.
@@ -126,7 +145,7 @@ export const OBJECTIVES = Object.freeze([
     beats: [
       {
         on: "unmoss",
-        say: "TRAINER: A pylon. Or it looks like one. Are you sure it is there? Call someone over and find out.",
+        say: `${TRAINER_NAME}: A pylon. Or it looks like one. Are you sure it is there? Call someone over and find out.`,
         opens: { call: true },
       },
     ],
@@ -321,7 +340,7 @@ export function checkTrainer(sim, emit) {
   if (!sim.trainer || sim.reachedTrainer) return false;
   if (Math.hypot(sim.player.x - sim.trainer.x, sim.player.z - sim.trainer.z) > TRAINER_RADIUS) return false;
   sim.reachedTrainer = true;
-  emit(sim, "reachTrainer", "TRAINER: There you are. Right — from the top.", { id: "trainer" });
+  emit(sim, "reachTrainer", `${TRAINER_NAME}: There you are. Right — from the top.`, { id: "trainer" });
   return true;
 }
 

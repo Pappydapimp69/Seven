@@ -8,7 +8,7 @@
 // who lags, who starts narrating things that aren't there. Each rule below exists
 // to make an internal number legible from the outside without printing it.
 
-import { findPath, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, gridOf } from "./world.js?v=seven-0.24.0";
+import { findPath, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, gridOf } from "./world.js?v=seven-0.25.0";
 import {
   BAND,
   bandOf,
@@ -23,7 +23,7 @@ import {
   activatePylon,
   updatePing, isAnswering, isReturning,
   PRIME_WINDOW,
-} from "./state.js?v=seven-0.24.0";
+} from "./state.js?v=seven-0.25.0";
 
 // Higher band = worse. Lets a per-companion trait move the pylon-seeking
 // trigger EARLIER than the uniform BRITTLE tell everyone else gets, without
@@ -842,6 +842,7 @@ export function companionRemark(sim, c, dt) {
     const pool = GONE_LINES.filter((l) => l !== c.lastGoneLine);
     const text = sim.rng.pick(pool);
     c.lastGoneLine = text;
+    if (sim.noChatter) return null;
     emit(sim, "chatter", `${c.name}: ${text}`, { who: c.id, gone: true });
     return text;
   }
@@ -853,6 +854,21 @@ export function companionRemark(sim, c, dt) {
   const roleLines = ROLE_LINES[c.role]?.[band];
   const pool = roleLines && sim.rng.chance(1 / 3) ? roleLines : LINES[band] || LINES[BAND.STEADY];
   const text = sim.rng.pick(pool);
+  // SUPPRESSED AFTER THE ROLLS, NEVER INSTEAD OF THEM.
+  //
+  // `sim.noChatter` is set in the training camp, where nobody is in your party
+  // yet and five idle companions put a line in the log every 20-60 seconds over
+  // the top of a tutorial that gives one instruction at a time. They are all
+  // STEADY there (noDrain), and a steady companion still speaks on 40% of its
+  // rolls.
+  //
+  // The guard sits below every draw on purpose. This function consumes
+  // float/chance/pick, the camp is saveable, and returning early would change
+  // the roll count — which forks a resumed run minutes later in a way that
+  // looks nothing like a chat setting. Constant roll count is the house rule
+  // and this is the case it exists for: draw unconditionally, emit
+  // conditionally.
+  if (sim.noChatter) return null;
   emit(sim, "chatter", `${c.name}: ${text}`, { who: c.id });
   return text;
 }
