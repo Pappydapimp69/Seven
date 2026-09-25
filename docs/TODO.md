@@ -15,8 +15,8 @@ Last reviewed: 2026-09-25, at seven-0.26.0.
 
 ## Where the project actually is
 
-- **Live:** https://pappydapimp69.github.io/Seven/ — seven-0.26.0, verified
-  across all 16 modules by `tools/verify-deploy.mjs`.
+- **Live:** https://pappydapimp69.github.io/Seven/ — seven-0.26.2, verified
+  across all 17 modules by `tools/verify-deploy.mjs`.
 - **Branch:** `claude/brain-install-vohzag`. `main` is what deploys, on push.
 - **Suite:** green, pure and browser tiers, except the known `deceived` row.
 - **The one question the repo exists to answer is still unanswered.**
