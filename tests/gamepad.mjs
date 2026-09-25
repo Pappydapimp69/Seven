@@ -345,6 +345,23 @@ const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, L3: 10, START:
   }));
   assert(!resumedState.paused && resumedState.hudVisible, "B on the pause screen did not resume play");
 
+  // ---- instructions name the PAD's buttons -----------------------------------
+  // From a playtest on a pad: "Pick IREN out on the roster" named no key, the
+  // legend's "LB/RB select" did not say select what, and the action prompt
+  // said [E]. The scheme is already "gamepad" here — everything above drove it.
+  const told = await page.evaluate(() => {
+    window.__seven.startStage(3);
+    return {
+      brief: document.getElementById("objectiveText").textContent,
+      key: document.getElementById("actionPrompt").dataset.key,
+      legend: document.getElementById("hints").textContent,
+    };
+  });
+  assert(/LB\/RB/.test(told.brief) && /D-pad Right/.test(told.brief), `the hand-off brief does not name the pad's buttons: "${told.brief}"`);
+  assert(!/Q\/R|press B\b/.test(told.brief), `the hand-off brief names keyboard keys on a pad: "${told.brief}"`);
+  assert(told.key === "A", `the action prompt shows [${told.key}] on a pad, not [A]`);
+  assert(/pick a teammate on the roster/.test(told.legend), `the pad legend does not say what LB/RB pick: "${told.legend}"`);
+
   // ---- debrief screen is reachable purely on gamepad -----------------------
   // Force a fast finish so the debrief screen actually appears: drop every
   // companion (dissolution) rather than waiting out a real run.

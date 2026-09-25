@@ -63,6 +63,10 @@ echo "== woods day (the day, the night, the morning) =="
 node tests/woods.mjs
 echo
 
+echo "== keys (every instruction names the button in the player's hand) =="
+node tests/keys.mjs
+echo
+
 echo "== woods readability (every kind of lie has something true to be caught against) =="
 node tests/readability.mjs
 echo

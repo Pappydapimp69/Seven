@@ -40,6 +40,13 @@ short on purpose.
 
 ## Open — found in passing, not yet fixed
 
+- [ ] **Touch has no CALL button.** Found writing keys.js (0.26.1): the touch
+      bar is Survey, Check in, Dose, Next, Cycle item, Use item, Craft, Give.
+      The tutorial's pylon beat needs a call, so a touch-only player cannot
+      finish it. keys.js says so in the brief rather than naming a button that
+      does not exist. Not fixed: adding a button is a layout change on a phone
+      screen that was already tight (see the 720px media query).
+
 - [x] **Obstacles cannot earn their keep on the survey basin — SETTLED by
       weakening the guarantee, not by tuning.** The three experiments were
       right that it was structural: the basin is 78% walkable because the

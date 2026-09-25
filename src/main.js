@@ -6,22 +6,23 @@ import {
   possess, release, possessableCompanions, activatePylon, pylonAt,
   callCompanion, clearMoss, mossedAt, feedFire, buildFire, FIRE_COST,
   PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=seven-0.26.0";
-import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.26.0";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.26.0";
+} from "./state.js?v=seven-0.26.1";
+import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.26.1";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.26.1";
 import {
   attachSites, startDay, beatAt, briefFor, canWork, workBeat, fallNight, ask, accuse,
   updateWorkHold, dawnLine, BEATS, PHASE, ASKS_ALLOWED,
-} from "./woods.js?v=seven-0.26.0";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.26.0";
-import { createRenderer } from "./render.js?v=seven-0.26.0";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.26.0";
-import { createInput, ACTIONS } from "./input.js?v=seven-0.26.0";
-import { createAudio } from "./audio.js?v=seven-0.26.0";
-import { hashSeed, makeRng } from "./rng.js?v=seven-0.26.0";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.26.0";
+} from "./woods.js?v=seven-0.26.1";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.26.1";
+import { createRenderer } from "./render.js?v=seven-0.26.1";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.26.1";
+import { keyed } from "./keys.js?v=seven-0.26.1";
+import { createInput, ACTIONS } from "./input.js?v=seven-0.26.1";
+import { createAudio } from "./audio.js?v=seven-0.26.1";
+import { hashSeed, makeRng } from "./rng.js?v=seven-0.26.1";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.26.1";
 
-const BUILD = "seven-0.26.0";
+const BUILD = "seven-0.26.1";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -165,6 +166,10 @@ function refreshSchemeUI(scheme) {
   document.body.dataset.scheme = scheme;
   document.querySelectorAll(".menu-hints").forEach((e) => paintHint(e, menuHintFor(scheme)));
   if (run) run.hud.setHints(scheme);
+  // An objective on screen names buttons, and they are the OLD controller's
+  // buttons until it is repainted — picking up a pad mid-objective must not
+  // leave "press Q/R" on the screen.
+  paintObjective();
 }
 
 
@@ -284,7 +289,7 @@ function startTutorial(index = 0) {
   sim.callUnlocked = false;
   sim.trainer = world.trainer;
   campParty(sim, world);
-  const r = mountRun(sim, obj.brief);
+  const r = mountRun(sim, keyed(obj.brief, input.activeScheme));
   tut = { index, stage: obj, done: false, beats: [] };
   enterObjective(index, sim);
   return r;
@@ -489,9 +494,9 @@ function paintMorning(sim) {
   const asked = w.asked.map((id) => w.nameById[id]).join(", ");
   setObjective(
     "The morning",
-    `Ask about yesterday — pick a name (1–5) and check in. ${w.asksLeft} of ${ASKS_ALLOWED} left.` +
+    `Ask about yesterday — to ask someone, {checkin}. ${w.asksLeft} of ${ASKS_ALLOWED} left.` +
     (asked ? ` Already asked: ${asked} — reading them again is free.` : "") +
-    " When you are ready, press B to name somebody.",
+    " When you are ready, press {name} to name somebody.",
   );
 }
 
@@ -652,13 +657,24 @@ function enterObjective(index, sim = run.sim) {
   if (obj.line) setTimeout(() => run && hudSay(`${sim.companions[obj.line.who - 1].name}: ${obj.line.text}`), 1200);
 }
 
+/**
+ * The objective banner. Text may carry {key} tokens (keys.js); they are filled
+ * for the controller in use NOW, and the raw text is kept so a controller
+ * change can repaint it.
+ */
+let objectiveShown = { title: null, text: "" };
 function setObjective(title, text) {
+  objectiveShown = { title, text: text || "" };
+  paintObjective();
+}
+function paintObjective() {
   const box = el("objective");
   if (!box) return;
+  const { title, text } = objectiveShown;
   box.classList.toggle("hidden", !title);
   if (!title) return;
   el("objectiveTitle").textContent = title;
-  el("objectiveText").textContent = text || "";
+  el("objectiveText").textContent = keyed(text, input.activeScheme);
 }
 
 function hudSay(text) { run?.hud.say(text, ""); }
@@ -1363,7 +1379,7 @@ function step(dt, intent) {
       if (!seen.some((ev) => ev.kind === beat.on)) continue;
       tut.beats.push(beat.on);
       if (beat.opens) openObjective(sim, { opens: beat.opens });
-      if (beat.say) hudSay(beat.say);
+      if (beat.say) hudSay(keyed(beat.say, input.activeScheme));
     }
     if (observe(p, tut.stage, seen, sim, tut)) completeStage();
   }

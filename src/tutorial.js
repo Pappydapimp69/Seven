@@ -97,7 +97,7 @@ export const OBJECTIVES = Object.freeze([
     id: "walk-in",
     title: "The walk in",
     verb: "move",
-    brief: `You are late. ${TRAINER_NAME} is waiting at the far end of the path — walk over to him.`,
+    brief: `You are late. ${TRAINER_NAME} is waiting at the far end of the path — walk over to him with {move}.`,
     // A PLACE, not a distance. "Cover 30m" is satisfied by pacing in a circle
     // and teaches nothing; walking the length of the camp to a person who is
     // waiting for you teaches the map and introduces the man in one action.
@@ -108,7 +108,7 @@ export const OBJECTIVES = Object.freeze([
     id: "ground",
     title: "What the ground gives",
     verb: "pickup",
-    brief: "He has put something down for you. Take it.",
+    brief: "He has put something down for you. Walk onto it and press {act} to take it.",
     opens: { items: [{ id: "tut-item-a", kind: "flare", near: "trainer", dx: 3, dz: 2 }] },
     step: { id: "tookItem", on: "pickup", target: "tut-item-a" },
     line: { who: 5, text: "A flare, I think. Good for a dark stretch." },
@@ -118,7 +118,7 @@ export const OBJECTIVES = Object.freeze([
     id: "craft",
     title: "Two things become one",
     verb: "craft",
-    brief: "There is a second piece by his feet. Two of those make something better — combine them.",
+    brief: "There is a second piece by his feet. Take it with {act}, then press {craft} to combine the two into something better.",
     opens: { items: [{ id: "tut-item-b", kind: "tether", near: "trainer", dx: -2, dz: 3 }] },
     step: { id: "crafted", on: "craft", targetKind: "ember", target: null, kindPinned: true },
     debrief: "A recipe is a claim about two objects. Hold on to that.",
@@ -127,7 +127,7 @@ export const OBJECTIVES = Object.freeze([
     id: "hands",
     title: "Hands",
     verb: "give",
-    brief: "Pick IREN out on the roster, then hand it to her.",
+    brief: "Press {select} to pick IREN on the roster (the list of names, top left). Walk up to her and press {give} to hand it over.",
     step: { id: "gave", on: "offerUsed", target: "c2" },
     debrief: "Things change hands. The person handing one to you believes something about it.",
   },
@@ -139,13 +139,13 @@ export const OBJECTIVES = Object.freeze([
     // the trainer asks whether you are sure it is really there, and the answer
     // is another pair of eyes. Teaching CALL here rather than in its own
     // objective is the difference between learning a verb and needing one.
-    brief: "There is something out here under the moss. Find it and clear it off.",
+    brief: "There is something out here under the moss. Find it, stand on it and press {act} to clear it off.",
     opens: { canClearMoss: true },
     step: { id: "firedPylon", on: "draw", target: null, kindPinned: true },
     beats: [
       {
         on: "unmoss",
-        say: `${TRAINER_NAME}: A pylon. Or it looks like one. Are you sure it is there? Call someone over and find out.`,
+        say: `${TRAINER_NAME}: A pylon. Or it looks like one. Are you sure it is there? Call someone over with {call}, then press {act} once you are both standing in it.`,
         opens: { call: true },
       },
     ],
@@ -155,7 +155,7 @@ export const OBJECTIVES = Object.freeze([
     id: "ask",
     title: "Ask them",
     verb: "checkin",
-    brief: "Check in on HALDER, then on NKEM. Their numbers are beside their names.",
+    brief: "Check in on HALDER, then on NKEM — to check in, {checkin}.",
     step: { id: "askedBoth", on: "report", target: ["c3", "c4"] },
     debrief: "One of them told you what they wanted to be true. An answer is evidence, not fact.",
   },
@@ -163,7 +163,7 @@ export const OBJECTIVES = Object.freeze([
     id: "first-lie",
     title: "The first lie",
     verb: "survey",
-    brief: "Something has gone wrong with the light. There is a marker out there — go and survey it.",
+    brief: "Something has gone wrong with the light. There is a marker out there — go to it and press {act} to survey it.",
     opens: { leadUnder: true },
     step: { id: "metTheLie", on: "logFalse", target: null, kindPinned: true },
     debrief: "It was never there. Someone standing with you would have said so.",

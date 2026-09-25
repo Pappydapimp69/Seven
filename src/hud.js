@@ -6,11 +6,12 @@
 // the one hallucinating. The only place a real number is ever printed is the
 // debrief, after the run is over.
 
-import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds, believedFireAt } from "./percept.js?v=seven-0.26.0";
-import { canWork, beatAt, holdFraction, PHASE } from "./woods.js?v=seven-0.26.0";
+import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds, believedFireAt } from "./percept.js?v=seven-0.26.1";
+import { canWork, beatAt, holdFraction, PHASE } from "./woods.js?v=seven-0.26.1";
+import { KEYS } from "./keys.js?v=seven-0.26.1";
 import { LOG_RADIUS, PYLON_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, gatherTarget, GATHER_HOLD_TIME, previewCraft, claimedEntryAt, pylonAt,
   mossedAt, FIRE_FUEL_MAX, FIRE_COST, phaseOf, holdTimeFor,
-} from "./state.js?v=seven-0.26.0";
+} from "./state.js?v=seven-0.26.1";
 
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 
@@ -551,11 +552,15 @@ export function createHud(sim, percept, opts = {}) {
 
   function setHints(scheme) {
     const text = {
-      keyboard: "WASD move · Shift run · E survey/pick up, hold to gather · Z cycle item · X use item · V drop · Q/R select · B give · T call over · C craft · 1–5 check in · Shift+1–5 dose · Esc pause",
-      gamepad: "Stick move · [A] survey/pick up, hold to gather · [RT] cycle item · [B] use item · D-pad Up craft · D-pad Down drop · D-pad Right give · D-pad Left call over · [X] check in · [Y] dose · [LB]/[RB] select · [Start] pause",
-      touch: "Left half steers · right half looks · buttons bottom-right",
+      // "select" alone meant nothing to a player on a pad: select WHAT? It is
+      // the roster — who the give, check-in and dose keys act on.
+      keyboard: "WASD move · Shift run · E survey/pick up, hold to gather · Z cycle item · X use item · V drop · Q/R pick a teammate on the roster · B give to them · T call over · C craft · 1–5 check in · Shift+1–5 dose · Esc pause",
+      gamepad: "Stick move · [A] survey/pick up, hold to gather · [LB]/[RB] pick a teammate on the roster · [X] check in on them · D-pad Right give to them · [Y] dose them · [RT] cycle item · [B] use item · D-pad Up craft · D-pad Down drop · D-pad Left call over · [Start] pause",
+      touch: "Left half steers · right half looks · Next picks a teammate on the roster · buttons bottom-right",
     }[scheme] || "";
     paintHint(el.hints, text);
+    // The action prompt's key. It said [E] on every controller.
+    if (el.prompt) el.prompt.dataset.key = KEYS[scheme]?.act || KEYS.keyboard.act;
   }
 
   return { update, say, showReport, setHints, collectFly, el };

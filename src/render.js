@@ -6,11 +6,11 @@
 // list as the real ones.
 
 import * as THREE from "../lib/three.module.js";
-import { CELL, cellToWorld, gridOf } from "./world.js?v=seven-0.26.0";
-import { nightFactor } from "./state.js?v=seven-0.26.0";
-import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=seven-0.26.0";
-import { PYLON_RADIUS } from "./state.js?v=seven-0.26.0";
-import { WEATHER_LOOK, dayMarks } from "./woods.js?v=seven-0.26.0";
+import { CELL, cellToWorld, gridOf } from "./world.js?v=seven-0.26.1";
+import { nightFactor } from "./state.js?v=seven-0.26.1";
+import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=seven-0.26.1";
+import { PYLON_RADIUS } from "./state.js?v=seven-0.26.1";
+import { WEATHER_LOOK, dayMarks } from "./woods.js?v=seven-0.26.1";
 
 const PALETTE = {
   sky: 0x0a0f16,

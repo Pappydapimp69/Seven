@@ -8,6 +8,7 @@
 //
 // Run: node tests/tutorial.mjs
 
+import { keyed } from "../src/keys.js";
 import { STAGES, TAUGHT_VERBS, observe, freshProgress, leaks, FORBIDDEN, outranks, VERB_PRIORITY, TRAINER_NAME } from "../src/tutorial.js";
 import { NAME_MIN, NAME_MAX, makeRoster } from "../src/names.js";
 import { makeRng } from "../src/rng.js";
@@ -263,7 +264,9 @@ check("both control legends explain how to select a companion", () => {
     const m = hud.match(new RegExp(`${scheme}:\\s*"([^"]*)"`));
     assert(m, `no ${scheme} control legend found in hud.js`);
     assert(
-      /select/i.test(m[1]),
+      // "pick a teammate on the roster" since the pad playtest: a bare
+      // "select" did not say select WHAT.
+      /select|pick a teammate/i.test(m[1]),
       `the ${scheme} legend never mentions selecting — but "give" acts on the selection and nothing else can aim it: "${m[1]}"`,
     );
   }
@@ -275,9 +278,11 @@ check("a stage that names a companion says how to aim at one", () => {
     // Only stages pinned to a COMPANION id (c1..c5) need this; an item- or
     // pylon-pinned step is aimed by standing next to the thing.
     if (!targets.some((t) => typeof t === "string" && /^c\d+$/.test(t))) continue;
-    assert(
-      /select|pick|choose|number/i.test(s.brief),
-      `stage "${s.id}" tells the player to act on a named companion but never says how to aim at one: "${s.brief}"`,
+    // Checked as SHOWN, per controller — the brief carries {key} tokens, and
+    // the words that say how to aim are partly the key names themselves.
+    for (const scheme of ["keyboard", "gamepad", "touch"]) assert(
+      /select|pick|choose|number/i.test(keyed(s.brief, scheme)),
+      `stage "${s.id}" tells a ${scheme} player to act on a named companion but never says how to aim at one: "${keyed(s.brief, scheme)}"`,
     );
   }
 });

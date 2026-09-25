@@ -13,6 +13,13 @@
   --warm: #ffb562;
   --bad: #ff7a86;
   --good: #7fd6c0;
+  /* The backing for any text that floats over the SCENE rather than sitting
+     in a panel. The colours above were tuned against a dark basin; the camp is
+     daylight and THE WOODS has fog, frost and a clear blue sky, and on a
+     projector a soft text-shadow over bright grass reads as nothing at all.
+     Text over the world carries its own dark ground so its contrast does not
+     depend on what is behind it (Brain dog#E45). */
+  --scrim: rgba(8, 12, 18, 0.82);
 }
 
 * { box-sizing: border-box; }
@@ -382,9 +389,18 @@ input[type="range"] { width: 100%; margin-bottom: 1.125rem; accent-color: var(--
   text-align: center;
   font-size: 0.9375rem;
   line-height: 1.5;
-  text-shadow: 0 0.125rem 0.75rem rgba(0, 0, 0, 0.9);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
 }
-.sub { margin: 0.125rem 0; color: #c6d0dd; }
+/* One pill per line, sized to the line: a single block behind the whole stack
+   would hide more of the world than the words need. */
+.sub {
+  display: table;
+  margin: 0.25rem auto;
+  padding: 0.125rem 0.75rem;
+  border-radius: 0.5rem;
+  background: var(--scrim);
+  color: #dfe6f0;
+}
 .sub.gone { color: var(--bad); font-style: italic; }
 .sub.warn { color: var(--warm); }
 .sub.good { color: var(--good); }
@@ -395,8 +411,8 @@ input[type="range"] { width: 100%; margin-bottom: 1.125rem; accent-color: var(--
   left: 50%;
   transform: translateX(-50%);
   padding: 0.5rem 1.0rem;
-  background: rgba(116, 224, 255, 0.12);
-  border: 1px solid rgba(116, 224, 255, 0.4);
+  background: var(--scrim);
+  border: 1px solid rgba(116, 224, 255, 0.55);
   border-radius: 62.4375rem;
   font-size: 0.875rem;
   opacity: 0;
@@ -404,7 +420,10 @@ input[type="range"] { width: 100%; margin-bottom: 1.125rem; accent-color: var(--
   overflow: hidden; /* clips the fill bar to the pill's rounded corners */
 }
 .action-prompt.show { opacity: 1; }
+/* The key comes from the controller in use (hud.js setHints sets data-key);
+   [E] only as the fallback before the first paint. */
 .action-prompt::after { content: "  [E]"; color: var(--cyan); font-size: 0.8rem; }
+.action-prompt[data-key]::after { content: "  [" attr(data-key) "]"; }
 /* Hold-to-gather progress. Width is set directly from JS each frame — no CSS
    transition here, since a transition would lag a per-frame value and read as
    mushy rather than responsive to how long the button has actually been down. */
@@ -453,8 +472,8 @@ input[type="range"] { width: 100%; margin-bottom: 1.125rem; accent-color: var(--
   left: 1.0rem;
   bottom: 3.625rem;
   padding: 0.3125rem 0.625rem;
-  background: rgba(127, 214, 192, 0.14);
-  border: 1px solid rgba(127, 214, 192, 0.4);
+  background: var(--scrim);
+  border: 1px solid rgba(127, 214, 192, 0.55);
   border-radius: 0.5rem;
   font-size: 0.8rem;
   color: var(--good);
@@ -470,7 +489,13 @@ input[type="range"] { width: 100%; margin-bottom: 1.125rem; accent-color: var(--
   left: 50%;
   transform: translateX(-50%);
   font-size: 0.8rem;
-  color: #5b6675;
+  /* Was #5b6675 straight on the scene: under 3:1 on the basin's dark and
+     worse on daylight grass. On the scrim, even over pure white, this is
+     5.3:1 (--dim would be 4.0, short of 4.5 for type this small). */
+  color: #a3aebe;
+  background: var(--scrim);
+  padding: 0.25rem 0.875rem;
+  border-radius: 0.625rem;
   text-align: center;
   /* It wraps now, so it needs a width to wrap WITHIN and room underneath —
      at the larger type it ran off the bottom of the window and the second
@@ -478,6 +503,9 @@ input[type="range"] { width: 100%; margin-bottom: 1.125rem; accent-color: var(--
   max-width: min(94vw, 70rem);
   line-height: 1.5;
 }
+
+/* No keys to list (touch on some layouts) means no pill, not an empty dark blob. */
+.hints:empty { display: none; }
 
 .touch-buttons {
   position: absolute;
