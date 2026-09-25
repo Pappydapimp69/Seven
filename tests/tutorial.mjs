@@ -8,7 +8,10 @@
 //
 // Run: node tests/tutorial.mjs
 
-import { STAGES, TAUGHT_VERBS, observe, freshProgress, leaks, FORBIDDEN, outranks, VERB_PRIORITY } from "../src/tutorial.js";
+import { STAGES, TAUGHT_VERBS, observe, freshProgress, leaks, FORBIDDEN, outranks, VERB_PRIORITY, TRAINER_NAME } from "../src/tutorial.js";
+import { NAME_MIN, NAME_MAX, makeRoster } from "../src/names.js";
+import { makeRng } from "../src/rng.js";
+import { buildCamp } from "../src/camp.js";
 import { createRun, tick, badLogCount, pickupItem, activatePylon, checkIn, offerItem, logMarker, beginHallucinating, HALLUCINATION, FULL_DRAIN_AT } from "../src/state.js";
 import { readFileSync } from "fs";
 
@@ -21,6 +24,64 @@ const assert = (c, m) => { if (!c) throw new Error(m); };
 const eq = (a, b, m) => { if (a !== b) throw new Error(`${m} — got ${JSON.stringify(a)}, expected ${JSON.stringify(b)}`); };
 
 // --- I1: the meter never leaks -------------------------------------------
+check("the trainer's name is one the roster CANNOT draw, by construction", () => {
+  // Not "does not collide on the seeds I tried". `makeRoster` discards any
+  // composed name outside [NAME_MIN, NAME_MAX], so a name longer than the cap
+  // is unreachable for every seed that will ever exist. Sampling four thousand
+  // seeds and finding nothing says nothing about the four thousand and first;
+  // this says something about all of them.
+  assert(TRAINER_NAME.length > NAME_MAX,
+    `"${TRAINER_NAME}" is ${TRAINER_NAME.length} letters, inside the roster's ${NAME_MIN}-${NAME_MAX} range — a run could draw a companion with the trainer's name`);
+  // ...and the cheap empirical check on top, which would catch the cap moving.
+  for (let seed = 1; seed <= 300; seed++) {
+    for (const n of makeRoster(makeRng(seed), 5)) {
+      assert(n !== TRAINER_NAME, `seed ${seed} drew a companion called ${n}`);
+    }
+  }
+});
+
+check("the trainer speaks under his own name, nowhere as a placeholder", () => {
+  // He was the bare string "TRAINER" in the lines themselves, which is how the
+  // one fixed character in the game ended up the only person without a name.
+  const src = readFileSync(new URL("../src/tutorial.js", import.meta.url), "utf8");
+  const lines = src.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const L = lines[i];
+    if (/TRAINER_RADIUS|TRAINER_NAME/.test(L)) continue;
+    assert(!/["`']TRAINER:/.test(L), `tutorial.js:${i + 1} still says "TRAINER:" instead of the name`);
+  }
+});
+
+check("the training camp does not chatter at you", () => {
+  // Nobody is in your party there. Five idle companions putting a line in the
+  // log every 20-60 seconds buries a tutorial that gives one instruction at a
+  // time.
+  const sim = createRun({ seed: -1, difficulty: "gentle", world: buildCamp() });
+  sim.noDrain = true;
+  sim.noChatter = true;
+  let chatter = 0;
+  for (let i = 0; i < 4000; i++) {
+    tick(sim, 0.05, { move: { x: 0, z: 0 }, yaw: 0 });
+    chatter += sim.events.filter((e) => e.kind === "chatter").length;
+  }
+  eq(chatter, 0, `the camp emitted ${chatter} chatter line(s) across 200 simulated seconds`);
+});
+
+check("...and suppressing it costs no rng draws", () => {
+  // The guard sits BELOW every roll on purpose: companionRemark consumes
+  // float/chance/pick, the camp is saveable, and returning early would change
+  // the roll count and fork a resumed run. Two identical camps, one quiet,
+  // must leave the generator in the same place.
+  const run = (quiet) => {
+    const sim = createRun({ seed: -1, difficulty: "gentle", world: buildCamp() });
+    sim.noDrain = true;
+    sim.noChatter = quiet;
+    for (let i = 0; i < 2000; i++) tick(sim, 0.05, { move: { x: 0, z: 0 }, yaw: 0 });
+    return sim.rng.snapshot();
+  };
+  eq(run(true), run(false), "silencing the camp moved the rng stream — a resumed tutorial would fork");
+});
+
 check("no authored tutorial string names the hidden meter", () => {
   for (const s of STAGES) {
     for (const [field, text] of [["brief", s.brief], ["debrief", s.debrief], ["title", s.title], ["line", s.line?.text]]) {

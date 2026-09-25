@@ -17,9 +17,9 @@
 //     options (dbh#E4, wrong-sky#E2). And an ended run is never saved, so a
 //     "Resume" can't drop you back onto the frame you already lost.
 
-import { createRun } from "./state.js?v=seven-0.24.0";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.24.0";
-import { attachSites, serializeWoods, deserializeWoods } from "./woods.js?v=seven-0.24.0";
+import { createRun } from "./state.js?v=seven-0.25.0";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.25.0";
+import { attachSites, serializeWoods, deserializeWoods } from "./woods.js?v=seven-0.25.0";
 
 // SEVEN'S OWN KEYS, and this is not cosmetic. GitHub Pages serves every project
 // of one account from ONE origin — `pappydapimp69.github.io` — so /mirage/ and
@@ -323,6 +323,13 @@ export function serializeRun(sim) {
     // whole class of per-tick rng draws happens at all, and the other three
     // decide which verbs the prompt resolver will even offer.
     noDrain: !!sim.noDrain,
+    // Gates no rng draw — the guard in companionRemark sits BELOW every roll —
+    // so by the letter of the invariant this is not save state. It travels
+    // anyway: dropped, a resumed tutorial starts chattering again, which is a
+    // silent behaviour change nothing would fail on. Restoring it as undefined
+    // on a pre-0.25 save yields falsy, which is exactly the old behaviour, so
+    // no version bump.
+    noChatter: !!sim.noChatter,
     canClearMoss: !!sim.canClearMoss,
     callUnlocked: sim.callUnlocked !== false,
     reachedTrainer: !!sim.reachedTrainer,
@@ -360,6 +367,7 @@ export function deserializeRun(data) {
   if (camp) {
     sim.trainer = world.trainer;
     sim.noDrain = !!data.noDrain;
+    sim.noChatter = !!data.noChatter;
     sim.canClearMoss = !!data.canClearMoss;
     sim.callUnlocked = data.callUnlocked !== false;
     sim.reachedTrainer = !!data.reachedTrainer;

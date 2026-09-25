@@ -6,11 +6,11 @@
 // the one hallucinating. The only place a real number is ever printed is the
 // debrief, after the run is over.
 
-import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds, believedFireAt } from "./percept.js?v=seven-0.24.0";
-import { canWork, beatAt, holdFraction, PHASE } from "./woods.js?v=seven-0.24.0";
+import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds, believedFireAt } from "./percept.js?v=seven-0.25.0";
+import { canWork, beatAt, holdFraction, PHASE } from "./woods.js?v=seven-0.25.0";
 import { LOG_RADIUS, PYLON_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, gatherTarget, GATHER_HOLD_TIME, previewCraft, claimedEntryAt, pylonAt,
   mossedAt, FIRE_FUEL_MAX, FIRE_COST, phaseOf, holdTimeFor,
-} from "./state.js?v=seven-0.24.0";
+} from "./state.js?v=seven-0.25.0";
 
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 
@@ -486,10 +486,20 @@ export function createHud(sim, percept, opts = {}) {
     // the same way the roster says "falling behind" rather than 41/100. The
     // camp and the woods run no cycle, and phaseOf is only consulted when one
     // is actually running.
-    if (el.dayLabel && !sim.noDrain && !sim.woods) {
-      const ph = phaseOf(sim.time);
-      el.dayLabel.textContent = ph.night ? `NIGHT ${ph.day}` : `DAY ${ph.day}`;
-      el.dayLabel.classList.toggle("night", ph.night);
+    if (el.dayLabel) {
+      if (sim.noDrain || sim.woods) {
+        // NO CYCLE HERE, so say so rather than saying nothing. Skipping the
+        // write left the element holding the PREVIOUS run's value: play a
+        // basin into the dark, quit to the title, start the tutorial, and the
+        // camp sits under a red "NIGHT 3" in full daylight for the whole walk
+        // in. The markup's default is "DAY 1" and nothing ever reset it.
+        el.dayLabel.textContent = "DAY 1";
+        el.dayLabel.classList.remove("night");
+      } else {
+        const ph = phaseOf(sim.time);
+        el.dayLabel.textContent = ph.night ? `NIGHT ${ph.day}` : `DAY ${ph.day}`;
+        el.dayLabel.classList.toggle("night", ph.night);
+      }
     }
 
     const dis = distortion(percept, sim);
