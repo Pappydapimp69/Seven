@@ -63,6 +63,10 @@ echo "== woods day (the day, the night, the morning) =="
 node tests/woods.mjs
 echo
 
+echo "== woods readability (every kind of lie has something true to be caught against) =="
+node tests/readability.mjs
+echo
+
 echo "== stress (invariants, hostile input, save/restore lockstep) =="
 node tests/stress.mjs "${STRESS_SEEDS:-16}"
 echo
