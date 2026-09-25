@@ -98,6 +98,35 @@ await page.waitForFunction(() => !!window.__seven, null, { timeout: 20000 });
   assert(lum.greenFraction > 0.15, `only ${(lum.greenFraction * 100).toFixed(0)}% of the camp is green — trees and grass are not drawing, so it is rendering as a rock field`);
 }
 
+// --- the camp does not wear the last run's weather --------------------------
+// The day/night pill is only written while a cycle is running, and the camp and
+// the woods run none — so it kept whatever the PREVIOUS run left in it. Play a
+// basin into the dark, quit to the title, start the tutorial, and the walk in
+// happens under a red "NIGHT 3" in full daylight. The markup default is
+// "DAY 1" and nothing ever reset it.
+{
+  const label = await page.evaluate(async () => {
+    const M = window.__seven;
+    // A basin, driven past dusk so the pill really says NIGHT.
+    M.toTitle();
+    M.startRun({ seed: 1234, difficulty: "standard" });
+    M.sim.time = 400;
+    M.advance(1);
+    const duringBasin = document.getElementById("dayLabel").textContent;
+    // ...then quit to the title and walk into the camp.
+    M.toTitle();
+    M.startStage(0);
+    M.advance(1);
+    const el = document.getElementById("dayLabel");
+    return { duringBasin, inCamp: el.textContent, night: el.classList.contains("night") };
+  });
+  assert(/NIGHT/.test(label.duringBasin),
+    `the basin never reached night, so this check proves nothing (pill read "${label.duringBasin}")`);
+  assert(!/NIGHT/.test(label.inCamp),
+    `the camp inherited the basin's weather: the pill reads "${label.inCamp}"`);
+  assert(!label.night, "the camp is wearing the night styling from the previous run");
+}
+
 // --- the whole walk in, one session, start to finish ------------------------
 {
   const r = await page.evaluate(async () => {

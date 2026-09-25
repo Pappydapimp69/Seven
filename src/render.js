@@ -694,18 +694,25 @@ export function createRenderer(canvas, sim) {
       g.add(crown);
 
       // The lantern, held out at his side.
+      // ON HIS LEFT, and further out than it was. At local +x 0.5 the lantern
+      // sat behind his own coat from half the angles you can stand at — it is
+      // the thing that makes him findable down eighty metres of path, and it
+      // was invisible in every screenshot taken of him. Local -x puts it on
+      // the side a player walking in from the west actually sees, and 0.62
+      // clears the coat's flare at that height (0.38 at y=1.12).
+      const LAMP_X = -0.62;
       const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.5, 6), cloth);
-      arm.position.set(0.38, 1.5, 0.05);
-      arm.rotation.z = 0.35;
+      arm.position.set(LAMP_X * 0.62, 1.5, 0.05);
+      arm.rotation.z = -0.35;
       g.add(arm);
       const hook = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.018, 4, 8), dark);
-      hook.position.set(0.5, 1.26, 0.05);
+      hook.position.set(LAMP_X, 1.28, 0.05);
       g.add(hook);
-      const lamp = new THREE.Mesh(new THREE.OctahedronGeometry(0.17, 0), new THREE.MeshBasicMaterial({ color: 0xffd489 }));
-      lamp.position.set(0.5, 1.12, 0.05);
+      const lamp = new THREE.Mesh(new THREE.OctahedronGeometry(0.19, 0), new THREE.MeshBasicMaterial({ color: 0xffd489 }));
+      lamp.position.set(LAMP_X, 1.12, 0.05);
       g.add(lamp);
       const glow = new THREE.PointLight(0xffc879, 1.6, 16, 2);
-      glow.position.set(0.5, 1.12, 0.05);
+      glow.position.set(LAMP_X, 1.12, 0.05);
       g.add(glow);
 
       g.userData.lamp = lamp;

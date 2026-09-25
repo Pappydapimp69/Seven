@@ -46,6 +46,10 @@ const VIEWS = [
   { name: "basin",  seed: 1234, yaw: 0.6,  pitch: -0.05, advance: 2,   night: false },
   { name: "depth",  seed: 1234, yaw: 2.4,  pitch: 0.04,  advance: 2,   night: false },
   { name: "night",  seed: 1234, yaw: 0.6,  pitch: -0.05, advance: 2,   night: true },
+  // The trainer after dark, because the lantern is how you find him and
+  // daylight washes it out entirely — the one condition the model has not been
+  // looked at under.
+  { name: "trainer-night", seed: null, yaw: 0.0, pitch: -0.02, advance: 2, night: true, atTrainer: true },
   { name: "camp",   seed: null, yaw: 0.9,  pitch: -0.02, advance: 2,   night: false },
   // Standing off the trainer, looking at him. The one view where a figure has
   // to read as a person rather than as a marker.
