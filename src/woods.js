@@ -27,10 +27,10 @@
 //      saveable, resumable and reproducible, and every draw below is taken
 //      unconditionally so the draw count cannot depend on the branch.
 
-import { CELL, cellToWorld, gridOf } from "./world.js?v=seven-0.25.0";
-import { CAMP_GRID } from "./camp.js?v=seven-0.25.0";
-import { makeChronicle, record, fact, account, pickPerturbation, WEATHERS } from "./chronicle.js?v=seven-0.25.0";
-import { makeRoster, nearMiss } from "./names.js?v=seven-0.25.0";
+import { CELL, cellToWorld, gridOf } from "./world.js?v=seven-0.26.0";
+import { CAMP_GRID } from "./camp.js?v=seven-0.26.0";
+import { makeChronicle, record, fact, account, pickPerturbation, WEATHERS } from "./chronicle.js?v=seven-0.26.0";
+import { makeRoster, nearMiss } from "./names.js?v=seven-0.26.0";
 
 /**
  * The four places the day happens in, as camp cells.
@@ -88,21 +88,125 @@ export function attachSites(world) {
  * which, which is the whole memory load and is drawn from the seed.
  */
 export const BEATS = Object.freeze([
-  { id: "b1", verb: "gathered", object: "firewood", cls: "timber", site: "deadfall",
+  { id: "b1", verb: "gathered", object: "firewood", cls: "timber", site: "deadfall", mark: "firewood",
     brief: "Take {who} down to the deadfall and bring firewood up." },
-  { id: "b2", verb: "fetched", object: "water", cls: "supply", site: "creek",
+  { id: "b2", verb: "fetched", object: "water", cls: "supply", site: "creek", mark: "water",
     brief: "Go with {who} to the creek for water." },
-  { id: "b3", verb: "cut", object: "leaning birch", cls: "timber", site: "ridge",
+  { id: "b3", verb: "cut", object: "leaning birch", cls: "timber", site: "ridge", mark: "birch",
     brief: "{who} has the saw. The leaning birch on the ridge has to come down." },
-  { id: "b4", verb: "pitched", object: "tent", cls: "structure", site: "fire",
+  { id: "b4", verb: "pitched", object: "tent", cls: "structure", site: "fire", mark: "tent",
     brief: "Back at camp — get the tent up with {who}." },
-  { id: "b5", verb: "lit", object: "fire", cls: "structure", site: "fire",
+  { id: "b5", verb: "lit", object: "fire", cls: "structure", site: "fire", mark: "fire",
     brief: "{who} can get the fire going." },
   { id: "b6", verb: "heard", object: null, cls: null, site: "ridge",
     brief: "Walk the ridge line with {who} before the light goes." },
   { id: "b7", verb: "watched", object: "fire", cls: "structure", site: "fire",
     brief: "That is the day. {who} has first watch — turn in." },
 ]);
+
+// ---------------------------------------------------------------------------
+// What the day LOOKS like. Pure numbers; render.js draws them.
+// ---------------------------------------------------------------------------
+//
+// A false account can bend the weather or an object, and either is only
+// catchable if the player EXPERIENCED the true value. Until 0.26 neither
+// reached them: the weather was drawn, stored on the chronicle and never
+// depicted, so "was it drizzling?" was a coin flip; and a beat resolved as a
+// subtitle, so "the tent" was a line of text rather than a thing they had
+// walked past. A green suite could not see either (Brain dog#E93/E95).
+//
+// These live HERE, beside the day, rather than in render.js, so the guard in
+// tests/readability.mjs can hold them without a browser. render.js reads them
+// off `sim.woods` every frame — never a copy — so the weather on screen is the
+// weather on the chronicle by construction.
+
+/**
+ * One visible signature per weather. Each must differ from every other on
+ * something a player sees across a whole day — tests/readability.mjs measures
+ * the pairwise distance, and the browser tier measures it again in pixels.
+ *
+ *   fog/fogDensity  the air        sky            low and high stops of the dome
+ *   hemi/sun        the light      rain           streaks falling round the eye
+ *   sway            trees moving   leaves         litter blowing past
+ *   frost           pale ground and crowns, the creek skinned over
+ */
+export const WEATHER_LOOK = Object.freeze({
+  clear: Object.freeze({
+    fog: 0xa6c2dc, fogDensity: 0.004, sky: [0xbad8f0, 0x3f7cc2],
+    hemi: 0xd8e8f8, hemiI: 1.6, sun: 0xfff0d0, sunI: 1.5, rain: 0, sway: 0, leaves: 0, frost: 0,
+  }),
+  drizzle: Object.freeze({
+    fog: 0x6c7881, fogDensity: 0.013, sky: [0x7a8791, 0x4f5a64],
+    hemi: 0xa3aeb8, hemiI: 1.15, sun: 0xc4ccd4, sunI: 0.45, rain: 1, sway: 0.18, leaves: 0, frost: 0,
+  }),
+  fog: Object.freeze({
+    fog: 0xc6cac9, fogDensity: 0.042, sky: [0xc6cac9, 0xb4babc],
+    hemi: 0xd2d6d6, hemiI: 1.35, sun: 0xe2e2de, sunI: 0.35, rain: 0, sway: 0, leaves: 0, frost: 0,
+  }),
+  wind: Object.freeze({
+    fog: 0x93a2ac, fogDensity: 0.006, sky: [0xb3b9ad, 0x66778a],
+    hemi: 0xd0d8dc, hemiI: 1.45, sun: 0xfff2dc, sunI: 1.1, rain: 0, sway: 1, leaves: 1, frost: 0,
+  }),
+  cold: Object.freeze({
+    fog: 0xd4e2ef, fogDensity: 0.008, sky: [0xe4eef6, 0x86a2c2],
+    hemi: 0xe2ecff, hemiI: 1.5, sun: 0xdce8ff, sunI: 0.95, rain: 0, sway: 0, leaves: 0, frost: 1,
+  }),
+});
+
+/**
+ * The first thing the day says, in the PRESENT register like beatLine — the
+ * player is standing in it, not being told about it. Deliberately not the
+ * chronicle's wording ("Cold enough that the water skinned over."): the
+ * morning should be a remembered DAY against a spoken sentence, not a
+ * remembered sentence against a spoken one.
+ */
+const DAWN = {
+  clear: "First light, and not a cloud.",
+  drizzle: "First light, and a fine drizzle coming down.",
+  fog: "First light — what there is of it. Fog in the trees.",
+  wind: "First light, and the tops are thrashing.",
+  cold: "First light. Your breath shows.",
+};
+export function dawnLine(weather) {
+  return `${DAWN[weather] || DAWN.clear} Seven things to get done before dark.`;
+}
+
+/**
+ * Where each beat's mark stands, as an offset from its site in CELLS. Chosen
+ * off the real grid (open cells, clear of the morning ring round the fire and
+ * of the spot the player wakes on) — tests/readability.mjs checks every one
+ * lands on open ground.
+ */
+export const MARK_AT = Object.freeze({
+  firewood: { site: "fire", dcx: -2, dcz: -1 },
+  water: { site: "fire", dcx: 2, dcz: -1 },
+  birch: { site: "ridge", dcx: 2, dcz: -1 },
+  tent: { site: "fire", dcx: 3, dcz: -2 },
+  fire: { site: "fire", dcx: 0, dcz: 0 },
+});
+
+/**
+ * What the day has done to the camp so far. DERIVED from `woods.beat` and
+ * `woods.phase`, both already save state, so a reload redraws exactly what
+ * was there and there is no second list to drift out of step with the first.
+ *
+ * Every mark-bearing beat is listed whether or not it is done, because some
+ * marks have a BEFORE as well as an after: the birch leans until it is cut,
+ * and a birch that only appears once it is down proves nothing.
+ *
+ *   done   the beat has resolved
+ *   spent  the night has passed — a lit fire is embers by morning
+ */
+export function dayMarks(woods) {
+  if (!woods) return [];
+  const slept = woods.phase === PHASE.MORNING || woods.phase === PHASE.VERDICT;
+  const out = [];
+  BEATS.forEach((b, i) => {
+    if (!b.mark) return;
+    out.push({ id: b.mark, beat: b.id, object: b.object, ...MARK_AT[b.mark], done: i < woods.beat, spent: slept });
+  });
+  return out;
+}
 
 export const PHASE = Object.freeze({
   DAY: "day",           // walking the beats
