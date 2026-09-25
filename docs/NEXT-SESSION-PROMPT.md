@@ -12,6 +12,11 @@ THE WOODS; the repo name and the game are the same thing.
 Brain stance brief. Terse replies. Direct response to my prompt and no extra
 explanations. Use conversational language.
 
+A SessionStart hook (`.claude/hooks/session-start.sh`) has already cloned the
+Brain CLI, linked this project in FULL mode and set the stance to brief, so
+`brain query` works from the first message. If it did not, it said so on stderr
+and the session started anyway — check `brain status`.
+
 **Read first, in this order:** `CLAUDE.md`, then `docs/TODO.md` (the ordered
 build queue and where the project actually is), then
 `docs/blueprint-0.26-the-ask-is-not-readable-yet.md`. Run
