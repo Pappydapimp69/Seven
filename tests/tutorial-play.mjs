@@ -158,6 +158,10 @@ await page.waitForFunction(() => !!window.__seven, null, { timeout: 20000 });
     // ---- 1: walk to the trainer -------------------------------------------
     M.startStage(0);
     const sim = M.sim;
+    // Sample every advance for anyone under — nothing may slip during the walk in.
+    let under = 0;
+    const realAdvance = M.advance;
+    M.advance = (sec, intent) => { const r = realAdvance.call(M, sec, intent); if (sim.party.some((c) => c.hallucinating)) under++; return r; };
     out.mapIsCamp = sim.pylons.length === 2 && sim.pylons.every((p) => p.mossed);
     out.noDrain = sim.noDrain === true;
     out.spawnedAwayFromTrainer = Math.hypot(sim.player.x - sim.trainer.x, sim.player.z - sim.trainer.z) > 30;
@@ -246,18 +250,21 @@ await page.waitForFunction(() => !!window.__seven, null, { timeout: 20000 });
     M.advance(0.2);
     note("ask", done().includes("ask"));
 
-    // ---- 7: the first lie --------------------------------------------------
+    // ---- 7: survey a real marker — nobody goes under ------------------------
     go(6);
-    out.leadUnder = !!sim.player.hallucinating;
     M.advance(0.1);
-    const ph = M.percept.phantomMonoliths[0];
-    out.phantoms = M.percept.phantomMonoliths.length;
-    if (ph) { sim.player.x = ph.x; sim.player.z = ph.z; M.advance(0.1); }
+    const mk = sim.monoliths.find((m) => m.id === "tut-marker");
+    out.markerSpawned = !!mk;
+    if (mk) { sim.player.x = mk.x; sim.player.z = mk.z + 1; M.advance(0.2); }
+    out.surveyPrompt = document.getElementById("actionPromptText").textContent;
     M.act(M.ACTIONS.SURVEY);
     M.advance(0.2);
     note("first-lie", done().includes("first-lie"));
+    out.realLogged = sim.logEntries.some((e) => e.id === "tut-marker" && e.real);
     out.badLogs = sim.logEntries.filter((e) => !e.real && !e.struck).length;
 
+    M.advance = realAdvance;
+    out.everUnder = under;
     out.finished = done().length;
     out.sameSessionThroughout = M.sim === sim;   // never remounted
     return out;
@@ -293,14 +300,16 @@ await page.waitForFunction(() => !!window.__seven, null, { timeout: 20000 });
   assert(r.irenId === "c2", `objective 4 is pinned to c2 but roster slot 1 is ${r.irenId}`);
   assert(String(r.askIds) === "c3,c4", `objective 6 is pinned to c3/c4 but slots 2-3 are ${r.askIds}`);
   assert(!r.askAfterOne, "one check-in completed objective 6 — it needs both");
-  assert(r.leadUnder, "objective 7 did not put the lead under");
-  assert(r.phantoms > 0, "objective 7 seeded no phantom to find");
-  assert(r.badLogs >= 1, "objective 7 completed without a false entry reaching the record");
+  assert(r.markerSpawned, "objective 7 did not put a marker out to survey");
+  assert(/Survey/.test(r.surveyPrompt), `at the marker the prompt was "${r.surveyPrompt}" — survey is being outranked`);
+  assert(r.realLogged, "the marker was not written into the record as a real entry");
+  assert(r.badLogs === 0, `the walk in left ${r.badLogs} false entr${r.badLogs === 1 ? "y" : "ies"} in the record — nothing should lie during it`);
+  assert(r.everUnder === 0, `somebody was hallucinating for ${r.everUnder} sampled frame(s) of the walk in`);
 
   // The whole point
   assert(r.finished === 7, `only ${r.finished} of 7 objectives completed`);
   assert(r.sameSessionThroughout, "the run was remounted mid-tutorial — this is meant to be one continuous session");
-  notes.push(`all 7 objectives complete in one session · ${r.badLogs} false entr${r.badLogs === 1 ? "y" : "ies"} left in the record`);
+  notes.push("all 7 objectives complete in one session · nobody went under");
 }
 
 // --- the meter never reaches the screen -------------------------------------

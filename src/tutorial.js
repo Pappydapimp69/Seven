@@ -44,6 +44,8 @@
 // (brain: sandbox-resolver-starves-tutorial#E1, and #E2's warning that there is
 // one such candidate PER pipeline layer, so an endpoint-only "the input fired"
 // check would pass while the tutorial never does.)
+import { CELL } from "./world.js?v=seven-0.26.3";
+
 export const VERB_PRIORITY = Object.freeze(["pylon", "pickup", "gather", "survey", "strike"]);
 
 /** Verbs that outrank `verb`, i.e. the ones a stage must clear from its site. */
@@ -160,13 +162,22 @@ export const OBJECTIVES = Object.freeze([
     debrief: "One of them told you what they wanted to be true. An answer is evidence, not fact.",
   },
   {
+    // The id is SAVE STATE (it is in every returning player's `done` list), so
+    // it stays "first-lie" although the objective no longer is one.
+    //
+    // NOBODY GOES UNDER DURING THE WALK IN. This objective used to put the
+    // lead under and have them log a marker that was not there. The owner's
+    // call from a playtest: the walk in teaches the verbs and nothing lies
+    // while it does — a new player cannot tell a taught hallucination from a
+    // broken game. So this is a REAL marker, surveyed for real, and the lie is
+    // left for the game itself to show them.
     id: "first-lie",
-    title: "The first lie",
+    title: "Survey",
     verb: "survey",
-    brief: "Something has gone wrong with the light. There is a marker out there — go to it and press {act} to survey it.",
-    opens: { leadUnder: true },
-    step: { id: "metTheLie", on: "logFalse", target: null, kindPinned: true },
-    debrief: "It was never there. Someone standing with you would have said so.",
+    brief: "There is a survey marker standing north of him, a tall dark stone. Walk up to it and press {act} to write it into the record.",
+    opens: { marker: { id: "tut-marker", name: "the Tally Stone", near: "trainer", dcx: -2, dcz: -6 } },
+    step: { id: "surveyed", on: "log", target: "tut-marker" },
+    debrief: "Written down. Nobody vouched for it — out there, ask someone to stand with you when you do.",
   },
 ]);
 
@@ -302,28 +313,19 @@ export function openObjective(sim, obj) {
   }
   if (o.canClearMoss) sim.canClearMoss = true;
   if (o.call) sim.callUnlocked = true;
-  if (o.leadUnder) {
-    // CLEAR WHAT OUTRANKS THIS VERB. The prompt resolver surfaces exactly one
-    // thing, and its order is pylon -> pickup -> gather -> survey -> strike.
-    // This objective teaches SURVEY, and the camp is small enough that a
-    // phantom seeded 14-30m out routinely lands inside the radius of a pylon
-    // or a still-mossed one — and then the press goes to that instead, forever,
-    // with nothing erroring. Exactly the starvation VERB_PRIORITY exists to
-    // name. The lesson those pylons had to teach is already over, so they are
-    // spent and their moss is gone: nothing above `survey` is left in reach.
-    for (const p of sim.pylons) { p.spent = true; p.mossed = false; }
-    for (const it of sim.items) it.taken = true;
-
-    // The lead goes under here, on purpose, with nobody close enough to refuse
-    // the entry. Survivable and reversible: the objective ends the moment the
-    // false entry is written, and the camp does not drain anybody, so this is
-    // the one and only time a mind slips during the walk in.
-    const lead = sim.player;
-    lead.lucidity = 0;
-    lead.hallucinating = true;
-    lead.hallucination = "phantomMarker";
-    lead.microUntil = 0;
-    for (const c of sim.companions) { c.x = lead.x + 300; c.z = lead.z + 300; }
+  if (o.marker) {
+    // EXISTENCE-GATED like the items: the stone is not there until the
+    // objective asks for it. Placed in cells off the trainer, on open ground
+    // well clear of both pylons (tests/tutorial.mjs checks both).
+    const m = o.marker;
+    if (!sim.monoliths.some((x) => x.id === m.id)) {
+      const anchor = m.near === "trainer" && sim.trainer ? sim.trainer : sim.player;
+      sim.monoliths.push({
+        id: m.id, kind: "monolith", name: m.name,
+        x: anchor.x + (m.dcx || 0) * CELL, z: anchor.z + (m.dcz || 0) * CELL,
+        logged: false,
+      });
+    }
   }
   return sim;
 }

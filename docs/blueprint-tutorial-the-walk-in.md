@@ -48,6 +48,13 @@ Each teaches ONE verb and plants ONE seed a later stage collects.
    is not there, invited to log it, with a lucid companion in range to refuse
    it. *Seeds 2/3/4/6 collect here.*
 
+   **Superseded in seven-0.26.3 (owner's call, from a playtest):** nobody goes
+   under during the walk in. A new player cannot tell a taught hallucination
+   from a broken game. Objective 7 is now "Survey" — a real marker, surveyed
+   for real; the id stays `first-lie` because it is save state. The lie is
+   left for the game itself to show. `tests/tutorial.mjs` holds that nobody
+   is hallucinating at any tick of the walk in.
+
 ## What must remain UNCHANGED
 
 - A non-tutorial run must be byte-identical with this code present. The overlay

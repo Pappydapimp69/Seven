@@ -9,10 +9,11 @@
 // Run: node tests/tutorial.mjs
 
 import { keyed } from "../src/keys.js";
-import { STAGES, TAUGHT_VERBS, observe, freshProgress, leaks, FORBIDDEN, outranks, VERB_PRIORITY, TRAINER_NAME } from "../src/tutorial.js";
+import { STAGES, TAUGHT_VERBS, openObjective, observe, freshProgress, leaks, FORBIDDEN, outranks, VERB_PRIORITY, TRAINER_NAME } from "../src/tutorial.js";
 import { NAME_MIN, NAME_MAX, makeRoster } from "../src/names.js";
 import { makeRng } from "../src/rng.js";
-import { buildCamp } from "../src/camp.js";
+import { buildCamp, CAMP_SEED } from "../src/camp.js";
+import { gridOf, CELL } from "../src/world.js";
 import { createRun, tick, badLogCount, pickupItem, activatePylon, checkIn, offerItem, logMarker, beginHallucinating, HALLUCINATION, FULL_DRAIN_AT } from "../src/state.js";
 import { readFileSync } from "fs";
 
@@ -431,7 +432,51 @@ check("a false log really does emit logFalse", () => {
   const before = sim.events.length;
   logMarker(sim, { name: "the Sixth Stone" });
   const ev = sim.events.slice(before).find((e) => e.kind === "logFalse");
-  assert(ev, "logging a phantom emitted no logFalse event — stage 7 would never complete");
+  assert(ev, "logging a phantom emitted no logFalse event");
+});
+
+// --- nobody goes under during the walk in ---------------------------------
+// The owner's call from a playtest: the walk in teaches verbs, and nothing
+// lies while it does — a new player cannot tell a taught hallucination from a
+// broken game. Objective 7 used to put the lead under on purpose. This opens
+// every objective in order on a real camp run, ticks through each, and
+// requires that nobody — lead or companion — is ever hallucinating.
+function walkInSlips(stages, open = openObjective) {
+  const world = buildCamp();
+  const sim = createRun({ seed: CAMP_SEED, difficulty: "gentle", level: 1, campaignLength: 1, world });
+  sim.noDrain = true; sim.noChatter = true; sim.trainer = world.trainer;
+  let slips = 0;
+  for (const st of stages) {
+    open(sim, st);
+    for (let i = 0; i < 20 * 40; i++) {
+      tick(sim, 1 / 20, { move: { x: Math.sin(i / 90), z: Math.cos(i / 130) }, yaw: i / 300 });
+      if (sim.party.some((c) => c.hallucinating)) slips++;
+    }
+  }
+  return slips;
+}
+check("nobody goes under at any point in the walk in", () => {
+  eq(walkInSlips(STAGES), 0, "somebody was hallucinating during the walk in (ticks)");
+});
+check("negative control — the old objective 7 is caught", () => {
+  // Exactly what it used to do on open: the lead's mind to the floor.
+  const old = (sim, st) => {
+    openObjective(sim, st);
+    if (st.id === "first-lie") { sim.player.lucidity = 0; sim.player.hallucinating = true; sim.player.hallucination = HALLUCINATION.PHANTOM_MARKER; }
+  };
+  assert(walkInSlips(STAGES, old) > 0, "the guard passed with the lead put under — it is inert");
+});
+check("the survey marker stands on open ground, clear of both pylons", () => {
+  const st = STAGES.find((x) => x.opens && x.opens.marker);
+  assert(st, "no objective places a survey marker");
+  const world = buildCamp();
+  const m = st.opens.marker;
+  const cx = world.trainer.cx + m.dcx, cz = world.trainer.cz + m.dcz;
+  assert(!world.blocked[cz * gridOf(world) + cx], `the marker stands in a blocked cell (${cx},${cz})`);
+  for (const p of world.pylons) {
+    const d = Math.hypot(p.cx - cx, p.cz - cz) * CELL;
+    assert(d > 15, `the marker is ${d.toFixed(1)} from pylon ${p.id} — its prompt would outrank survey`);
+  }
 });
 
 check("the pinning rule allows exactly the exceptions that declare themselves", () => {
