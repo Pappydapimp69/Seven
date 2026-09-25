@@ -6,10 +6,11 @@
 // list as the real ones.
 
 import * as THREE from "../lib/three.module.js";
-import { CELL, cellToWorld, gridOf } from "./world.js?v=seven-0.25.0";
-import { nightFactor } from "./state.js?v=seven-0.25.0";
-import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=seven-0.25.0";
-import { PYLON_RADIUS } from "./state.js?v=seven-0.25.0";
+import { CELL, cellToWorld, gridOf } from "./world.js?v=seven-0.26.0";
+import { nightFactor } from "./state.js?v=seven-0.26.0";
+import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=seven-0.26.0";
+import { PYLON_RADIUS } from "./state.js?v=seven-0.26.0";
+import { WEATHER_LOOK, dayMarks } from "./woods.js?v=seven-0.26.0";
 
 const PALETTE = {
   sky: 0x0a0f16,
@@ -301,6 +302,99 @@ export function createRenderer(canvas, sim) {
     return kindAt(cx, cz) === KIND.NONE;   // anything tagged draws as itself
   };
 
+  // ---- the day's weather (THE WOODS) ----------------------------------------
+  //
+  // The weather is one of the six things a false account can bend, and until
+  // 0.26 nothing drew it — so a wrong-weather claim asked the player about a
+  // thing they had never been shown. The look is woods.js's WEATHER_LOOK, read
+  // off `sim.woods.weather` EVERY FRAME rather than copied at build: a copy is
+  // one missed update from the scene and the chronicle disagreeing.
+  const weatherLook = () => (isCamp && sim.woods ? WEATHER_LOOK[sim.woods.weather] || null : null);
+
+  // Wind is MOVEMENT, so it is drawn in the vertex shader rather than by
+  // rewriting a thousand instance matrices a frame. Every tree leans the same
+  // way — a still frame of a windy day has to read as wind too, and trees
+  // swaying at random read as nothing in particular.
+  const windU = { uWindT: { value: 0 }, uSway: { value: 0 } };
+  function swayable(mat, base) {
+    mat.onBeforeCompile = (sh) => {
+      sh.uniforms.uWindT = windU.uWindT;
+      sh.uniforms.uSway = windU.uSway;
+      sh.vertexShader = "uniform float uWindT;\nuniform float uSway;\n" + sh.vertexShader.replace(
+        "#include <project_vertex>",
+        THREE.ShaderChunk.project_vertex.replace(
+          "mvPosition = modelViewMatrix * mvPosition;",
+          `vec4 wSw = modelMatrix * mvPosition;
+          float wH = max(0.0, transformed.y + ${base.toFixed(2)}) / 7.8;
+          float wPh = uWindT * 2.3 + wSw.x * 0.31 + wSw.z * 0.17;
+          wSw.x += uSway * wH * wH * (0.85 + 0.45 * sin(wPh));
+          wSw.z += uSway * wH * wH * 0.22 * sin(wPh * 1.37);
+          mvPosition = viewMatrix * wSw;`,
+        ),
+      );
+    };
+  }
+
+  // Held for the weather: frost whitens the crowns, drizzle darkens the grass.
+  let campLeaf = null;
+  let creekWater = null;
+  const leafBase = new THREE.Color(PALETTE.treeLeaf);
+  const creekBase = new THREE.Color(0x3d5a6b);
+
+  // Rain: short streaks in a box that follows the eye. Positions are hashed,
+  // not random, so tools/shoot.mjs frames of the same instant are identical.
+  const RAIN_N = 1400, RAIN_BOX = 26, RAIN_H = 16;
+  const rainPos = new Float32Array(RAIN_N * 6);
+  const rainSeed = new Float32Array(RAIN_N * 3);
+  for (let i = 0; i < RAIN_N; i++) {
+    const j = Math.imul(i + 1, 2654435761) >>> 0;
+    rainSeed[i * 3] = ((j % 1000) / 1000 - 0.5) * RAIN_BOX * 2;
+    rainSeed[i * 3 + 1] = (((j >>> 10) % 1000) / 1000) * RAIN_H;
+    rainSeed[i * 3 + 2] = ((((j >>> 20) % 1000) / 1000) - 0.5) * RAIN_BOX * 2;
+  }
+  const rainGeo = new THREE.BufferGeometry();
+  rainGeo.setAttribute("position", new THREE.BufferAttribute(rainPos, 3));
+  const rain = new THREE.LineSegments(rainGeo, new THREE.LineBasicMaterial({ color: 0xc2ced8, transparent: true, opacity: 0.6, fog: false }));
+  rain.frustumCulled = false;
+  rain.visible = false;
+  scene.add(rain);
+
+  // Leaves on the wind: the other half of "wind", because a treeline swaying at
+  // the edge of the frame is easy to walk a whole day without looking at.
+  const LEAF_N = 220;
+  const leafPos = new Float32Array(LEAF_N * 3);
+  const leafGeo = new THREE.BufferGeometry();
+  leafGeo.setAttribute("position", new THREE.BufferAttribute(leafPos, 3));
+  const leafFly = new THREE.Points(leafGeo, new THREE.PointsMaterial({ color: 0x7a6a3a, size: 0.22 }));
+  leafFly.frustumCulled = false;
+  leafFly.visible = false;
+  scene.add(leafFly);
+
+  /** Move the rain and the leaves. `t` is scene time; everything is a function of it. */
+  function updateWeatherParticles(look, eye, t) {
+    rain.visible = !!(look && look.rain);
+    leafFly.visible = !!(look && look.leaves);
+    if (rain.visible) {
+      const fall = 14;
+      for (let i = 0; i < RAIN_N; i++) {
+        const x = eye.x + rainSeed[i * 3];
+        const z = eye.z + rainSeed[i * 3 + 2];
+        const y = RAIN_H - ((rainSeed[i * 3 + 1] + t * fall) % RAIN_H) + terrainHeight(eye.x, eye.z) - 2;
+        rainPos.set([x, y, z, x + 0.05, y - 0.55, z], i * 6);
+      }
+      rainGeo.attributes.position.needsUpdate = true;
+    }
+    if (leafFly.visible) {
+      const span = RAIN_BOX * 2;
+      for (let i = 0; i < LEAF_N; i++) {
+        const sx = rainSeed[i * 3], sy = rainSeed[i * 3 + 1], sz = rainSeed[i * 3 + 2];
+        const x = eye.x - RAIN_BOX + ((sx + RAIN_BOX + t * (7 + (i % 5))) % span + span) % span;
+        const y = terrainHeight(eye.x, eye.z) + 0.3 + (sy / RAIN_H) * 5 + Math.sin(t * 3 + i) * 0.4;
+        leafPos.set([x, y, eye.z + sz], i * 3);
+      }
+      leafGeo.attributes.position.needsUpdate = true;
+    }
+  }
   if (sim.world.cellKind) buildCampScenery();
 
   /** Cabins, trees and a dirt path — the camp's own vocabulary. */
@@ -309,6 +403,12 @@ export function createRenderer(canvas, sim) {
     const roof = new THREE.MeshStandardMaterial({ color: 0x2e2620, roughness: 1, flatShading: true });
     const trunkMat = new THREE.MeshStandardMaterial({ color: PALETTE.treeTrunk, roughness: 0.9 });
     const leafMat = new THREE.MeshStandardMaterial({ color: PALETTE.treeLeaf, roughness: 0.85, flatShading: true });
+    campLeaf = leafMat;
+    // The offset is how far the geometry's local origin sits above the ground,
+    // so the bend grows from the roots: a trunk is centred on 1.7, a crown on
+    // 3.4 + 2.2.
+    swayable(leafMat, 5.6);
+    swayable(trunkMat, 1.7);
     // Well lighter than the grass. At 0x50432f the path was technically drawn
     // and read as a slightly different green — a path you cannot see is not a path.
     const dirtMat = new THREE.MeshStandardMaterial({ color: 0x9c7f55, roughness: 1 });
@@ -540,7 +640,7 @@ export function createRenderer(canvas, sim) {
   // ---- monoliths, pylons, figures: pooled and rebuilt from perception ------
   const monolithGeo = new THREE.BoxGeometry(1.5, 7.4, 1.1);
   const ringGeo = new THREE.TorusGeometry(PYLON_RADIUS, 0.09, 6, 40);
-  const pool = { monoliths: new Map(), pylons: new Map(), figures: new Map(), items: new Map(), trees: new Map(), stones: new Map(), sites: new Map(), fires: new Map(), falls: new Map() };
+  const pool = { monoliths: new Map(), pylons: new Map(), figures: new Map(), items: new Map(), trees: new Map(), stones: new Map(), sites: new Map(), fires: new Map(), falls: new Map(), marks: new Map() };
 
   function makeMonolith() {
     const g = new THREE.Group();
@@ -792,6 +892,7 @@ export function createRenderer(canvas, sim) {
       water.position.y = 0.06;
       water.rotation.y = 0.32;
       g.add(water);
+      creekWater = water;
       const stone = new THREE.MeshStandardMaterial({ color: 0x77726a, roughness: 0.95, flatShading: true });
       for (let i = 0; i < 6; i++) {
         const r = 0.16 + (i % 3) * 0.07;
@@ -891,6 +992,122 @@ export function createRenderer(canvas, sim) {
     glow.position.y = 2.5;
     g.add(glow);
     g.userData = { lamp, glow };
+    scene.add(g);
+    return g;
+  }
+
+  /**
+   * What a beat LEAVES. Until 0.26 a beat resolved as a subtitle and nothing
+   * else, so a false account that swapped "the tent" for "the fire" was a
+   * memory test of a line of text. Now the tent stands, the firewood is
+   * stacked, the birch is down, and the thing the account names is a thing the
+   * player walked past for the rest of the day.
+   *
+   * One body per mark id (woods.js MARK_AT / dayMarks). tests/readability.mjs
+   * holds that every object a false account can name has one here.
+   */
+  const MARK_BODIES = {
+    firewood() {
+      const g = new THREE.Group();
+      const mat = new THREE.MeshStandardMaterial({ color: 0x6e5236, roughness: 1, flatShading: true });
+      for (let row = 0; row < 3; row++) {
+        for (let i = 0; i < 4 - row; i++) {
+          const log = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.18, 1.5, 6), mat);
+          log.rotation.x = Math.PI / 2;
+          log.position.set((i - (3 - row) / 2) * 0.36, 0.17 + row * 0.3, 0);
+          g.add(log);
+        }
+      }
+      return g;
+    },
+    water() {
+      const g = new THREE.Group();
+      const mat = new THREE.MeshStandardMaterial({ color: 0x7d8c96, roughness: 0.45, metalness: 0.5, flatShading: true });
+      for (let i = 0; i < 2; i++) {
+        const can = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.24, 0.62, 8), mat);
+        can.position.set(i * 0.62 - 0.31, 0.31, i * 0.12);
+        g.add(can);
+        const handle = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.025, 4, 10, Math.PI), mat);
+        handle.position.set(i * 0.62 - 0.31, 0.62, i * 0.12);
+        g.add(handle);
+      }
+      return g;
+    },
+    tent() {
+      const g = new THREE.Group();
+      const canvasMat = new THREE.MeshStandardMaterial({ color: 0xb49a68, roughness: 0.95, flatShading: true, side: THREE.DoubleSide });
+      const L = 2.6, H = 1.55, W = 1.1;
+      const slope = Math.hypot(W, H);
+      for (const side of [-1, 1]) {
+        const panel = new THREE.Mesh(new THREE.BoxGeometry(L, 0.05, slope), canvasMat);
+        panel.position.set(0, H / 2, side * W / 2);
+        panel.rotation.x = side * Math.atan2(H, W);
+        g.add(panel);
+      }
+      const poleMat = new THREE.MeshStandardMaterial({ color: 0x4a3a2a, roughness: 0.9 });
+      for (const end of [-1, 1]) {
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, H + 0.2, 5), poleMat);
+        pole.position.set(end * L / 2, (H + 0.2) / 2, 0);
+        g.add(pole);
+      }
+      // End-on to the hearth, so the A of it is what you see from the fire.
+      g.rotation.y = Math.PI / 2;
+      return g;
+    },
+    // Two states: leaning until it is cut, then down with a stump. A birch that
+    // only appears once it is down would prove nothing about the day.
+    birch() {
+      const g = new THREE.Group();
+      const bark = new THREE.MeshStandardMaterial({ color: 0xe4e0d4, roughness: 0.8, flatShading: true });
+      const leaf = new THREE.MeshStandardMaterial({ color: 0x8a9a4a, roughness: 0.85, flatShading: true });
+      const standing = new THREE.Group();
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.19, 5.2, 6), bark);
+      trunk.position.y = 2.6;
+      standing.add(trunk);
+      const crown = new THREE.Mesh(new THREE.IcosahedronGeometry(1.0, 0), leaf);
+      crown.position.y = 5.2;
+      crown.scale.set(1, 1.3, 1);
+      standing.add(crown);
+      standing.rotation.z = -0.42;   // it LEANS — that is the whole reason it has to come down
+      g.add(standing);
+      const down = new THREE.Group();
+      const stump = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.21, 0.4, 6), bark);
+      stump.position.y = 0.2;
+      down.add(stump);
+      const log = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.18, 4.8, 6), bark);
+      log.rotation.z = Math.PI / 2;
+      log.position.set(2.7, 0.2, 0.3);
+      down.add(log);
+      const brush = new THREE.Mesh(new THREE.IcosahedronGeometry(0.8, 0), leaf);
+      brush.position.set(5.3, 0.45, 0.3);
+      brush.scale.set(1.3, 0.6, 1);
+      down.add(brush);
+      g.add(down);
+      g.userData = { standing, down };
+      return g;
+    },
+    // The hearth's fire: burning once lit, embers by morning. The site body
+    // under it is the unlit ring; this is only what burns in it.
+    fire() {
+      const g = new THREE.Group();
+      const flame = new THREE.Mesh(new THREE.ConeGeometry(0.42, 1.1, 6), new THREE.MeshBasicMaterial({ color: 0xffa63a }));
+      flame.position.y = 0.6;
+      g.add(flame);
+      const embers = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.46, 0.08, 8), new THREE.MeshBasicMaterial({ color: 0xa8401a }));
+      embers.position.y = 0.08;
+      g.add(embers);
+      const glow = new THREE.PointLight(0xffa03c, 2.0, 20, 2);
+      glow.position.y = 1.0;
+      g.add(glow);
+      g.userData = { flame, embers, glow };
+      return g;
+    },
+  };
+
+  function makeMark(item) {
+    const make = MARK_BODIES[item && item.id];
+    const g = make ? make() : new THREE.Group();
+    g.userData = { ...(g.userData || {}) };
     scene.add(g);
     return g;
   }
@@ -995,8 +1212,13 @@ export function createRenderer(canvas, sim) {
     // the night off the mind standing in it (nightFactor(sim, ch)), it does not
     // hold the sky up. The local light a fire throws is drawn with the fire.
     const night = nightFactor(sim);
-    sky.intensity = dayLit.sky * (1 - 0.72 * night);
-    sun.intensity = dayLit.sun * (1 - 0.85 * night);
+    const look = weatherLook();
+    if (look) {
+      sky.color.setHex(look.hemi);
+      sun.color.setHex(look.sun);
+    }
+    sky.intensity = (look ? look.hemiI : dayLit.sky) * (1 - 0.72 * night);
+    sun.intensity = (look ? look.sunI : dayLit.sun) * (1 - 0.85 * night);
     // The rim falls FURTHER than the sun at night. It is a sky light, and the
     // point of the dark is that shape stops being free — what separates two
     // silhouettes after dusk should be the lamp you are carrying.
@@ -1006,8 +1228,13 @@ export function createRenderer(canvas, sim) {
     // The sky darkens toward the horizon colour's own shadow rather than to
     // black: a night sky that is pure black has no horizon, and losing the
     // horizon is what made the old nights read as a void instead of a place.
-    skyMat.uniforms.low.value.copy(SKY.low).multiplyScalar(1 - 0.82 * night);
-    skyMat.uniforms.high.value.copy(SKY.high).multiplyScalar(1 - 0.6 * night);
+    if (look) {
+      skyMat.uniforms.low.value.setHex(look.sky[0]).multiplyScalar(1 - 0.82 * night);
+      skyMat.uniforms.high.value.setHex(look.sky[1]).multiplyScalar(1 - 0.6 * night);
+    } else {
+      skyMat.uniforms.low.value.copy(SKY.low).multiplyScalar(1 - 0.82 * night);
+      skyMat.uniforms.high.value.copy(SKY.high).multiplyScalar(1 - 0.6 * night);
+    }
     skyDome.position.set(eye.x, 0, eye.z);
     if (scene.background && scene.background.isColor) {
       scene.background.copy(skyMat.uniforms.low.value);
@@ -1049,8 +1276,23 @@ export function createRenderer(canvas, sim) {
     // enough; anything set at build must also be respected here or it lasts
     // exactly one frame. The camp still drifts as the lead goes, just from its
     // own colours and its own baseline density.
-    const baseFog = isCamp ? 0x8fa2b4 : PALETTE.fog;
-    const baseDensity = isCamp ? 0.006 : 0.014;
+    const baseFog = look ? look.fog : isCamp ? 0x8fa2b4 : PALETTE.fog;
+    const baseDensity = look ? look.fogDensity : isCamp ? 0.006 : 0.014;
+    if (look) {
+      windU.uWindT.value = elapsed;
+      windU.uSway.value = look.sway;
+      if (campLeaf) campLeaf.color.copy(leafBase).lerp(tmpColor.setHex(0xdfe8ee), 0.55 * look.frost);
+      // The ground: frost lifts it pale, rain darkens it. Emissive rather than
+      // colour because the grass is vertex-coloured and colour can only darken.
+      ground.material.color.setScalar(look.rain ? 0.72 : 1);
+      ground.material.emissive.setHex(0x9fb0c2).multiplyScalar(0.32 * look.frost);
+      // "Cold enough that the water skinned over" — so it has, where you can see it.
+      if (creekWater) {
+        creekWater.material.color.copy(creekBase).lerp(tmpColor.setHex(0xd6e4ec), 0.8 * look.frost);
+        creekWater.material.roughness = look.frost ? 0.6 : 0.25;
+      }
+    }
+    updateWeatherParticles(look, eye, elapsed);
     tmpColor.set(baseFog).lerp(new THREE.Color(PALETTE.fogLost), dis);
     scene.fog.color.copy(tmpColor);
     scene.background = tmpColor;
@@ -1159,6 +1401,28 @@ export function createRenderer(canvas, sim) {
       obj.userData.glow.intensity = lit ? 1.5 : 0;
       obj.userData.lamp.material.color.set(lit ? 0xffd489 : 0x4a4a48);
       obj.userData.lamp.scale.setScalar(lit ? 1 + Math.sin(elapsed * 1.7) * 0.14 : 0.85);
+    }
+
+    // ---- what the day has left behind (THE WOODS) ----
+    // Read off `sim.woods` every frame — woods.beat and woods.phase are already
+    // save state, so a reload redraws exactly this and there is no second list.
+    const sites = sim.world.sites || [];
+    const marks = dayMarks(sim.woods).filter((m) => m.done || m.id === "birch");
+    syncPool(pool.marks, marks, makeMark);
+    for (const obj of pool.marks.values()) {
+      if (!obj.visible) continue;
+      const m = obj.userData.item;
+      const site = sites.find((x) => x.id === m.site);
+      if (!site) { obj.visible = false; continue; }
+      const x = site.x + m.dcx * CELL, z = site.z + m.dcz * CELL;
+      obj.position.set(x, terrainHeight(x, z), z);
+      const u = obj.userData;
+      if (u.standing) { u.standing.visible = !m.done; u.down.visible = m.done; }
+      if (u.flame) {
+        u.flame.visible = !m.spent;
+        u.flame.scale.y = 1 + Math.sin(elapsed * 9) * 0.08;
+        u.glow.intensity = m.spent ? 0.35 : 2.0;
+      }
     }
 
     // ---- companions (real and otherwise) ----

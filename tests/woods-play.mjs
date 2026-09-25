@@ -29,6 +29,26 @@ const serve = () => http.createServer((q, r) => {
 const fails = [];
 const A = (c, m) => { if (!c) fails.push(m); };
 
+// What the day has left in the scene, read off the live Three objects (not off
+// woods.js) — a mark that dayMarks lists and the renderer never shows is the
+// exact failure 0.26 exists to end. Needs the page's own loop to have drawn a
+// frame since the state changed; `frames` waits for two.
+const MARKS = `(() => {
+  const out = {};
+  window.__seven.renderer.scene.traverse((o) => {
+    const it = o.userData && o.userData.item;
+    if (!it || !it.beat || !o.parent) return;
+    out[it.id] = {
+      shown: o.visible,
+      standing: o.userData.standing ? o.userData.standing.visible : null,
+      down: o.userData.down ? o.userData.down.visible : null,
+      burning: o.userData.flame ? o.userData.flame.visible : null,
+    };
+  });
+  return out;
+})()`;
+const frames = (pg) => pg.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+
 (async () => {
   const s = serve(); await new Promise((r) => s.listen(0, "127.0.0.1", r));
   const url = `http://localhost:${s.address().port}/index.html`;
@@ -72,6 +92,12 @@ const A = (c, m) => { if (!c) fails.push(m); };
   A(new Set(start.names).size === 5, `the party is not five distinct people: ${start.names.join(",")}`);
   A(start.names.every((n) => /^[A-Z]{4,8}$/.test(n)), `a generated name is malformed: ${start.names.join(",")}`);
   A(start.drew > 40, `the camp barely drew (${start.drew} calls) — geometry is missing`);
+
+  // --- at dawn the camp is untouched, except the birch that has to come down
+  await frames(page);
+  const dawn = await page.evaluate(MARKS);
+  A(dawn.birch && dawn.birch.shown && dawn.birch.standing && !dawn.birch.down, `the leaning birch is not standing at dawn: ${JSON.stringify(dawn.birch)}`);
+  for (const id of ["firewood", "water", "tent", "fire"]) A(!dawn[id] || !dawn[id].shown, `the ${id} is already there at dawn — it proves nothing about the day`);
 
   // --- the four places are four DIFFERENT places ------------------------
   // `tests/woods.mjs` holds the contract (every site has a form); this holds
@@ -230,6 +256,15 @@ const A = (c, m) => { if (!c) fails.push(m); };
   A(night.after === night.before, "a question was spent on a press made at a black screen");
   A(/hidden/.test(night.cls), `the night did not clear: "${night.cls}"`);
 
+  // --- and the day is still THERE in the morning -------------------------
+  // The whole point of 0.26: "the tent" in somebody's account is a thing the
+  // player walked past, not a line they read. Read off the live scene.
+  await frames(page);
+  const after = await page.evaluate(MARKS);
+  for (const id of ["firewood", "water", "tent", "fire"]) A(after[id] && after[id].shown, `the morning shows no ${id} — the beat left nothing behind: ${JSON.stringify(after)}`);
+  A(after.birch && after.birch.down && !after.birch.standing, `the birch is not down in the morning: ${JSON.stringify(after.birch)}`);
+  A(after.fire && after.fire.burning === false, "the fire is still burning in the morning — it was put down for the night");
+
   // --- asking -------------------------------------------------------------
   const asked = await page.evaluate(() => {
     const M = window.__seven;
@@ -366,6 +401,57 @@ const A = (c, m) => { if (!c) fails.push(m); };
   A(resumed.lit, "the resumed day lit no worksite");
   A(/the woods/.test(resumed.detail), `the Resume button describes a woods day as "${resumed.detail}"`);
   A(resumed.names.every((n) => /^[A-Z]{4,8}$/.test(n)), `the party came back under different names: ${resumed.names.join(",")}`);
+  // The marks are DERIVED from woods.beat, which is save state — so a reload
+  // redraws exactly the two things done, and not the third.
+  await frames(page2);
+  const back = await page2.evaluate(MARKS);
+  A(back.firewood?.shown && back.water?.shown, `a reload lost what the first two beats left: ${JSON.stringify(back)}`);
+  A(!back.tent?.shown && back.birch?.standing, `a reload drew beats that had not happened: ${JSON.stringify(back)}`);
+
+  // --- the weather is SEEN ------------------------------------------------
+  // tests/readability.mjs holds the look table and that render.js binds it.
+  // This holds the RESULT: five days, one per weather, the same spot and the
+  // same frame, read back off the canvas. Each is a signature of mean colour
+  // in three horizontal bands (sky, treeline, ground) plus how much the frame
+  // moves between two samples — wind and drizzle are movement, and a still
+  // frame alone would undersell them. Every pair must differ.
+  const SAMPLE = `(() => {
+    const r = window.__seven.renderer; r.renderer.render(r.scene, r.camera);
+    const gl = r.renderer.getContext(); const W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
+    const px = new Uint8Array(W * H * 4); gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    const bands = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]; const keep = [];
+    for (let y = 0; y < H; y += 4) for (let x = 0; x < W; x += 4) {
+      const i = (y * W + x) * 4; const b = bands[Math.min(2, Math.floor(((H - 1 - y) / H) * 3))];
+      b[0] += px[i]; b[1] += px[i + 1]; b[2] += px[i + 2]; b[3]++; keep.push(px[i], px[i + 1], px[i + 2]);
+    }
+    return { means: bands.map((b) => [b[0] / b[3], b[1] / b[3], b[2] / b[3]]), keep };
+  })()`;
+  // The first "dayN" seed that draws each weather (woods.js startDay).
+  const DAYS = { clear: "day1", drizzle: "day2", fog: "day4", wind: "day5", cold: "day0" };
+  const sig = {};
+  for (const [want, day] of Object.entries(DAYS)) {
+    const got = await page2.evaluate((day) => {
+      const M = window.__seven; M.startWoods(day);
+      const sim = M.sim; const site = sim.world.sites.find((x) => x.id === "fire");
+      sim.player.x = site.x + 2.6; sim.player.z = site.z + 13;
+      for (const c of sim.companions) { c.x = site.x - 30; c.z = site.z + 30; c.jobSite = null; }
+      return M.woods.weather;
+    }, day);
+    A(got === want, `seed "${day}" drew ${got}, not ${want} — the day's draw order moved`);
+    await frames(page2);
+    const a = await page2.evaluate(SAMPLE);
+    await page2.waitForTimeout(400); await frames(page2);
+    const b2 = await page2.evaluate(SAMPLE);
+    let motion = 0; for (let i = 0; i < a.keep.length; i++) motion += Math.abs(a.keep[i] - b2.keep[i]);
+    sig[want] = { means: a.means, motion: motion / a.keep.length };
+  }
+  const W = Object.keys(sig);
+  for (let i = 0; i < W.length; i++) for (let j = i + 1; j < W.length; j++) {
+    const p = sig[W[i]], q = sig[W[j]];
+    const colour = Math.max(...p.means.map((m, k) => Math.hypot(...m.map((v, c) => v - q.means[k][c]))));
+    const d = Math.max(colour, Math.abs(p.motion - q.motion) * 40);
+    A(d >= 15, `${W[i]} and ${W[j]} look the same on screen (distance ${d.toFixed(1)}) — a wrong-weather claim is a coin flip`);
+  }
 
   A(errs.length === 0, `page errors: ${JSON.stringify(errs.slice(0, 3))}`);
   await b.close(); s.close();

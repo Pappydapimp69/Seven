@@ -9,14 +9,15 @@ Rules: an item leaves by being built, or by being moved to `WORKING-LIST.md`
 with a reason, or by being deleted with one. Nothing sits here unexamined for
 two phases.
 
-Last reviewed: 2026-09-25, at seven-0.25.0.
+Last reviewed: 2026-09-25, at seven-0.26.0.
 
 ---
 
 ## Where the project actually is
 
 - **Live:** https://pappydapimp69.github.io/Seven/ — seven-0.25.0, verified
-  across all 16 modules by `tools/verify-deploy.mjs`.
+  across all 16 modules by `tools/verify-deploy.mjs`. seven-0.26.0 is built on
+  the branch and NOT merged or deployed — that waits on the owner.
 - **Branch:** `claude/brain-install-vohzag`. `main` is what deploys, on push.
 - **Suite:** green, pure and browser tiers, except the known `deceived` row.
 - **The one question the repo exists to answer is still unanswered.**
@@ -27,35 +28,25 @@ Last reviewed: 2026-09-25, at seven-0.25.0.
 
 ---
 
-## 1. NEXT — make the ask readable (blueprint 0.26)
+## 1. DONE — the ask is readable (seven-0.26.0, blueprint 0.26)
 
-`docs/blueprint-0.26-the-ask-is-not-readable-yet.md` has the reasoning. The
-short version: `chronicle.js` perturbs one of six kinds, and a false account is
-only catchable if the player experienced the true value. Two kinds never reach
-them.
+Built as the blueprint said; its "What was built" section has the detail.
 
-- [ ] **Render the weather.** `woods.js` draws one of five (`clear`, `drizzle`,
-      `fog`, `wind`, `cold`) and stores it on the chronicle. `render.js`
-      mentions weather once, in a comment about camp fog; `hud.js` never does.
-      A wrong-weather claim asks whether it was drizzling on a day where
-      drizzle was never depicted — one sixth of the falsification surface is a
-      coin flip. Bind the renderer to `woods.weather` directly, not to a copy
-      (Brain: `draw-the-rule-from-the-live-value`).
-- [ ] **Make beats leave the world changed.** The seven beats resolve as a
-      subtitle and nothing else: no tent is pitched, no firewood stacks by the
-      fire, the leaning birch never falls. `woods.js` argues a beat must be a
-      HOLD because "a memory needs something to be a memory OF" — and then the
-      thing being watched is a progress bar. One mesh each, placed on resolve,
-      serialised in the shape `deadfallsCleared` already uses.
-- [ ] **A readability guard per perturbation kind.** For each of the six, a
-      test that the true value reached the player through something other than
-      the account text. This is the guard whose absence let `place` ship as
-      four identical cairns for the alpha's entire life. Negative-control each.
+- [x] **Weather rendered.** `woods.js` `WEATHER_LOOK`, read off
+      `sim.woods.weather` every frame in `render.js`: sky, fog, light, rain,
+      wind in the treeline plus blowing leaves, frost and a skinned-over creek.
+      The day's first line says it too, in the present register.
+- [x] **Beats leave the world changed.** Firewood, water cans, tent and fire at
+      the hearth; the birch leans on the ridge until it is cut, then lies down.
+      DERIVED from `woods.beat`/`woods.phase` (`dayMarks`), not serialised as a
+      second list — both are already save state, so nothing can drift.
+- [x] **A readability guard per kind.** `tests/readability.mjs`, one guard per
+      perturbation kind, each with its negative controls in the file. The
+      browser half is in `tests/woods-play.mjs`: marks read off the live scene
+      at dawn, morning and after a reload; the five weathers read back off the
+      canvas and required pairwise distinct.
 
-**Explicitly out of scope:** the traverse, regions, recruitment, skills,
-pylons-as-route, meta-progression. Deferred by the handoff, still deferred.
-
-## 2. THEN — a human plays a day
+## 2. NEXT — a human plays a day
 
 Nothing in this repo can answer the design question, and tension **T11** says
 the automated tier never will. The instrument exists: every finished day writes
