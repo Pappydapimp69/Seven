@@ -25,6 +25,12 @@ cairn — they are already on their way there, because it is their job — and
 Watch who does what, and where. That is the whole thing you are being asked to
 remember. Nothing else in the run will help you.
 
+Since 0.26 the day also shows you the rest of what an account can get wrong:
+the **weather** is on screen all day (clear, drizzle, fog, wind or cold, and
+the first line says which), and each job **leaves something behind** — the
+firewood stacked by the hearth, water cans, the tent, the fire, the birch down
+on the ridge. In the morning they are still there.
+
 **The night.** The screen closes. One of them is replaced by something with the
 same name and the same skills. Nothing is announced — no line, no sound, no
 mark on the roster, and nobody else finds it strange.
@@ -33,7 +39,8 @@ mark on the roster, and nobody else finds it strange.
 name (**1**–**5**) and check in to hear their account of yesterday. Everyone
 who was really there tells it the same way, word for word. The one who was not
 gets **exactly one thing wrong**: a wrong place, the wrong pair of hands, two
-things in the wrong order, the weather, or a name a letter off.
+things in the wrong order, the wrong thing done, the weather, or a name a
+letter off.
 
 Re-reading somebody you have already asked is free and gives back the same
 words. Three questions for five people is the point — you cannot lay all five
@@ -51,7 +58,8 @@ this was built before anything else.
    is fine. Losing while feeling you never had the information is not.
 2. **Which kind of wrongness did you notice, and which did you miss?** Six
    axes are in play. If one is invisible in practice, or one is a giveaway,
-   that is a real finding.
+   that is a real finding. Weather and "the wrong thing" were invisible before
+   0.26; whether they are readable NOW is the thing no test can say.
 3. **Run five.** This matters more than run one. Does it get more interesting
    as you learn what to listen for, or does it flatten into guessing? The title
    button keeps a count — days walked, how many caught, and how many of your

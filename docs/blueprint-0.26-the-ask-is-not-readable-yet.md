@@ -105,3 +105,33 @@ tier never will.
   built on it.
 - If `order` also proves unreadable in play — seven beats is a lot to hold —
   the fix is the day's length, not its presentation, and that is a design call.
+
+## What was built (seven-0.26.0)
+
+- **Weather.** `woods.js` `WEATHER_LOOK` is one visible signature per weather:
+  fog colour and density, the sky's two stops, the light, and four effects —
+  rain streaks (drizzle), a treeline that leans and moves plus blowing leaves
+  (wind), frosted crowns and ground and an iced creek (cold), and fog at seven
+  times the clear density. `render.js` reads it off `sim.woods.weather` every
+  frame; there is no copy. `dawnLine` opens the day with it, in the present
+  register and deliberately not in the account's words.
+- **Marks.** `dayMarks(woods)` derives what the day has left from
+  `woods.beat` and `woods.phase`. This departs from the plan's "serialise in
+  `deadfallsCleared`'s shape" on purpose: both inputs are already save state,
+  so a second list could only ever disagree with them. No SAVE_VERSION bump.
+  The birch has a BEFORE (leaning) as well as an after (down, with a stump); a
+  mark that only appears once done would prove nothing. The fire is embers by
+  morning. Beat 6 (heard something) and 7 (first watch) leave nothing — they
+  carry no object an account can swap.
+- **Guards.** `tests/readability.mjs` holds one guard per kind and feeds each a
+  broken copy of what it watches (18 negative controls, each checked to fail
+  for the RIGHT reason, not just to fail). `tests/woods-play.mjs` holds the
+  result on real pixels and the live scene. Both browser checks were
+  negative-controlled by unbinding the weather and emptying the marks pool:
+  19 failures, all of the expected shape.
+- `tools/shoot.mjs` gained `woods-*` views (one per weather from one spot,
+  and the ridge before and after the birch) and `SHOOT_ONLY=<substring>`.
+
+Open, and outside what this build claims: whether a player NOTICES any of it.
+The pixel guard says five weathers are distinguishable on screen; it cannot
+say anyone looked.
