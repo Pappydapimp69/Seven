@@ -63,6 +63,9 @@ const results = [];
 for (const c of CASES) {
   const ctx = await browser.newContext({ viewport: { width: c.width, height: c.height }, deviceScaleFactor: c.deviceScaleFactor });
   const page = await ctx.newPage();
+  // A RETURNING player: the walk in is finished, so the title offers everything.
+  // A first visit offers only "Learn the walk" (tests/tutorial-play.mjs holds that).
+  await page.addInitScript(() => { try { const k = "seven:settings"; const s = JSON.parse(localStorage.getItem(k) || "{}"); if (!s.tutorial) { s.tutorial = { done: ["walk-in", "ground", "craft", "hands", "pylon", "ask", "first-lie"], current: 7 }; localStorage.setItem(k, JSON.stringify(s)); } } catch {} });
   await page.goto(`http://127.0.0.1:${PORT}/index.html`, { waitUntil: "load" });
   await page.waitForFunction(() => !!window.__seven, null, { timeout: 20000 });
   await page.evaluate(() => window.__seven.startRun({ difficulty: "standard", seed: 4242 }));

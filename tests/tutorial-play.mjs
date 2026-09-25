@@ -55,6 +55,26 @@ await page.waitForFunction(() => !!window.__seven, null, { timeout: 20000 });
   assert(btn && btn.row !== undefined, "the tutorial button is outside the gamepad menu grid — unreachable on a pad");
 }
 
+// --- a FIRST VISIT offers the walk in and nothing else ----------------------
+// From a playtest: the woods, the basin and their settings were all on the
+// first screen a new player saw, and they picked one of those and met verbs
+// nobody had taught them. This profile is fresh, so the title must be locked.
+{
+  const first = await page.evaluate(() => {
+    const shown = (id) => document.getElementById(id)?.offsetParent !== null;
+    return {
+      learn: shown("learnBtn"), woods: shown("woodsBtn"), walkIn: shown("startBtn"),
+      seed: shown("seedInput"), note: shown("firstWalkNote"),
+      focus: document.querySelector("#title .gpfocus")?.id || null,
+    };
+  });
+  assert(first.learn, "a first visit does not show Learn the walk");
+  assert(!first.woods && !first.walkIn, `a first visit offers more than the walk in (woods ${first.woods}, walk in ${first.walkIn})`);
+  assert(!first.seed, "a first visit shows the basin's seed field");
+  assert(first.note, "a first visit does not say why there is only one option");
+  assert(first.focus === "learnBtn", `a pad lands on "${first.focus}", not on Learn the walk`);
+}
+
 // --- does the camp LOOK like a camp? ----------------------------------------
 // Every other check in this file passes on a camp rendered as a near-black
 // rocky clearing, which is exactly what shipped: blocked cells drew as rock
@@ -291,6 +311,18 @@ await page.waitForFunction(() => !!window.__seven, null, { timeout: 20000 });
     return words.filter((w) => hud.includes(w));
   });
   assert(leaked.length === 0, `the HUD showed the hidden meter during the tutorial: ${leaked.join(", ")}`);
+}
+
+// --- finishing the walk in opens the title -----------------------------------
+{
+  const after = await page.evaluate(() => {
+    window.__seven.toTitle();
+    const shown = (id) => document.getElementById(id)?.offsetParent !== null;
+    return { woods: shown("woodsBtn"), walkIn: shown("startBtn"), note: shown("firstWalkNote"), learn: shown("learnBtn") };
+  });
+  assert(after.woods && after.walkIn, `finishing the walk in did not open the title (woods ${after.woods}, walk in ${after.walkIn})`);
+  assert(!after.note, "the first-visit note is still up after the walk in is done");
+  assert(after.learn, "Learn the walk vanished once finished — it should stay, quieter, for a replay");
 }
 
 // --- progress persists --------------------------------------------------------

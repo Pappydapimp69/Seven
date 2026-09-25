@@ -17,6 +17,9 @@ const fails=[];const A=(c,m)=>{if(!c)fails.push(m)};
  const s=serve();await new Promise(r=>s.listen(0,"127.0.0.1",r));
  const b=await chromium.launch({executablePath:"/opt/pw-browsers/chromium-1194/chrome-linux/chrome",args:["--use-gl=swiftshader","--enable-unsafe-swiftshader"]});
  const page=await b.newPage({viewport:{width:1280,height:800}});
+ // A RETURNING player: the walk in is finished, so the title offers everything.
+ // A first visit offers only "Learn the walk" (tests/tutorial-play.mjs holds that).
+ await page.addInitScript(() => { try { const k = "seven:settings"; const s = JSON.parse(localStorage.getItem(k) || "{}"); if (!s.tutorial) { s.tutorial = { done: ["walk-in", "ground", "craft", "hands", "pylon", "ask", "first-lie"], current: 7 }; localStorage.setItem(k, JSON.stringify(s)); } } catch {} });
  const errs=[]; page.on("pageerror",e=>errs.push(e.message));
  await page.goto(`http://localhost:${s.address().port}/index.html`,{waitUntil:"networkidle"});
  // Force-complete basin 1 by logging every marker, then let the sim advance.

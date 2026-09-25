@@ -6,23 +6,23 @@ import {
   possess, release, possessableCompanions, activatePylon, pylonAt,
   callCompanion, clearMoss, mossedAt, feedFire, buildFire, FIRE_COST,
   PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=seven-0.26.1";
-import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.26.1";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.26.1";
+} from "./state.js?v=seven-0.26.2";
+import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.26.2";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.26.2";
 import {
   attachSites, startDay, beatAt, briefFor, canWork, workBeat, fallNight, ask, accuse,
   updateWorkHold, dawnLine, BEATS, PHASE, ASKS_ALLOWED,
-} from "./woods.js?v=seven-0.26.1";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.26.1";
-import { createRenderer } from "./render.js?v=seven-0.26.1";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.26.1";
-import { keyed } from "./keys.js?v=seven-0.26.1";
-import { createInput, ACTIONS } from "./input.js?v=seven-0.26.1";
-import { createAudio } from "./audio.js?v=seven-0.26.1";
-import { hashSeed, makeRng } from "./rng.js?v=seven-0.26.1";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.26.1";
+} from "./woods.js?v=seven-0.26.2";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.26.2";
+import { createRenderer } from "./render.js?v=seven-0.26.2";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.26.2";
+import { keyed } from "./keys.js?v=seven-0.26.2";
+import { createInput, ACTIONS } from "./input.js?v=seven-0.26.2";
+import { createAudio } from "./audio.js?v=seven-0.26.2";
+import { hashSeed, makeRng } from "./rng.js?v=seven-0.26.2";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.26.2";
 
-const BUILD = "seven-0.26.1";
+const BUILD = "seven-0.26.2";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -262,6 +262,12 @@ function refreshLearnLabel() {
   // done the walk in should not have to notice a quiet button underneath a loud
   // one to find out the game has a tutorial at all.
   el("learnBtn")?.classList.toggle("quiet", n >= STAGES.length);
+  // FIRST VISIT: the walk in is the only way in until it is finished. Stopping
+  // halfway keeps it locked — the button resumes where they left off.
+  el("title")?.classList.toggle("first-walk", n < STAGES.length);
+  // The grid just changed shape; re-seat focus so a pad is not left on a row
+  // that has been hidden.
+  if (menu.root === "title") setupMenuFocus("title");
 }
 
 /**

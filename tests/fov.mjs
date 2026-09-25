@@ -31,6 +31,9 @@ const fails=[];const A=(c,m)=>{if(!c)fails.push(m)};
  const url=`http://localhost:${s.address().port}/index.html`;
  const b=await chromium.launch({executablePath:"/opt/pw-browsers/chromium-1194/chrome-linux/chrome",args:["--use-gl=swiftshader","--enable-unsafe-swiftshader"]});
  const page=await b.newPage({viewport:{width:960,height:540}});
+ // A RETURNING player: the walk in is finished, so the title offers everything.
+ // A first visit offers only "Learn the walk" (tests/tutorial-play.mjs holds that).
+ await page.addInitScript(() => { try { const k = "seven:settings"; const s = JSON.parse(localStorage.getItem(k) || "{}"); if (!s.tutorial) { s.tutorial = { done: ["walk-in", "ground", "craft", "hands", "pylon", "ask", "first-lie"], current: 7 }; localStorage.setItem(k, JSON.stringify(s)); } } catch {} });
  const errs=[];page.on("pageerror",e=>errs.push(e.message));
  await page.goto(url,{waitUntil:"networkidle"});
  const def=await page.evaluate(()=>{ const M=window.__seven; M.startRun({seed:1234}); M.advance(0.3);

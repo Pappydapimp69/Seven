@@ -50,6 +50,9 @@ const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, L3: 10, START:
     args: ["--use-gl=swiftshader", "--enable-unsafe-swiftshader", "--enable-webgl", "--ignore-gpu-blocklist", "--no-sandbox"],
   });
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  // A RETURNING player: the walk in is finished, so the title offers everything.
+  // A first visit offers only "Learn the walk" (tests/tutorial-play.mjs holds that).
+  await page.addInitScript(() => { try { const k = "seven:settings"; const s = JSON.parse(localStorage.getItem(k) || "{}"); if (!s.tutorial) { s.tutorial = { done: ["walk-in", "ground", "craft", "hands", "pylon", "ask", "first-lie"], current: 7 }; localStorage.setItem(k, JSON.stringify(s)); } } catch {} });
   const errors = [];
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
   page.on("pageerror", (e) => errors.push("PAGEERROR: " + e.message));

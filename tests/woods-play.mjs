@@ -57,6 +57,9 @@ const frames = (pg) => pg.evaluate(() => new Promise((r) => requestAnimationFram
     args: ["--use-gl=swiftshader", "--enable-unsafe-swiftshader", "--no-sandbox"],
   });
   const page = await b.newPage({ viewport: { width: 1100, height: 640 } });
+  // A RETURNING player: the walk in is finished, so the title offers everything.
+  // A first visit offers only "Learn the walk" (tests/tutorial-play.mjs holds that).
+  await page.addInitScript(() => { try { const k = "seven:settings"; const s = JSON.parse(localStorage.getItem(k) || "{}"); if (!s.tutorial) { s.tutorial = { done: ["walk-in", "ground", "craft", "hands", "pylon", "ask", "first-lie"], current: 7 }; localStorage.setItem(k, JSON.stringify(s)); } } catch {} });
   const errs = []; page.on("pageerror", (e) => errs.push(e.message));
   await page.goto(url, { waitUntil: "networkidle" });
 

@@ -641,6 +641,16 @@ body[data-coop="2"] .item-bar.p2 { display: flex; }
    visually the primary action when present — continuing a run should never be
    the harder thing to hit. */
 .big-btn.resume { display: none; }
+
+/* A FIRST VISIT offers one thing: the walk in. The woods, the basin and their
+   settings were all on the title from the start, and a first-time player
+   picked one of those and met verbs nobody had taught them. Everything tagged
+   first-walk-hide stays out until the walk in is finished (main.js
+   refreshLearnLabel). Resume and How to play stay: neither starts something
+   the player has not been taught. */
+.first-walk-note { display: none; color: var(--ink); text-align: center; margin: 0 0 1rem; }
+#title.first-walk .first-walk-note { display: block; }
+#title.first-walk .first-walk-hide { display: none !important; }
 .big-btn.resume.show { display: block; }
 .resume-detail {
   display: block;

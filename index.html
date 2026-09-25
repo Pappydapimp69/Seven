@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0a0f16" />
   <title>SEVEN — the woods, and who walks out</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230a0f16'/%3E%3Cpath d='M4 22h24' stroke='%23596579' stroke-width='2'/%3E%3Crect x='9' y='8' width='4' height='14' fill='%2374e0ff'/%3E%3Crect x='19' y='11' width='4' height='11' fill='%23b06a72'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="css/style.css?v=seven-0.26.1" />
+  <link rel="stylesheet" href="css/style.css?v=seven-0.26.2" />
 </head>
 <body>
   <canvas id="gl"></canvas>
@@ -28,7 +28,11 @@
         walks out with you.
       </p>
 
-      <div class="row">
+      <!-- Shown only on a first visit (main.js refreshLearnLabel): until the
+           walk in is finished, it is the only way in. -->
+      <p id="firstWalkNote" class="first-walk-note">First time here. Learn the walk — the woods opens when you finish it.</p>
+
+      <div class="row first-walk-hide">
         <div class="field">
           <label class="field-label">Basin</label>
           <input id="seedInput" placeholder="random seed" autocomplete="off" spellcheck="false" />
@@ -43,7 +47,7 @@
         </div>
       </div>
 
-      <div class="field" style="margin-bottom:20px">
+      <div class="field first-walk-hide" style="margin-bottom:20px">
         <label class="field-label">Party</label>
         <div class="diff-row">
           <button class="diff sel" data-coop-opt="solo" data-row="1" data-col="0">Solo</button>
@@ -67,13 +71,13 @@
            obvious button. "Learn the walk" and "Walk in" are the basin game
            these bones came from; they still run, and they are still where the
            verbs are taught. -->
-      <button id="woodsBtn" class="big-btn" data-row="3" data-col="0">
+      <button id="woodsBtn" class="big-btn first-walk-hide" data-row="3" data-col="0">
         The woods<span id="woodsDetail" class="resume-detail"></span>
       </button>
       <button id="learnBtn" class="big-btn" data-row="4" data-col="0">
         Learn the walk<span id="learnDetail" class="resume-detail"></span>
       </button>
-      <button id="startBtn" class="big-btn" data-row="5" data-col="0">Walk in</button>
+      <button id="startBtn" class="big-btn first-walk-hide" data-row="5" data-col="0">Walk in</button>
       <button id="howBtn" class="text-btn" data-row="6" data-col="0">How to play</button>
 
       <p id="menuHints" class="menu-hints"></p>
@@ -344,7 +348,7 @@
   <!-- DEBRIEF -->
   <div id="debriefLayer" class="screen hidden"></div>
 
-  <script type="module" src="src/main.js?v=seven-0.26.1"></script>
+  <script type="module" src="src/main.js?v=seven-0.26.2"></script>
   <noscript><p style="color:#ccd">SEVEN needs JavaScript and WebGL.</p></noscript>
 </body>
 </html>
