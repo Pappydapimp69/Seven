@@ -365,6 +365,27 @@ const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, L3: 10, START:
   assert(told.key === "A", `the action prompt shows [${told.key}] on a pad, not [A]`);
   assert(/pick a teammate on the roster/.test(told.legend), `the pad legend does not say what LB/RB pick: "${told.legend}"`);
 
+  // ---- the red arrow follows the selection ----------------------------------
+  // Read off the live scene after the page's own loop has drawn: RB moves the
+  // selection, and the arrow must move to stand over the newly picked person.
+  const arrowAt = () => page.evaluate(() => {
+    let at = null;
+    window.__seven.renderer.scene.traverse((o) => {
+      if (o.isMesh && o.geometry?.type === "ConeGeometry" && o.material?.color?.getHex?.() === 0xff3030 && o.parent.visible) at = { x: o.parent.position.x, z: o.parent.position.z };
+    });
+    const M = window.__seven; const c = M.sim.companions[M.selected];
+    return { at, want: c ? { x: c.x, z: c.z, name: c.name } : null };
+  });
+  const frames2 = () => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  await frames2();
+  const a1 = await arrowAt();
+  await tap(BTN.RB);
+  await frames2();
+  const a2 = await arrowAt();
+  const over = (a) => a.at && a.want && Math.hypot(a.at.x - a.want.x, a.at.z - a.want.z) < 0.5;
+  assert(over(a1), `no red arrow over the selected teammate: ${JSON.stringify(a1)}`);
+  assert(over(a2) && a2.want.name !== a1.want.name, `RB did not move the arrow to the next teammate: ${JSON.stringify([a1, a2])}`);
+
   // ---- debrief screen is reachable purely on gamepad -----------------------
   // Force a fast finish so the debrief screen actually appears: drop every
   // companion (dissolution) rather than waiting out a real run.

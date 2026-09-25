@@ -23,7 +23,7 @@
 // wrong length — the failure surfaces somewhere far away as a NaN position or
 // an invisible floor. The returned object is asserted field-for-field in tests.
 
-import { CELL, FEATURE, cellToWorld, floodFill, gridOf } from "./world.js?v=seven-0.26.2";
+import { CELL, FEATURE, cellToWorld, floodFill, gridOf } from "./world.js?v=seven-0.26.3";
 
 /**
  * The reserved seed that means "this is the camp, not a basin".

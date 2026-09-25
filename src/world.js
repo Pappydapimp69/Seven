@@ -24,7 +24,7 @@
 // reachability from scratch and is asserted in the test suite — the fixup is
 // verified, not trusted.
 
-import { makeRng } from "./rng.js?v=seven-0.26.2";
+import { makeRng } from "./rng.js?v=seven-0.26.3";
 
 export const CELL = 2.6; // world units per grid cell
 /**

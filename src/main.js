@@ -6,23 +6,23 @@ import {
   possess, release, possessableCompanions, activatePylon, pylonAt,
   callCompanion, clearMoss, mossedAt, feedFire, buildFire, FIRE_COST,
   PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=seven-0.26.2";
-import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.26.2";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.26.2";
+} from "./state.js?v=seven-0.26.3";
+import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.26.3";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.26.3";
 import {
   attachSites, startDay, beatAt, briefFor, canWork, workBeat, fallNight, ask, accuse,
   updateWorkHold, dawnLine, BEATS, PHASE, ASKS_ALLOWED,
-} from "./woods.js?v=seven-0.26.2";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.26.2";
-import { createRenderer } from "./render.js?v=seven-0.26.2";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.26.2";
-import { keyed } from "./keys.js?v=seven-0.26.2";
-import { createInput, ACTIONS } from "./input.js?v=seven-0.26.2";
-import { createAudio } from "./audio.js?v=seven-0.26.2";
-import { hashSeed, makeRng } from "./rng.js?v=seven-0.26.2";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.26.2";
+} from "./woods.js?v=seven-0.26.3";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.26.3";
+import { createRenderer } from "./render.js?v=seven-0.26.3";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.26.3";
+import { keyed } from "./keys.js?v=seven-0.26.3";
+import { createInput, ACTIONS } from "./input.js?v=seven-0.26.3";
+import { createAudio } from "./audio.js?v=seven-0.26.3";
+import { hashSeed, makeRng } from "./rng.js?v=seven-0.26.3";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.26.3";
 
-const BUILD = "seven-0.26.2";
+const BUILD = "seven-0.26.3";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -1442,7 +1442,9 @@ function step(dt, intent) {
   run.players[0].pitch = intent.pitch ?? 0;
   for (let i = 0; i < run.players.length; i++) {
     const p = run.players[i];
-    renderer.update(p.percept, i === 0 ? dt : 0, { yaw: p.yaw, pitch: p.pitch }, { eye: p.eye, viewport: vps[i] });
+    // Each player's OWN selection — co-op keeps one pointer per player.
+    const selectedId = sim.companions[p.selected]?.id || null;
+    renderer.update(p.percept, i === 0 ? dt : 0, { yaw: p.yaw, pitch: p.pitch }, { eye: p.eye, viewport: vps[i], selectedId });
   }
 
   // sim.events is documented as "transient, drained by the HUD each frame"

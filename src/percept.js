@@ -13,8 +13,8 @@
 
 import { HALLUCINATION, BAND, bandOf, ITEM_INFO, LUCIDITY_GRACE, CORROBORATE_RADIUS,
   LINK_RANGE, PING_RANGE, FIRE_FUEL_MAX, FIRE_BURN_RATE, FIRE_FEED, FIRE_RADIUS,
-} from "./state.js?v=seven-0.26.2";
-import { ITEM_KINDS } from "./world.js?v=seven-0.26.2";
+} from "./state.js?v=seven-0.26.3";
+import { ITEM_KINDS } from "./world.js?v=seven-0.26.3";
 
 const PHANTOM_NAMES = ["the Sixth Stone", "the Watching Slab", "the Other Cairn", "the Hollow Tooth"];
 const PHANTOM_COMPANIONS = ["ODEN", "MARIS", "THE SEVENTH"];
@@ -1034,6 +1034,28 @@ export function perceivedCompanions(percept, sim) {
     monstrous: lying && c.id === percept.monsterId,
   }));
   return lying ? [...real, ...percept.phantomCompanions] : real;
+}
+
+/**
+ * WHERE THIS MIND BELIEVES the selected companion is — for the red arrow over
+ * their head.
+ *
+ * Their real position, with one exception, and it is the reason this lives
+ * here rather than in the renderer: under DOUBLED_PARTY the roster reads the
+ * phantom holding a vacated slot as that person, "keeping up" (rosterRead).
+ * An arrow drawn over the REAL person, off on their own, would contradict the
+ * roster and hand the player the lie. So when the selected person is the one
+ * the phantom stands in for, the arrow goes where the roster says they are.
+ */
+export function perceivedSelected(percept, sim, id) {
+  if (!id) return null;
+  const lying = percept.active && !isClear(percept, sim);
+  if (lying && percept.kind === HALLUCINATION.DOUBLED_PARTY && id === percept.ghostOf) {
+    const ph = percept.phantomCompanions[0];
+    if (ph) return { id, x: ph.x, z: ph.z };
+  }
+  const c = sim.companions.find((x) => x.id === id);
+  return c ? { id, x: c.x, z: c.z } : null;
 }
 
 /** The heading the lead thinks they are facing. */

@@ -6,11 +6,11 @@
 // list as the real ones.
 
 import * as THREE from "../lib/three.module.js";
-import { CELL, cellToWorld, gridOf } from "./world.js?v=seven-0.26.2";
-import { nightFactor } from "./state.js?v=seven-0.26.2";
-import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, distortion } from "./percept.js?v=seven-0.26.2";
-import { PYLON_RADIUS } from "./state.js?v=seven-0.26.2";
-import { WEATHER_LOOK, dayMarks } from "./woods.js?v=seven-0.26.2";
+import { CELL, cellToWorld, gridOf } from "./world.js?v=seven-0.26.3";
+import { nightFactor } from "./state.js?v=seven-0.26.3";
+import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, perceivedSelected, distortion } from "./percept.js?v=seven-0.26.3";
+import { PYLON_RADIUS } from "./state.js?v=seven-0.26.3";
+import { WEATHER_LOOK, dayMarks } from "./woods.js?v=seven-0.26.3";
 
 const PALETTE = {
   sky: 0x0a0f16,
@@ -1104,6 +1104,20 @@ export function createRenderer(canvas, sim) {
     },
   };
 
+  // The selected-companion arrow: one mesh, moved every frame.
+  const selArrow = new THREE.Mesh(
+    new THREE.ConeGeometry(0.34, 0.8, 4),
+    new THREE.MeshBasicMaterial({ color: 0xff3030, fog: false, depthTest: false, transparent: true, opacity: 0.95 }),
+  );
+  selArrow.rotation.x = Math.PI;       // point DOWN at them
+  selArrow.renderOrder = 10;
+  selArrow.frustumCulled = false;
+  // A group so the spin (y) does not fight the flip (x).
+  const selArrowRig = new THREE.Group();
+  selArrowRig.add(selArrow);
+  selArrowRig.visible = false;
+  scene.add(selArrowRig);
+
   function makeMark(item) {
     const make = MARK_BODIES[item && item.id];
     const g = make ? make() : new THREE.Group();
@@ -1456,6 +1470,23 @@ export function createRenderer(canvas, sim) {
         obj.userData.mat.color.set(c.hallucinating ? PALETTE.bodyLost : PALETTE.body);
         obj.userData.light.material.color.set(c.hallucinating ? 0xff8a94 : 0xffd9a0);
       }
+    }
+
+    // ---- who you have selected on the roster ----
+    // A red arrow over their head, so a name on the roster is a person in the
+    // world: who is who, and where. Drawn through trees and fog (no depth test,
+    // no fog) and grown with distance so it stays findable across the camp.
+    // WHERE comes from percept (perceivedSelected), never from sim: under one
+    // hallucination the roster says a phantom is this person, and the arrow
+    // must agree with the roster or it is the tell.
+    const sel = perceivedSelected(percept, sim, opts.selectedId || null);
+    selArrowRig.visible = !!sel;
+    if (sel) {
+      const d = Math.hypot(sel.x - px, sel.z - pz);
+      const s = Math.max(1, d / 14);
+      selArrowRig.scale.setScalar(s);
+      selArrowRig.position.set(sel.x, terrainHeight(sel.x, sel.z) + 2.9 + 0.5 * s + Math.sin(elapsed * 3) * 0.12 * s, sel.z);
+      selArrowRig.rotation.y = elapsed * 1.5;
     }
 
     renderer.render(scene, camera);

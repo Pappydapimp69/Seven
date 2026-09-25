@@ -36,7 +36,7 @@ import {
 } from "../src/state.js";
 import {
   createPercept, updatePercept, perceivedYaw, perceivedPylons, perceivedCompanions,
-  rosterRead, filterReport, chorusEcho, chorusTier, KIND_TUNING,
+  rosterRead, filterReport, chorusEcho, chorusTier, KIND_TUNING, perceivedSelected,
 } from "../src/percept.js";
 
 let passed = 0;
@@ -909,6 +909,42 @@ check("the roster is confident about exactly the person who is missing", () => {
   const duty = runs.reduce((a, r) => a + r.confidentTicks, 0) / runs.reduce((a, r) => a + r.ticks, 0);
   atLeast(duty, 0.4, "the roster almost never shows the false-steady row");
   for (const r of runs) atMost(r.maxRows, 1, "more than one roster row was confident at once");
+});
+
+// The red selection arrow (0.26.3) must say what the roster says. Under this
+// kind the roster reads the phantom as the person whose slot it fills; an arrow
+// over the REAL person, off on their own, would contradict that and hand the
+// player the lie.
+function arrowAgreesWithRoster(where) {
+  let checked = 0, contradicted = 0;
+  for (const r of doubledAcross(20)) {
+    const { percept, sim, victim } = r;
+    if (percept.ghostOf !== victim.id) continue;
+    if (rosterRead(percept, sim, victim).uncertain) continue;
+    checked++;
+    const ph = percept.phantomCompanions[0];
+    const at = where(percept, sim, victim.id);
+    if (!at || Math.hypot(at.x - ph.x, at.z - ph.z) > 0.01) contradicted++;
+  }
+  return { checked, contradicted };
+}
+check("the selection arrow points where the roster says the person is", () => {
+  const { checked, contradicted } = arrowAgreesWithRoster(perceivedSelected);
+  atLeast(checked, 5, "too few runs ended with the roster lying — this check measured nothing");
+  eq(contradicted, 0, "the arrow sat over the real person while the roster vouched for the phantom");
+});
+check("negative control — an arrow drawn from sim positions is caught", () => {
+  const naive = (_p, sim, id) => sim.companions.find((c) => c.id === id);
+  const { contradicted } = arrowAgreesWithRoster(naive);
+  assert(contradicted > 0, "an arrow at the real position passed — the check above is inert");
+});
+check("with nothing lying, the arrow is on the real person", () => {
+  const sim = liveRun(3);
+  const percept = createPercept(sim.player);
+  const c = sim.companions[1];
+  const at = perceivedSelected(percept, sim, c.id);
+  assert(at && at.x === c.x && at.z === c.z, "the arrow is not over the selected companion");
+  eq(perceivedSelected(percept, sim, null), null, "nothing selected still drew an arrow");
 });
 
 check("nobody missing, nothing claimed — the roster stays honestly blank", () => {
