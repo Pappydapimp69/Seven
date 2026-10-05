@@ -6,23 +6,24 @@ import {
   possess, release, possessableCompanions, activatePylon, pylonAt,
   callCompanion, clearMoss, mossedAt, feedFire, buildFire, FIRE_COST,
   PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=seven-0.26.3";
-import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.26.3";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.26.3";
+} from "./state.js?v=seven-0.27.0";
+import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.27.0";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.27.0";
 import {
   attachSites, startDay, beatAt, briefFor, canWork, workBeat, fallNight, ask, accuse,
   updateWorkHold, dawnLine, BEATS, PHASE, ASKS_ALLOWED,
-} from "./woods.js?v=seven-0.26.3";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.26.3";
-import { createRenderer } from "./render.js?v=seven-0.26.3";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.26.3";
-import { keyed } from "./keys.js?v=seven-0.26.3";
-import { createInput, ACTIONS } from "./input.js?v=seven-0.26.3";
-import { createAudio } from "./audio.js?v=seven-0.26.3";
-import { hashSeed, makeRng } from "./rng.js?v=seven-0.26.3";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.26.3";
+} from "./woods.js?v=seven-0.27.0";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.27.0";
+import { createRenderer } from "./render.js?v=seven-0.27.0";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.27.0";
+import { keyed } from "./keys.js?v=seven-0.27.0";
+import { createInput, ACTIONS } from "./input.js?v=seven-0.27.0";
+import { createAudio } from "./audio.js?v=seven-0.27.0";
+import { createDiag } from "./diag.js?v=seven-0.27.0";
+import { hashSeed, makeRng } from "./rng.js?v=seven-0.27.0";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.27.0";
 
-const BUILD = "seven-0.26.3";
+const BUILD = "seven-0.27.0";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -34,6 +35,13 @@ const audio = createAudio();
 // meant nothing before the first run existed could see a gamepad at all, so a
 // controller-only player had no way to even press Start.
 const input = createInput(canvas, { sensitivity: 1, onScheme: refreshSchemeUI });
+// Tab on a PC: movement, resolution and zoom readout. Input and display facts only.
+const diag = createDiag(canvas);
+window.addEventListener("keydown", (e) => {
+  if (e.code !== "Tab" || e.repeat || !run) return;
+  e.preventDefault();
+  diag.toggle();
+});
 let run = null; // { sim, percept, renderer, hud }
 let paused = false;
 let coopAllowed = false; // title-screen Party option; gates the mid-run join poll
@@ -1353,6 +1361,7 @@ function step(dt, intent) {
   }
 
   tick(sim, dt, { move, run: intent.run, yaw, interact: intent.interact, others });
+  diag.update({ input: intent.move, move, yaw, x: sim.player.x, z: sim.player.z, camera: renderer.camera, hfov: renderer.hfov });
   // The camp's one place-based objective. Emits once, into the same merged
   // stream the observer reads, so "walk to the trainer" is an ordinary event
   // like any other rather than a special case inside the overlay.
