@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0a0f16" />
   <title>SEVEN — the woods, and who walks out</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230a0f16'/%3E%3Cpath d='M4 22h24' stroke='%23596579' stroke-width='2'/%3E%3Crect x='9' y='8' width='4' height='14' fill='%2374e0ff'/%3E%3Crect x='19' y='11' width='4' height='11' fill='%23b06a72'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="css/style.css?v=seven-0.27.1" />
+  <link rel="stylesheet" href="css/style.css?v=seven-0.28.0" />
 </head>
 <body>
   <canvas id="gl"></canvas>
@@ -339,8 +339,15 @@
         <button class="diff fov sel" data-fov="78" data-row="1" data-col="1">Normal</button>
         <button class="diff fov" data-fov="90" data-row="1" data-col="2">Wide</button>
       </div>
-      <button id="resumeBtn" class="big-btn" data-row="2" data-col="0">Keep walking</button>
-      <button id="quitBtn" class="text-btn" data-row="3" data-col="0">Abandon the survey</button>
+      <label class="field-label">Interface size</label>
+      <div class="diff-row">
+        <button class="diff ui" data-ui="0.65" data-row="2" data-col="0">Tiny</button>
+        <button class="diff ui" data-ui="0.8" data-row="2" data-col="1">Small</button>
+        <button class="diff ui sel" data-ui="1" data-row="2" data-col="2">Normal</button>
+        <button class="diff ui" data-ui="1.2" data-row="2" data-col="3">Large</button>
+      </div>
+      <button id="resumeBtn" class="big-btn" data-row="3" data-col="0">Keep walking</button>
+      <button id="quitBtn" class="text-btn" data-row="4" data-col="0">Abandon the survey</button>
       <p class="menu-hints"></p>
     </div>
   </div>
@@ -348,7 +355,7 @@
   <!-- DEBRIEF -->
   <div id="debriefLayer" class="screen hidden"></div>
 
-  <script type="module" src="src/main.js?v=seven-0.27.1"></script>
+  <script type="module" src="src/main.js?v=seven-0.28.0"></script>
   <noscript><p style="color:#ccd">SEVEN needs JavaScript and WebGL.</p></noscript>
 </body>
 </html>

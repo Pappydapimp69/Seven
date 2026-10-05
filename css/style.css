@@ -46,7 +46,7 @@ html {
      and the smallest steps (0.625rem) rendered at SEVEN PIXELS — unreadable,
      and reported as such. Raised the floor and the slope: 720p now lands near
      14px and 1080p near 21px. */
-  font-size: clamp(13px, calc(0.7vw + 0.7vh), 22px);
+  font-size: calc(clamp(13px, calc(0.7vw + 0.7vh), 22px) * var(--ui, 1));
 }
 
 html, body {

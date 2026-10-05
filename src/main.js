@@ -6,24 +6,24 @@ import {
   possess, release, possessableCompanions, activatePylon, pylonAt,
   callCompanion, clearMoss, mossedAt, feedFire, buildFire, FIRE_COST,
   PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=seven-0.27.1";
-import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.27.1";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.27.1";
+} from "./state.js?v=seven-0.28.0";
+import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.28.0";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.28.0";
 import {
   attachSites, startDay, beatAt, briefFor, canWork, workBeat, fallNight, ask, accuse,
   updateWorkHold, dawnLine, BEATS, PHASE, ASKS_ALLOWED,
-} from "./woods.js?v=seven-0.27.1";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.27.1";
-import { createRenderer } from "./render.js?v=seven-0.27.1";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.27.1";
-import { keyed } from "./keys.js?v=seven-0.27.1";
-import { createInput, ACTIONS } from "./input.js?v=seven-0.27.1";
-import { createAudio } from "./audio.js?v=seven-0.27.1";
-import { createDiag } from "./diag.js?v=seven-0.27.1";
-import { hashSeed, makeRng } from "./rng.js?v=seven-0.27.1";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.27.1";
+} from "./woods.js?v=seven-0.28.0";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.28.0";
+import { createRenderer } from "./render.js?v=seven-0.28.0";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.28.0";
+import { keyed } from "./keys.js?v=seven-0.28.0";
+import { createInput, ACTIONS } from "./input.js?v=seven-0.28.0";
+import { createAudio } from "./audio.js?v=seven-0.28.0";
+import { createDiag } from "./diag.js?v=seven-0.28.0";
+import { hashSeed, makeRng } from "./rng.js?v=seven-0.28.0";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.28.0";
 
-const BUILD = "seven-0.27.1";
+const BUILD = "seven-0.28.0";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -1536,6 +1536,19 @@ function boot() {
       saveSettings({ fov: fovPref });
       run?.renderer.setFov(fovPref);
       for (const o of document.querySelectorAll("[data-fov]")) o.classList.toggle("sel", o === b);
+    });
+  }
+  // Interface size scales the HUD only (everything is rem off the root), so a
+  // big display can shrink the furniture without zooming the browser.
+  const applyUi = (u) => document.documentElement.style.setProperty("--ui", String(u));
+  applyUi(prefs.ui);
+  for (const b of document.querySelectorAll("[data-ui]")) {
+    b.classList.toggle("sel", Number(b.dataset.ui) === prefs.ui);
+    b.addEventListener("click", () => {
+      const u = Number(b.dataset.ui);
+      applyUi(u);
+      saveSettings({ ui: u });
+      for (const o of document.querySelectorAll("[data-ui]")) o.classList.toggle("sel", o === b);
     });
   }
   audio.setVolume(prefs.volume);

@@ -17,9 +17,9 @@
 //     options (dbh#E4, wrong-sky#E2). And an ended run is never saved, so a
 //     "Resume" can't drop you back onto the frame you already lost.
 
-import { createRun } from "./state.js?v=seven-0.27.1";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.27.1";
-import { attachSites, serializeWoods, deserializeWoods } from "./woods.js?v=seven-0.27.1";
+import { createRun } from "./state.js?v=seven-0.28.0";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.28.0";
+import { attachSites, serializeWoods, deserializeWoods } from "./woods.js?v=seven-0.28.0";
 
 // SEVEN'S OWN KEYS, and this is not cosmetic. GitHub Pages serves every project
 // of one account from ONE origin — `pappydapimp69.github.io` — so /mirage/ and
@@ -603,7 +603,7 @@ export function summariseTally(all = loadTally()) {
 // the save payload became a cross-slot leak the moment the game grew slots.
 // Settings rather than the run payload because progress has to survive
 // clearSave(), which every new run calls.
-const DEFAULT_SETTINGS = { volume: 0.7, muted: false, difficulty: "standard", coop: "solo", fov: 78, tutorial: { done: [], current: 0 } };
+const DEFAULT_SETTINGS = { volume: 0.7, muted: false, difficulty: "standard", coop: "solo", fov: 78, ui: 1, tutorial: { done: [], current: 0 } };
 
 /**
  * A defaults object nobody can corrupt. `{ ...DEFAULT_SETTINGS }` is a SHALLOW
@@ -638,6 +638,7 @@ export function loadSettings() {
       },
       coop: ["solo", "couch"].includes(d.coop) ? d.coop : DEFAULT_SETTINGS.coop,
       fov: typeof d.fov === "number" && d.fov >= 70 && d.fov <= 110 ? d.fov : DEFAULT_SETTINGS.fov,
+      ui: typeof d.ui === "number" && d.ui >= 0.5 && d.ui <= 1.5 ? d.ui : DEFAULT_SETTINGS.ui,
     };
   } catch {
     return freshSettings();
