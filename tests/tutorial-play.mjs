@@ -188,7 +188,7 @@ await page.waitForFunction(() => !!window.__seven, null, { timeout: 20000 });
     go(1);
     const a = sim.items.find((i) => i.id === "tut-item-a");
     out.itemSpawned = !!a;
-    if (a) { sim.player.x = a.x; sim.player.z = a.z; M.advance(0.1); }
+    if (a) { sim.player.x = a.x + 4.5; sim.player.z = a.z; M.advance(0.1); } // not on top of it: reach is wider here
     out.pickPrompt = document.getElementById("actionPromptText")?.textContent || "";
     M.act(M.ACTIONS.SURVEY);
     M.advance(0.1);
@@ -221,8 +221,14 @@ await page.waitForFunction(() => !!window.__seven, null, { timeout: 20000 });
     const iren = sim.companions[1];
     out.irenId = iren.id;
     iren.x = sim.player.x + 1; iren.z = sim.player.z; iren.lucidity = 80;
+    for (const c of sim.companions) { if (c !== iren) { c.x = sim.player.x + 1; c.z = sim.player.z + 1; } }
     M.advance(0.1);
+    // the roster starts on someone else: handing it to them must be refused
+    const wrongBefore = sim.inventory.length;
+    M.act(M.ACTIONS.OFFER_ITEM); M.advance(0.1);
+    out.wrongBefore = wrongBefore; out.wrongAfter = sim.inventory.length;
     M.act(M.ACTIONS.NEXT_TARGET);
+    iren.x = sim.player.x + 4.5; iren.z = sim.player.z; // and IREN need not be within arm's length
     M.act(M.ACTIONS.OFFER_ITEM);
     M.advance(0.2);
     note("hands", done().includes("hands"));
@@ -300,6 +306,7 @@ await page.waitForFunction(() => !!window.__seven, null, { timeout: 20000 });
   assert(/Pick up/i.test(r.pickPrompt), `objective 2's prompt was "${r.pickPrompt}" — the taught verb is outranked at its own site`);
   assert(r.propsBefore >= 1 && r.propsAfter === r.propsBefore, `use/drop/give spent a prop item: ${r.propsBefore} held, ${r.propsAfter} after`);
   assert(r.emberBefore >= 1 && r.emberAfter === r.emberBefore, `use/drop spent the ember before it was handed over: ${r.emberBefore} -> ${r.emberAfter}`);
+  assert(r.wrongBefore >= 1 && r.wrongAfter === r.wrongBefore, "the ember was handed to the wrong person");
   assert(r.held === 2, `the player held ${r.held} ingredients at the craft, not 2`);
 
   // The pylon's two beats

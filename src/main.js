@@ -5,25 +5,25 @@ import {
   createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem, dropItem, craftItem, gatherTarget, offerItem,
   possess, release, possessableCompanions, activatePylon, pylonAt,
   callCompanion, clearMoss, mossedAt, feedFire, buildFire, FIRE_COST,
-  PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=seven-0.28.1";
-import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.28.1";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.28.1";
+  PARTY_SIZE, DIFFICULTY, reachOf, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
+} from "./state.js?v=seven-0.28.2";
+import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.28.2";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.28.2";
 import {
   attachSites, startDay, beatAt, briefFor, canWork, workBeat, fallNight, ask, accuse,
   updateWorkHold, dawnLine, BEATS, PHASE, ASKS_ALLOWED,
-} from "./woods.js?v=seven-0.28.1";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.28.1";
-import { createRenderer } from "./render.js?v=seven-0.28.1";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.28.1";
-import { keyed } from "./keys.js?v=seven-0.28.1";
-import { createInput, ACTIONS } from "./input.js?v=seven-0.28.1";
-import { createAudio } from "./audio.js?v=seven-0.28.1";
-import { createDiag } from "./diag.js?v=seven-0.28.1";
-import { hashSeed, makeRng } from "./rng.js?v=seven-0.28.1";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.28.1";
+} from "./woods.js?v=seven-0.28.2";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.28.2";
+import { createRenderer } from "./render.js?v=seven-0.28.2";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.28.2";
+import { keyed } from "./keys.js?v=seven-0.28.2";
+import { createInput, ACTIONS } from "./input.js?v=seven-0.28.2";
+import { createAudio } from "./audio.js?v=seven-0.28.2";
+import { createDiag } from "./diag.js?v=seven-0.28.2";
+import { hashSeed, makeRng } from "./rng.js?v=seven-0.28.2";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.28.2";
 
-const BUILD = "seven-0.28.1";
+const BUILD = "seven-0.28.2";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -908,14 +908,14 @@ function nearestPhantom(sim, percept, actor = sim.player) {
     const d = Math.hypot(ph.x - actor.x, ph.z - actor.z);
     if (d < bestD) { bestD = d; best = ph; }
   }
-  return bestD <= LOG_RADIUS ? best : null;
+  return bestD <= LOG_RADIUS * reachOf(run.sim) ? best : null;
 }
 
 /** Is there a pickup within reach right now? Checked before falling back to a
  * marker survey — one contextual "interact" verb, not a separate pickup button. */
 function nearestPickupItem(sim, actor = sim.player) {
   return sim.items
-    .filter((it) => it.discovered && !it.taken && Math.hypot(it.x - actor.x, it.z - actor.z) <= ITEM_PICKUP_RADIUS)
+    .filter((it) => it.discovered && !it.taken && Math.hypot(it.x - actor.x, it.z - actor.z) <= ITEM_PICKUP_RADIUS * reachOf(run.sim))
     .sort((a, b) => Math.hypot(a.x - actor.x, a.z - actor.z) - Math.hypot(b.x - actor.x, b.z - actor.z))[0] || null;
 }
 
@@ -943,6 +943,15 @@ function handleAction(action, arg, player = run.players[0]) {
   if (tut && ITEM_PROPS.has(tut.stage.id)) {
     const strands = action === ACTIONS.USE_ITEM || action === ACTIONS.DROP_ITEM ||
       (action === ACTIONS.OFFER_ITEM && tut.stage.id !== "hands");
+    // Hands has one right answer. Handing the ember to anyone else would pass
+    // the step's item to somebody the lesson is not about.
+    const wrongHand = action === ACTIONS.OFFER_ITEM && tut.stage.id === "hands" &&
+      sim.companions[player.selected]?.id !== tut.stage.step.target;
+    if (wrongHand && sim.inventory.length) {
+      audio.play("deny");
+      hud.say("Not them — hand it to IREN.", "warn");
+      return;
+    }
     if (strands && sim.inventory.length) {
       audio.play("deny");
       hud.say(tut.stage.id === "hands" ? "Hold on to that — hand it to IREN." : "Hold on to that — the next step needs it.", "warn");

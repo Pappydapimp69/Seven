@@ -14,9 +14,9 @@
 // The sim's job is to keep an honest, testable record of what is TRUE; `percept.js`
 // is the only place allowed to lie about it.
 
-import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=seven-0.28.1";
-import { makeRng } from "./rng.js?v=seven-0.28.1";
-import { updateCompanions, companionRemark } from "./party.js?v=seven-0.28.1";
+import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=seven-0.28.2";
+import { makeRng } from "./rng.js?v=seven-0.28.2";
+import { updateCompanions, companionRemark } from "./party.js?v=seven-0.28.2";
 
 export const PARTY_SIZE = 6; // you + 5 companions — the spec's five NPCs, plus the player
 export const MAX_LUCIDITY = 100;
@@ -1345,7 +1345,7 @@ export function logMarker(sim, phantom = null, actor = sim.player) {
   if (sim.status !== "playing") return { ok: false, reason: "over" };
 
   const near = sim.monoliths
-    .filter((m) => !m.logged && dist2D(m, actor) <= LOG_RADIUS)
+    .filter((m) => !m.logged && dist2D(m, actor) <= LOG_RADIUS * reachOf(sim))
     .sort((a, b) => dist2D(a, actor) - dist2D(b, actor))[0];
 
   // Anyone in the party but the surveyor themselves can corroborate — you
@@ -1459,7 +1459,7 @@ export function claimedEntryAt(sim, actor = sim.player) {
   if (!actor) return null;
   return (
     sim.logEntries.find(
-      (e) => !e.real && !e.struck && typeof e.x === "number" && dist2D(e, actor) <= LOG_RADIUS,
+      (e) => !e.real && !e.struck && typeof e.x === "number" && dist2D(e, actor) <= LOG_RADIUS * reachOf(sim),
     ) || null
   );
 }
@@ -1503,7 +1503,7 @@ export function pickupItem(sim, actor = sim.player) {
   if (sim.inventory.length >= ITEM_CAP) return { ok: false, reason: "full" };
 
   const near = sim.items
-    .filter((it) => !it.taken && it.discovered && dist2D(it, actor) <= ITEM_PICKUP_RADIUS)
+    .filter((it) => !it.taken && it.discovered && dist2D(it, actor) <= ITEM_PICKUP_RADIUS * reachOf(sim))
     .sort((a, b) => dist2D(a, actor) - dist2D(b, actor))[0];
   if (!near) return { ok: false, reason: "nothing-here" };
 
@@ -1550,6 +1550,14 @@ export function pickupItem(sim, actor = sim.player) {
 // extra to get right — useItem/craftItem/perceivedInventory already judge a
 // slot by `real`, never by whose hallucination put it there.
 export const COMPANION_ITEM_CAP = 1;
+/**
+ * How much farther than the base radii the lead can reach. The walk in (the
+ * camp, the only place `sim.trainer` exists) is someone's first minutes with a
+ * keyboard, and standing exactly on an item or a person was reading as the
+ * verb not working. Derived from `sim.trainer`, so it is not save state and
+ * every other run keeps the exact radii it always had.
+ */
+export const reachOf = (sim) => (sim && sim.trainer ? 1.8 : 1);
 export const OFFER_RADIUS = 5.0; // close enough to put something in someone's hand
 
 /**
@@ -1566,7 +1574,7 @@ export const OFFER_RADIUS = 5.0; // close enough to put something in someone's h
 export function companionPickup(sim, ch, targetId = null) {
   if (ch.inventory.length >= COMPANION_ITEM_CAP) return { ok: false, reason: "full" };
 
-  const candidates = sim.items.filter((it) => !it.taken && it.discovered && dist2D(it, ch) <= ITEM_PICKUP_RADIUS);
+  const candidates = sim.items.filter((it) => !it.taken && it.discovered && dist2D(it, ch) <= ITEM_PICKUP_RADIUS * reachOf(sim));
   const near = targetId
     ? candidates.find((it) => it.id === targetId)
     : candidates.sort((a, b) => dist2D(a, ch) - dist2D(b, ch))[0];
@@ -1677,7 +1685,7 @@ export function offerItem(sim, slotIndex, companionId, believedKind = null, acto
   if (!slot) return { ok: false, reason: "empty" };
   const target = sim.companions.find((c) => c.id === companionId);
   if (!target || target === actor) return { ok: false, reason: "no-target" };
-  if (dist2D(target, actor) > OFFER_RADIUS) return { ok: false, reason: "too-far" };
+  if (dist2D(target, actor) > OFFER_RADIUS * reachOf(sim)) return { ok: false, reason: "too-far" };
 
   // Everything below decides on the item as the OFFERER understands it. Gating
   // on the true kind instead turned a refusal into a free oracle: a genuinely

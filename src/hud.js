@@ -6,12 +6,12 @@
 // the one hallucinating. The only place a real number is ever printed is the
 // debrief, after the run is over.
 
-import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds, believedFireAt } from "./percept.js?v=seven-0.28.1";
-import { canWork, beatAt, holdFraction, PHASE } from "./woods.js?v=seven-0.28.1";
-import { KEYS } from "./keys.js?v=seven-0.28.1";
-import { LOG_RADIUS, PYLON_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, gatherTarget, GATHER_HOLD_TIME, previewCraft, claimedEntryAt, pylonAt,
+import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds, believedFireAt } from "./percept.js?v=seven-0.28.2";
+import { canWork, beatAt, holdFraction, PHASE } from "./woods.js?v=seven-0.28.2";
+import { KEYS } from "./keys.js?v=seven-0.28.2";
+import { reachOf, LOG_RADIUS, PYLON_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, gatherTarget, GATHER_HOLD_TIME, previewCraft, claimedEntryAt, pylonAt,
   mossedAt, FIRE_FUEL_MAX, FIRE_COST, phaseOf, holdTimeFor,
-} from "./state.js?v=seven-0.28.1";
+} from "./state.js?v=seven-0.28.2";
 
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 
@@ -242,7 +242,7 @@ export function createHud(sim, percept, opts = {}) {
       const d = Math.hypot(ph.x - actor.x, ph.z - actor.z);
       if (d < bestD) { bestD = d; best = ph; }
     }
-    return bestD <= LOG_RADIUS ? best : null;
+    return bestD <= LOG_RADIUS * reachOf(sim) ? best : null;
   }
 
   /** Nearest pickup in reach, shown through PERCEPTION — the prompt names the
@@ -253,7 +253,7 @@ export function createHud(sim, percept, opts = {}) {
       const d = Math.hypot(it.x - actor.x, it.z - actor.z);
       if (d < bestD) { bestD = d; best = it; }
     }
-    return bestD <= ITEM_PICKUP_RADIUS ? best : null;
+    return bestD <= ITEM_PICKUP_RADIUS * reachOf(sim) ? best : null;
   }
 
   /**
