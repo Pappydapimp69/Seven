@@ -17,9 +17,11 @@
 //     options (dbh#E4, wrong-sky#E2). And an ended run is never saved, so a
 //     "Resume" can't drop you back onto the frame you already lost.
 
-import { createRun } from "./state.js?v=seven-0.28.2";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.28.2";
-import { attachSites, serializeWoods, deserializeWoods } from "./woods.js?v=seven-0.28.2";
+import { createRun } from "./state.js?v=seven-0.29.0";
+import { generateWorld } from "./world.js?v=seven-0.29.0";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.29.0";
+import { attachSites, serializeWoods, deserializeWoods } from "./woods.js?v=seven-0.29.0";
+import { serializeExpedition, deserializeExpedition } from "./expedition.js?v=seven-0.29.0";
 
 // SEVEN'S OWN KEYS, and this is not cosmetic. GitHub Pages serves every project
 // of one account from ONE origin — `pappydapimp69.github.io` — so /mirage/ and
@@ -67,7 +69,10 @@ export const SAVE_KEY = "seven:run";
 // same reason `lostSince` does: dropped, it restores as undefined, and
 // `sim.wood + undefined` is NaN, which does not throw and does not fail a
 // round-trip — it just quietly shows the player a broken number.
-export const SAVE_VERSION = 6;
+//
+// v7: Seven's merged woods crossing. The map is the dense world variant, and
+// the expedition record carries day/area/missing-person branch state.
+export const SAVE_VERSION = 7;
 
 const store = () => (typeof localStorage === "undefined" ? null : localStorage);
 
@@ -179,6 +184,8 @@ function packCharacter(c) {
     known: c.known
       ? { pylons: [...c.known.pylons], monoliths: [...c.known.monoliths] }
       : null,
+    skills: c.skills ? { ...c.skills } : null,
+    replacedDay: c.replacedDay ?? null,
   };
 }
 
@@ -246,6 +253,8 @@ function applyCharacter(c, s) {
   // of these that belongs to the player too, and it sits outside the
   // !isPlayer guard for that reason.
   c.callReadyAt = s.callReadyAt ?? 0;
+  if (s.skills) c.skills = { ...s.skills };
+  c.replacedDay = s.replacedDay ?? null;
 }
 
 /** Flags for world features, keyed by id — positions come back from the seed. */
@@ -333,6 +342,10 @@ export function serializeRun(sim) {
     canClearMoss: !!sim.canClearMoss,
     callUnlocked: sim.callUnlocked !== false,
     reachedTrainer: !!sim.reachedTrainer,
+    seven: !!sim.seven,
+    sevenTeam: sim.sevenTeam ?? null,
+    finalDecision: sim.finalDecision ? { ...sim.finalDecision } : null,
+    expedition: serializeExpedition(sim.expedition),
     woods: serializeWoods(sim.woods),
     // The day's own seed. Every woods run is on the same authored camp, whose
     // seed is a sentinel, so this is the only thing that identifies WHICH day.
@@ -356,7 +369,7 @@ export function deserializeRun(data) {
   // is the routing key because it is already in every payload at every
   // version, which is exactly what camp.js said it was for.
   const camp = data.seed === CAMP_SEED;
-  const world = camp ? attachSites(buildCamp()) : null;
+  const world = camp ? attachSites(buildCamp()) : data.expedition ? generateWorld(data.seed, { dense: true }) : null;
   const sim = createRun({
     seed: data.seed,
     difficulty: data.difficulty,
@@ -377,6 +390,10 @@ export function deserializeRun(data) {
       for (const c of sim.companions) c.name = sim.woods.nameById[c.id] || c.name;
     }
   }
+  sim.seven = !!data.seven || !!data.expedition;
+  sim.sevenTeam = data.sevenTeam ?? null;
+  sim.finalDecision = data.finalDecision ? { ...data.finalDecision } : null;
+  sim.expedition = deserializeExpedition(data.expedition);
 
   const byId = new Map(sim.party.map((c) => [c.id, c]));
   for (const s of data.party) {
@@ -506,6 +523,11 @@ export function describeSave(data) {
     // are one basin into a campaign you never started is the menu lying about
     // where you are.
     woods: data.woods ? { phase: data.woods.phase, beat: data.woods.beat, asksLeft: data.woods.asksLeft } : null,
+    expedition: data.expedition ? {
+      day: data.expedition.day,
+      area: data.expedition.area ?? 0,
+      daylight: data.expedition.daylight,
+    } : null,
   };
 }
 
@@ -603,7 +625,7 @@ export function summariseTally(all = loadTally()) {
 // the save payload became a cross-slot leak the moment the game grew slots.
 // Settings rather than the run payload because progress has to survive
 // clearSave(), which every new run calls.
-const DEFAULT_SETTINGS = { volume: 0.7, muted: false, difficulty: "standard", coop: "solo", fov: 78, ui: 1, tutorial: { done: [], current: 0 } };
+const DEFAULT_SETTINGS = { volume: 0.7, muted: false, difficulty: "standard", coop: "solo", sevenTeam: "trail", fov: 78, ui: 1, tutorial: { done: [], current: 0 } };
 
 /**
  * A defaults object nobody can corrupt. `{ ...DEFAULT_SETTINGS }` is a SHALLOW
@@ -637,6 +659,7 @@ export function loadSettings() {
         current: Number.isFinite(d.tutorial?.current) ? d.tutorial.current : 0,
       },
       coop: ["solo", "couch"].includes(d.coop) ? d.coop : DEFAULT_SETTINGS.coop,
+      sevenTeam: ["trail", "recovery", "haul"].includes(d.sevenTeam) ? d.sevenTeam : DEFAULT_SETTINGS.sevenTeam,
       fov: typeof d.fov === "number" && d.fov >= 70 && d.fov <= 110 ? d.fov : DEFAULT_SETTINGS.fov,
       ui: typeof d.ui === "number" && d.ui >= 0.5 && d.ui <= 1.5 ? d.ui : DEFAULT_SETTINGS.ui,
     };

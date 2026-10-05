@@ -6,24 +6,29 @@ import {
   possess, release, possessableCompanions, activatePylon, pylonAt,
   callCompanion, clearMoss, mossedAt, feedFire, buildFire, FIRE_COST,
   PARTY_SIZE, DIFFICULTY, reachOf, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=seven-0.28.2";
-import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.28.2";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.28.2";
+} from "./state.js?v=seven-0.29.0";
+import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.29.0";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.29.0";
+import { generateWorld } from "./world.js?v=seven-0.29.0";
 import {
   attachSites, startDay, beatAt, briefFor, canWork, workBeat, fallNight, ask, accuse,
   updateWorkHold, dawnLine, BEATS, PHASE, ASKS_ALLOWED,
-} from "./woods.js?v=seven-0.28.2";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.28.2";
-import { createRenderer } from "./render.js?v=seven-0.28.2";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.28.2";
-import { keyed } from "./keys.js?v=seven-0.28.2";
-import { createInput, ACTIONS } from "./input.js?v=seven-0.28.2";
-import { createAudio } from "./audio.js?v=seven-0.28.2";
-import { createDiag } from "./diag.js?v=seven-0.28.2";
-import { hashSeed, makeRng } from "./rng.js?v=seven-0.28.2";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.28.2";
+} from "./woods.js?v=seven-0.29.0";
+import {
+  createExpedition, spendDaylight, recordFact, sleep, resolveNight, advanceArea,
+} from "./expedition.js?v=seven-0.29.0";
+import { DEFAULT_TEAM, applyTeamLoadout, teamSkill, finalDecision } from "./seven.js?v=seven-0.29.0";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.29.0";
+import { createRenderer } from "./render.js?v=seven-0.29.0";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.29.0";
+import { keyed } from "./keys.js?v=seven-0.29.0";
+import { createInput, ACTIONS } from "./input.js?v=seven-0.29.0";
+import { createAudio } from "./audio.js?v=seven-0.29.0";
+import { createDiag } from "./diag.js?v=seven-0.29.0";
+import { hashSeed, makeRng } from "./rng.js?v=seven-0.29.0";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.29.0";
 
-const BUILD = "seven-0.28.2";
+const BUILD = "seven-0.29.0";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -55,13 +60,14 @@ let saveTimer = 0;
 // each renderer as it is built, since a run can start before the pause menu
 // has ever been opened.
 let fovPref = 78;
+let sevenTeamPref = DEFAULT_TEAM;
 // Sim-seconds between autosaves. Short enough that a closed tab costs little,
 // long enough that a serialise is nowhere near a per-frame cost.
 const AUTOSAVE_EVERY = 5;
 let lastFrame = 0;
 let campaignSeed = 0; // the seed the player actually entered/rolled — each basin in the campaign derives its own seed from this so "New basin" always starts a fresh campaign
 
-const LAYERS = ["title", "hudLayer", "pauseLayer", "debriefLayer"];
+const LAYERS = ["title", "hudLayer", "pauseLayer", "debriefLayer", "finalLayer"];
 function screens(show) {
   for (const id of LAYERS) el(id).classList.toggle("hidden", id !== show);
   input.setMode(show === "hudLayer" ? "game" : "menu");
@@ -84,6 +90,7 @@ function screens(show) {
 // or a keyboard cannot reach.
 const ROOT_SELECTOR = {
   title: "#title", pauseLayer: "#pauseLayer", debriefLayer: "#debriefLayer",
+  finalLayer: "#finalLayer",
   accusePanel: "#accusePanel", verdictPanel: "#verdictPanel",
 };
 const menu = { root: null, row: 0, col: 0 };
@@ -208,7 +215,7 @@ function refreshTitleSave() {
   // had already gone, which is a prompt that lies about what the press does.
   const woodsBtn = el("woodsBtn");
   if (woodsBtn) {
-    woodsBtn.textContent = "The woods";
+    woodsBtn.textContent = "Seven";
     woodsBtn.appendChild(Object.assign(document.createElement("span"), { id: "woodsDetail", className: "resume-detail" }));
     woodsBtn.classList.remove("confirm-new");
     refreshWoodsTally();
@@ -220,7 +227,9 @@ function refreshTitleSave() {
     const d = describeSave(data);
     const mm = String(d.minutes).padStart(2, "0");
     const ss = String(d.seconds).padStart(2, "0");
-    el("continueDetail").textContent = d.woods
+    el("continueDetail").textContent = d.expedition
+      ? `seven · day ${d.expedition.day} · area ${d.expedition.area}/7 · ${d.expedition.daylight}h light`
+      : d.woods
       ? (d.woods.phase === "morning"
           ? `the woods · the morning after · ${d.woods.asksLeft} questions left`
           : `the woods · day one · ${d.woods.beat} of ${BEATS.length} done`)
@@ -746,6 +755,12 @@ function resumeRun() {
   // The line matters as much as the wiring: waking up to "Basin 1 of 1" after
   // a night in the trees is the game telling the player they are somewhere
   // they are not.
+  if (sim.expedition) {
+    applySevenTeam(sim);
+    const r = mountRun(sim, `Day ${sim.expedition.day}. You pick the trail back up.`);
+    updateSevenObjective(sim);
+    return r;
+  }
   if (sim.woods) {
     const r = mountRun(sim, sim.woods.phase === PHASE.MORNING
       ? "Grey light. The fire is down to ash and everyone is up."
@@ -794,6 +809,7 @@ function mountRun(sim, openingLine) {
   paused = false;
   whisperTimer = 0;
   run = { sim, percept, renderer, hud, players: [makeLocalPlayer(0, sim.player, percept)] };
+  input.setView(sim.player.yaw || 0, 0);
   hud.setHints(input.activeScheme);
   hud.say(openingLine, "warn");
   saveTimer = 0;
@@ -881,7 +897,159 @@ function advanceLevel() {
   const players = sim.humans.map((ch, slot) =>
     slot === 0 ? makeLocalPlayer(0, ch, percept) : makeLocalPlayer(slot, ch, createPercept(ch)));
   run = { sim, percept, renderer, hud, players };
+  input.setView(sim.player.yaw || 0, 0);
   lastFrame = 0;
+}
+
+const SEVEN_AREAS = 7;
+function applySevenTeam(sim) {
+  return applyTeamLoadout(sim, sim.sevenTeam || sevenTeamPref || DEFAULT_TEAM);
+}
+
+function sevenRoute(sim) {
+  const exitZ = -(sim.world.grid / 2 - 2) * sim.world.cell;
+  const startZ = sim.world.camp.z;
+  const total = Math.max(1, startZ - exitZ);
+  const progress = Math.max(0, Math.min(1, (startZ - sim.player.z) / total));
+  return { exitZ, startZ, progress, area: Math.min(SEVEN_AREAS, Math.floor(progress * SEVEN_AREAS)) };
+}
+
+function spendSevenDaylight(sim, amount, reason) {
+  const e = sim.expedition;
+  if (!e || amount <= 0) return false;
+  if (spendDaylight(e, amount, reason)) return true;
+  if (e.daylight < amount) {
+    e.daylight = 0;
+    e.lastSpend = { day: e.day, amount, reason };
+    return true;
+  }
+  return false;
+}
+
+function resolveSevenNight(sim) {
+  const e = sim.expedition;
+  if (!e || e.phase !== "day" || e.daylight > 0 || sim.status !== "playing") return;
+  sleep(e);
+  const before = e.missing.length;
+  const gone = resolveNight(e, sim.rng, sim.companions.map((c) => c.id));
+  if (gone && e.missing.length > before) {
+    const c = sim.companions.find((x) => x.id === gone.missing.id);
+    if (c) c.replacedDay = e.day - 1;
+  }
+  emitToHud(sim, "expedition", "Night passes. In the morning, the trail is still there.");
+}
+
+function updateSevenObjective(sim) {
+  const e = sim.expedition;
+  if (!e) return;
+  const route = sevenRoute(sim);
+  const pct = Math.round(route.progress * 100);
+  const missing = e.missing.filter((m) => !m.recovered && !m.abandoned).length;
+  setObjective(
+    `Day ${e.day}  Area ${e.area}/${SEVEN_AREAS}`,
+    `Make it through the woods. Progress ${pct}%. Light left: ${e.daylight}h.` +
+      (missing ? " Someone is still out there behind you." : "") +
+      " Deadfalls slow the route; pylons and supplies buy enough clarity to keep going.",
+  );
+}
+
+function updateSevenProgress(sim) {
+  const e = sim.expedition;
+  if (!e || sim.status !== "playing") return;
+  const route = sevenRoute(sim);
+  if (route.area > e.area) {
+    const gained = route.area - e.area;
+    const abandoned = advanceArea(e, gained);
+    const travelCost = Math.max(0.25, gained * (1 - Math.min(0.45, teamSkill(sim, "scout") * 0.08)));
+    spendSevenDaylight(sim, Number(travelCost.toFixed(2)), "travel");
+    if (abandoned.length) emitToHud(sim, "expedition", "The old trail closes behind you.");
+    else emitToHud(sim, "expedition", `The party pushes into area ${e.area}.`);
+  }
+  if (route.progress >= 1) {
+    sim.status = "decision";
+    sim.ending = "edge";
+    emitToHud(sim, "end", "The trees break. There is open air ahead.");
+    openFinalDecision(sim);
+    return;
+  }
+  resolveSevenNight(sim);
+  updateSevenObjective(sim);
+}
+
+function recordSevenEvents(sim, events) {
+  const e = sim.expedition;
+  if (!e) return;
+  for (const ev of events) {
+    if (ev.kind === "gather") {
+      const deadfall = /deadfall/i.test(ev.text || "");
+      recordFact(e, {
+        kind: deadfall ? "deadfall" : "gather",
+        object: deadfall ? "deadfall" : ev.resource,
+        actor: ev.who || "you",
+        amount: ev.amount ?? 0,
+        t: sim.time,
+      });
+      const base = deadfall ? 2.5 : 0.5;
+      const skill = deadfall ? teamSkill(sim, "cut") : teamSkill(sim, "carry");
+      spendSevenDaylight(sim, Math.max(0.25, Number((base - skill * 0.2).toFixed(2))), deadfall ? "deadfall" : "gather");
+    } else if (ev.kind === "draw") {
+      recordFact(e, { kind: "pylon", actor: ev.who || "you", object: ev.id, t: sim.time });
+      spendSevenDaylight(sim, 0.25, "pylon");
+    } else if (ev.kind === "log") {
+      recordFact(e, { kind: "survey", actor: ev.who || "you", object: ev.id, t: sim.time });
+    } else if (ev.kind === "recover") {
+      recordFact(e, { kind: "recovered", actor: ev.who || "you", t: sim.time });
+    }
+  }
+  resolveSevenNight(sim);
+}
+
+function startSeven({ seed, difficulty, team } = {}) {
+  const seedValue = seed ?? Math.floor(Math.random() * 0xffffff) + 1;
+  campaignSeed = seedValue;
+  tut = null;
+  setObjective(null);
+  const world = generateWorld(seedValue, { dense: true });
+  const sim = createRun({ seed: seedValue, difficulty: difficulty || "standard", level: 1, campaignLength: 1, world });
+  sim.seven = true;
+  sim.expedition = createExpedition();
+  applyTeamLoadout(sim, team || sevenTeamPref || DEFAULT_TEAM, { overwrite: true });
+  updateSevenObjective(sim);
+  clearSave();
+  const r = mountRun(sim, "Seven of you enter the woods. The way out is north.");
+  updateSevenObjective(sim);
+  return r;
+}
+
+let finalUi = null;
+
+function openFinalDecision(sim = run?.sim) {
+  if (!sim?.expedition) return;
+  const layer = el("finalLayer");
+  if (!layer) return;
+  finalUi = true;
+  const open = sim.expedition.missing.filter((m) => !m.recovered && !m.abandoned).length;
+  const abandoned = sim.expedition.missing.filter((m) => m.abandoned).length;
+  el("finalHead").textContent = "The edge of the woods";
+  el("finalBody").textContent = open || abandoned
+    ? "There is open air ahead, and there is still a question behind you."
+    : "There is open air ahead. For once, nobody is missing from the count.";
+  el("finalState").textContent = open
+    ? `${open} still out there behind you.`
+    : abandoned
+      ? `${abandoned} left beyond the route.`
+      : "Everyone who can answer is here.";
+  layer.classList.remove("hidden");
+  screens("finalLayer");
+}
+
+function chooseFinal(choice) {
+  const sim = run?.sim;
+  if (!sim || sim.status !== "decision") return;
+  finalDecision(sim, choice);
+  finalUi = null;
+  el("finalLayer")?.classList.add("hidden");
+  finish();
 }
 
 /**
@@ -1447,6 +1615,7 @@ function step(dt, intent) {
       hud.collectFly(ev.resource, from);
     }
   }
+  recordSevenEvents(sim, events);
 
   // Whispers only exist for a lead who is gone.
   if (percept.active) {
@@ -1508,7 +1677,10 @@ function step(dt, intent) {
     saveRun(sim, Date.now());
   }
 
+  updateSevenProgress(sim);
+
   if (sim.status === "levelComplete") advanceLevel();
+  else if (sim.status === "decision") openFinalDecision(sim);
   else if (sim.status !== "playing") finish();
 }
 
@@ -1553,6 +1725,7 @@ function boot() {
   // campaign (which clears the run slot) never also resets your volume.
   const prefs = loadSettings();
   let difficulty = prefs.difficulty;
+  sevenTeamPref = prefs.sevenTeam || DEFAULT_TEAM;
   fovPref = prefs.fov;
   for (const b of document.querySelectorAll("[data-fov]")) {
     b.classList.toggle("sel", Number(b.dataset.fov) === prefs.fov);
@@ -1587,6 +1760,9 @@ function boot() {
   for (const b of document.querySelectorAll("[data-coop-opt]")) {
     b.classList.toggle("sel", b.dataset.coopOpt === prefs.coop);
   }
+  for (const b of document.querySelectorAll("[data-seven-team]")) {
+    b.classList.toggle("sel", b.dataset.sevenTeam === sevenTeamPref);
+  }
   for (const btn of document.querySelectorAll("[data-diff]")) {
     btn.addEventListener("click", () => {
       difficulty = btn.dataset.diff;
@@ -1602,6 +1778,13 @@ function boot() {
       coopAllowed = btn.dataset.coopOpt === "couch";
       saveSettings({ coop: btn.dataset.coopOpt });
       for (const b of document.querySelectorAll("[data-coop-opt]")) b.classList.toggle("sel", b === btn);
+    });
+  }
+  for (const btn of document.querySelectorAll("[data-seven-team]")) {
+    btn.addEventListener("click", () => {
+      sevenTeamPref = btn.dataset.sevenTeam || DEFAULT_TEAM;
+      saveSettings({ sevenTeam: sevenTeamPref });
+      for (const b of document.querySelectorAll("[data-seven-team]")) b.classList.toggle("sel", b === btn);
     });
   }
   el("startBtn").addEventListener("click", () => {
@@ -1635,8 +1818,12 @@ function boot() {
       return;
     }
     const raw = el("seedInput").value.trim();
-    startWoods(raw || null);
+    const seed = raw ? (/^\d+$/.test(raw) ? Number(raw) : hashSeed(raw)) : undefined;
+    startSeven({ seed, difficulty, team: sevenTeamPref });
   });
+  el("finalLeave")?.addEventListener("click", () => chooseFinal("leave"));
+  el("finalReturn")?.addEventListener("click", () => chooseFinal("return"));
+  el("finalSeal")?.addEventListener("click", () => chooseFinal("seal"));
   el("verdictAgain")?.addEventListener("click", () => {
     // A NEW day, not the same one again. The seed box is for a day somebody
     // wants to share or re-walk deliberately; the button beside the verdict is
@@ -1698,7 +1885,7 @@ function boot() {
   // A closing tab, a backgrounded phone, an alt-tab: all of these can end the
   // session between autosaves, so flush on the way out. visibilitychange is the
   // one that actually fires reliably on mobile — beforeunload does not.
-  const flush = () => { if (run && !paused) saveRun(run.sim, Date.now()); };
+  const flush = () => { if (run && !paused && run.sim.status === "playing") saveRun(run.sim, Date.now()); };
   window.addEventListener("beforeunload", flush);
   document.addEventListener("visibilitychange", () => { if (document.hidden) flush(); });
 
@@ -1714,6 +1901,7 @@ if (typeof window !== "undefined") {
   window.__seven = {
     build: BUILD,
     startRun,
+    startSeven,
     get sim() { return run?.sim ?? null; },
     get percept() { return run?.percept ?? null; },
     // Exposed so the smoke test can assert the scene was actually DRAWN.
@@ -1726,7 +1914,7 @@ if (typeof window !== "undefined") {
     get selectedItem() { return lead().selectedItem; },
     act: (action, arg) => run && handleAction(action, arg),
     /** Leave the run for the title screen — what "quit" does, for tests. */
-    toTitle() { run = null; paused = false; screens("title"); },
+    toTitle() { run = null; paused = false; finalUi = null; el("finalLayer")?.classList.add("hidden"); screens("title"); },
     /** Feed a raw pointer-lock delta in CSS pixels, as a real mouse would.
      * The DPI test needs to send the SAME PHYSICAL sweep at several display
      * scaling levels, and the only honest way to do that is to hand the input

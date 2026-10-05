@@ -14,9 +14,9 @@
 // The sim's job is to keep an honest, testable record of what is TRUE; `percept.js`
 // is the only place allowed to lie about it.
 
-import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=seven-0.28.2";
-import { makeRng } from "./rng.js?v=seven-0.28.2";
-import { updateCompanions, companionRemark } from "./party.js?v=seven-0.28.2";
+import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=seven-0.29.0";
+import { makeRng } from "./rng.js?v=seven-0.29.0";
+import { updateCompanions, companionRemark } from "./party.js?v=seven-0.29.0";
 
 export const PARTY_SIZE = 6; // you + 5 companions — the spec's five NPCs, plus the player
 export const MAX_LUCIDITY = 100;
@@ -650,6 +650,7 @@ export function createRun({ seed = 1, difficulty = "standard", level = 1, campai
     stats: carryOver ? carryOver.stats : { doseUses: 0, pylonSeconds: 0, recoveries: 0, falseLogs: 0, strikes: 0, slips: 0, itemsUsed: 0, phantomItemsUsed: 0, itemsCrafted: 0, falseCrafts: 0, phantomsRevealed: 0 },
     level,
     campaignLength,
+    seven: false,
   };
 }
 
@@ -2339,7 +2340,7 @@ export function checkEndings(sim) {
 
   // Nobody decays in camp and nothing is racing, so the daylight limit has no
   // business ending a lesson either.
-  if (!sim.noDrain && sim.time >= TIME_LIMIT && sim.status === "playing") {
+  if (!sim.noDrain && !sim.seven && sim.time >= TIME_LIMIT && sim.status === "playing") {
     sim.status = "lost";
     sim.ending = "darkness";
     emit(sim, "end", "The light goes. Whatever is still out here stays out here.");
@@ -2354,7 +2355,7 @@ export function checkEndings(sim) {
   //
   // Requiring at least one marker is right for basins too: a basin that
   // generated none should not be winnable without doing anything.
-  if (sim.monoliths.length > 0 && trueLogCount(sim) >= sim.monoliths.length && sim.status === "playing") {
+  if (!sim.seven && sim.monoliths.length > 0 && trueLogCount(sim) >= sim.monoliths.length && sim.status === "playing") {
     // Survey complete — now walk it home. Extraction needs YOU plus at least
     // two others physically at camp; a lone lead with a written record is a
     // rumour, not a survey.
@@ -2546,6 +2547,16 @@ export function debrief(sim) {
     stone: sim.stone,
     level: sim.level,
     campaignLength: sim.campaignLength,
+    sevenTeam: sim.sevenTeam ?? null,
+    finalDecision: sim.finalDecision ? { ...sim.finalDecision } : null,
+    expedition: sim.expedition ? {
+      day: sim.expedition.day,
+      area: sim.expedition.area,
+      daylight: sim.expedition.daylight,
+      missing: sim.expedition.missing?.length || 0,
+      abandoned: sim.expedition.missing?.filter((m) => m.abandoned).length || 0,
+      recovered: sim.expedition.missing?.filter((m) => m.recovered).length || 0,
+    } : null,
     party: sim.party.map((c) => ({
       name: c.name,
       role: c.role,

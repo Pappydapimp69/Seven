@@ -3314,10 +3314,13 @@ check("striking needs a lucid mind — you cannot audit your own hallucination",
 // the source rather than mocked, so adding an ending to state.js without
 // adding a verdict to hud.js fails here.
 check("every ending the rules can set has its own debrief verdict", () => {
-  const rules = fsReadFileSync(new URL("../src/state.js", import.meta.url), "utf8");
+  const rules = [
+    fsReadFileSync(new URL("../src/state.js", import.meta.url), "utf8"),
+    fsReadFileSync(new URL("../src/seven.js", import.meta.url), "utf8"),
+  ].join("\n");
   const hud = fsReadFileSync(new URL("../src/hud.js", import.meta.url), "utf8");
 
-  const endings = [...rules.matchAll(/sim\.ending\s*=\s*"([a-z]+)"/g)].map((m) => m[1]);
+  const endings = [...rules.matchAll(/sim\.ending\s*=\s*"([A-Za-z]+)"/g)].map((m) => m[1]);
   assert(endings.length >= 4, `only found ${endings.length} endings to check — the parse broke`);
 
   const block = hud.slice(hud.indexOf("const VERDICTS"), hud.indexOf("const verdict ="));
@@ -3330,8 +3333,8 @@ check("every ending the rules can set has its own debrief verdict", () => {
     // between a win and a loss is the failure this is really guarding.
     seen.set(e, m[1]);
   }
-  const lost = ["dissolved", "discredited", "darkness"].filter((e) => seen.has(e));
-  const won = ["extracted", "advance"].filter((e) => seen.has(e));
+  const lost = ["dissolved", "discredited", "darkness", "turnedBack", "vanishedBack"].filter((e) => seen.has(e));
+  const won = ["extracted", "advance", "throughWoods", "leftSomeone", "sealedWoods", "sealedClean"].filter((e) => seen.has(e));
   for (const l of lost) {
     for (const w of won) {
       assert(seen.get(l) !== seen.get(w), `losing ending "${l}" reads the same as winning "${w}"`);

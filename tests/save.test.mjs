@@ -17,6 +17,8 @@ import {
 } from "../src/save.js";
 import { buildCamp, CAMP_SEED } from "../src/camp.js";
 import { attachSites, startDay, PHASE } from "../src/woods.js";
+import { generateWorld } from "../src/world.js";
+import { createExpedition, advanceArea, spendDaylight } from "../src/expedition.js";
 
 let passed = 0;
 const failures = [];
@@ -186,6 +188,34 @@ check("carried progress survives: logs, gathers, pickups, doses, scars, planted 
   assert(restored.pylons.some((p) => p.id === "stake-test"), "a planted Stake did not survive the save");
 });
 
+check("a Seven crossing resumes with its dense woods map and expedition branch state", () => {
+  const world = generateWorld(9191, { dense: true });
+  const sim = createRun({ seed: 9191, difficulty: "standard", world });
+  sim.seven = true;
+  sim.expedition = createExpedition();
+  advanceArea(sim.expedition, 3);
+  spendDaylight(sim.expedition, 4, "test-route");
+  sim.expedition.missing.push({
+    id: "c3",
+    day: 2,
+    area: 2,
+    recoverByArea: 3,
+    recovered: false,
+    abandoned: false,
+  });
+  sim.companions[2].skills = { cut: 2, carry: 1 };
+  sim.companions[2].replacedDay = 2;
+
+  const restored = deserializeRun(serializeRun(sim));
+  eq(restored.seven, true, "Seven mode flag was lost");
+  assert(restored.world.deadfalls.length > 0, "dense woods deadfalls were not rebuilt");
+  eq(restored.expedition.area, 3, "route area was lost");
+  eq(restored.expedition.daylight, 8, "daylight was lost");
+  eq(restored.expedition.missing[0].id, "c3", "missing-person branch state was lost");
+  eq(restored.companions[2].skills.cut, 2, "team skills were lost");
+  eq(restored.companions[2].replacedDay, 2, "replacement surface state was lost");
+});
+
 check("companion identity survives — traits, memory and errands", () => {
   const sim = createRun({ seed: 616, difficulty: "standard" });
   const c = sim.companions[1];
@@ -304,13 +334,14 @@ check("describeSave reports progress without ever leaking a meter", () => {
 // ---------------------------------------------------------------------------
 check("preferences survive a run being cleared", () => {
   withFakeStorage(() => {
-    saveSettings({ volume: 0.35, difficulty: "bleak" });
+    saveSettings({ volume: 0.35, difficulty: "bleak", sevenTeam: "haul" });
     const sim = createRun({ seed: 91 });
     saveRun(sim, 1);
     clearSave(); // what finish() does when a run ends
     const s = loadSettings();
     eq(s.volume, 0.35, "losing a run reset the volume");
     eq(s.difficulty, "bleak", "losing a run reset the pressure preference");
+    eq(s.sevenTeam, "haul", "losing a run reset the Seven team preference");
     eq(hasSave(), false, "the run slot should still be gone");
   });
 });
@@ -318,21 +349,23 @@ check("preferences survive a run being cleared", () => {
 check("saveSettings merges rather than replacing", () => {
   withFakeStorage(() => {
     saveSettings({ volume: 0.35 });
-    saveSettings({ difficulty: "gentle" });
+    saveSettings({ difficulty: "gentle", sevenTeam: "recovery" });
     const s = loadSettings();
     eq(s.volume, 0.35, "a later partial write clobbered an unrelated preference");
     eq(s.difficulty, "gentle", "the later write did not land");
+    eq(s.sevenTeam, "recovery", "the team preference did not land");
   });
 });
 
 check("out-of-range or junk preferences degrade to defaults, not to a broken game", () => {
   withFakeStorage((map) => {
-    map.set(SETTINGS_KEY, JSON.stringify({ volume: 45, muted: "yes", difficulty: "impossible", coop: "hive" }));
+    map.set(SETTINGS_KEY, JSON.stringify({ volume: 45, muted: "yes", difficulty: "impossible", coop: "hive", sevenTeam: "none" }));
     const s = loadSettings();
     eq(s.volume, 0.7, "an out-of-range volume should fall back, not deafen or mute");
     eq(s.muted, false, "a non-boolean muted should fall back");
     eq(s.difficulty, "standard", "an unknown difficulty should fall back");
     eq(s.coop, "solo", "an unknown party mode should fall back");
+    eq(s.sevenTeam, "trail", "an unknown Seven team should fall back");
   });
 });
 

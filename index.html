@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0a0f16" />
   <title>SEVEN — the woods, and who walks out</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230a0f16'/%3E%3Cpath d='M4 22h24' stroke='%23596579' stroke-width='2'/%3E%3Crect x='9' y='8' width='4' height='14' fill='%2374e0ff'/%3E%3Crect x='19' y='11' width='4' height='11' fill='%23b06a72'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="css/style.css?v=seven-0.28.2" />
+  <link rel="stylesheet" href="css/style.css?v=seven-0.29.0" />
 </head>
 <body>
   <canvas id="gl"></canvas>
@@ -22,7 +22,7 @@
   <div id="title" class="screen">
     <div class="title-card">
       <h1 class="logo">SEVEN</h1>
-      <p class="tagline">
+      <p class="tagline title-tagline">
         You set out to walk a trail through the woods and come out the other
         side. That is all this is about. What it turns out to be about is who
         walks out with you.
@@ -32,9 +32,9 @@
            walk in is finished, it is the only way in. -->
       <p id="firstWalkNote" class="first-walk-note">First time here. Learn the walk — the woods opens when you finish it.</p>
 
-      <div class="row first-walk-hide">
+      <div class="title-settings first-walk-hide">
         <div class="field">
-          <label class="field-label">Basin</label>
+          <label class="field-label">Seed</label>
           <input id="seedInput" placeholder="random seed" autocomplete="off" spellcheck="false" />
         </div>
         <div class="field">
@@ -47,19 +47,38 @@
         </div>
       </div>
 
-      <div class="field first-walk-hide" style="margin-bottom:20px">
-        <label class="field-label">Party</label>
+      <div class="field menu-field first-walk-hide">
+        <label class="field-label">Controls</label>
         <div class="diff-row">
           <button class="diff sel" data-coop-opt="solo" data-row="1" data-col="0">Solo</button>
           <button class="diff" data-coop-opt="couch" data-row="1" data-col="1">Couch co-op</button>
         </div>
       </div>
 
+      <div class="field menu-field first-walk-hide">
+        <label class="field-label">Team</label>
+        <div class="diff-row team-row">
+          <button class="diff sel" data-seven-team="trail" data-row="2" data-col="0">
+            <span class="option-title">Trail</span>
+            <span class="option-detail">scout · cut</span>
+          </button>
+          <button class="diff" data-seven-team="recovery" data-row="2" data-col="1">
+            <span class="option-title">Recovery</span>
+            <span class="option-detail">mend · signal</span>
+          </button>
+          <button class="diff" data-seven-team="haul" data-row="2" data-col="2">
+            <span class="option-title">Haul</span>
+            <span class="option-detail">carry · build</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="title-actions">
       <!-- Shown only when a save exists (main.js adds .show). It sits ABOVE
            "Walk in" and takes the menu's first row when present, so the
            default focus lands on continuing rather than on the button that
            silently discards the run. -->
-      <button id="continueBtn" class="big-btn resume" data-row="2" data-col="0">
+      <button id="continueBtn" class="big-btn resume" data-row="3" data-col="0">
         Resume run<span id="continueDetail" class="resume-detail"></span>
       </button>
       <!-- TUTORIAL ABOVE "Walk in", and not quiet, until it has been finished.
@@ -71,42 +90,34 @@
            obvious button. "Learn the walk" and "Walk in" are the basin game
            these bones came from; they still run, and they are still where the
            verbs are taught. -->
-      <button id="woodsBtn" class="big-btn first-walk-hide" data-row="3" data-col="0">
-        The woods<span id="woodsDetail" class="resume-detail"></span>
+      <button id="woodsBtn" class="big-btn first-walk-hide" data-row="4" data-col="0">
+        Seven<span id="woodsDetail" class="resume-detail"></span>
       </button>
-      <button id="learnBtn" class="big-btn" data-row="4" data-col="0">
+      <button id="learnBtn" class="big-btn" data-row="5" data-col="0">
         Learn the walk<span id="learnDetail" class="resume-detail"></span>
       </button>
-      <button id="startBtn" class="big-btn first-walk-hide" data-row="5" data-col="0">Walk in</button>
-      <button id="howBtn" class="text-btn" data-row="6" data-col="0">How to play</button>
+      <button id="startBtn" class="big-btn first-walk-hide" data-row="6" data-col="0">Walk in</button>
+      </div>
+      <button id="howBtn" class="text-btn" data-row="7" data-col="0">How to play</button>
 
       <p id="menuHints" class="menu-hints"></p>
 
       <div id="howto" class="howto hidden">
-        <p><b>THE WOODS — one day, one night, one morning.</b></p>
-        <p>You and five others are walking a trail through the woods. Day one is
-        work: firewood from the deadfall, water from the creek, a leaning birch
-        on the ridge that has to come down, a tent, a fire, a walk along the
-        ridge line, and then somebody takes first watch. <b>Seven jobs, and you
-        are standing there for every one of them.</b></p>
-        <p><b>Each job is one named person.</b> The banner says who. Walk to the
-        lit cairn; they are already on their way there, because it is their job.
-        When you are both there, press <b>E</b>. Watch what happens and watch
-        who does it — that is the whole thing you are being asked to remember.</p>
-        <p><b>Overnight, one of them is replaced.</b> Same name. Same skills.
-        Nothing is announced, nothing looks wrong, and nobody else finds it
-        strange. There is no bar, no icon and no sound.</p>
-        <p><b>In the morning you get three questions.</b> Pick a name
-        (<b>1</b>–<b>5</b>) and check in to hear their account of yesterday.
-        Everyone who was really there tells it the same way, word for word. The
-        one who was not gets <b>exactly one thing wrong</b> — a wrong place, the
-        wrong pair of hands, two things in the wrong order, the weather, or a
-        name a letter off.</p>
-        <p><b>Three questions, five people.</b> You cannot ask everybody, so you
-        cannot lay them side by side and read off the odd one out. The evidence
-        is your memory of a day you played.</p>
-        <p>When you are ready, press <b>B</b> and name somebody. That is the
-        run.</p>
+        <p><b>SEVEN — one woods, end to end.</b></p>
+        <p>You and five others have to cross the woods and come out the far
+        side. The map is one continuous route split into seven areas. Deadfalls
+        and detours do not lock the route; they spend daylight.</p>
+        <p><b>Your team matters.</b> Pick Trail for faster route progress,
+        Recovery for better missing-person coverage, or Haul for supplies and
+        camp work. Those skills reduce the cost of travel, obstacles, and
+        gathering.</p>
+        <p><b>Nights change the party.</b> After the first day, someone can
+        disappear out in the woods. What comes back keeps the same name and the
+        same apparent skills. The missing person remains behind you until the
+        route leaves their recovery window behind.</p>
+        <p><b>The goal is simple:</b> keep moving north, use pylons and supplies
+        to stay clear enough to trust the route, decide when an obstacle is
+        worth cutting through, and get out.</p>
         <hr />
         <p><b>MIRAGE — the game underneath.</b> "Walk in" and "Learn the walk"
         run the original: a survey party of six crossing a fogged basin while
@@ -247,6 +258,19 @@
     </div>
   </div>
 
+  <div id="finalLayer" class="screen hidden">
+    <div class="title-card narrow final-card">
+      <h2 id="finalHead">The edge of the woods</h2>
+      <p id="finalBody" class="tagline small"></p>
+      <p id="finalState" class="decision-state"></p>
+      <div class="final-actions">
+        <button id="finalLeave" class="big-btn" data-row="0" data-col="0">Walk out</button>
+        <button id="finalReturn" class="big-btn quiet" data-row="1" data-col="0">Turn back</button>
+        <button id="finalSeal" class="text-btn" data-row="2" data-col="0">Seal the pylons</button>
+      </div>
+    </div>
+  </div>
+
   <!-- IN-RUN HUD -->
   <div id="hudLayer" class="hud hidden">
     <div class="hud-top">
@@ -258,7 +282,7 @@
       <div class="pill" id="stonePill"><span class="pill-label">Stone</span><span id="stoneCount">0</span></div>
       <div class="pill"><span class="pill-label">Light</span><span id="clock">15:00</span></div>
       <div class="pill"><span class="pill-label">When</span><span id="dayLabel">DAY 1</span></div>
-      <div class="pill"><span class="pill-label">Basin</span><span id="levelLabel">1 / 1</span></div>
+      <div class="pill"><span id="levelPillLabel" class="pill-label">Basin</span><span id="levelLabel">1 / 1</span></div>
       <div class="pill dim"><span id="seedLabel"></span></div>
     </div>
 
@@ -347,7 +371,7 @@
         <button class="diff ui" data-ui="1.2" data-row="2" data-col="3">Large</button>
       </div>
       <button id="resumeBtn" class="big-btn" data-row="3" data-col="0">Keep walking</button>
-      <button id="quitBtn" class="text-btn" data-row="4" data-col="0">Abandon the survey</button>
+      <button id="quitBtn" class="text-btn" data-row="4" data-col="0">Return to title</button>
       <p class="menu-hints"></p>
     </div>
   </div>
@@ -355,7 +379,7 @@
   <!-- DEBRIEF -->
   <div id="debriefLayer" class="screen hidden"></div>
 
-  <script type="module" src="src/main.js?v=seven-0.28.2"></script>
+  <script type="module" src="src/main.js?v=seven-0.29.0"></script>
   <noscript><p style="color:#ccd">SEVEN needs JavaScript and WebGL.</p></noscript>
 </body>
 </html>

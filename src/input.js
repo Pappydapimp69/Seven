@@ -109,6 +109,12 @@ export function createInput(canvas, opts = {}) {
   const push = (action, arg) => state.queue.push({ action, arg });
 
   function setMode(m) { mode = m; }
+  function setView(yaw = 0, pitch = 0) {
+    state.yaw = Number.isFinite(yaw) ? yaw : 0;
+    state.pitch = Math.max(-1.15, Math.min(1.15, Number.isFinite(pitch) ? pitch : 0));
+    state.look.dx = 0;
+    state.look.dy = 0;
+  }
   function setMenuHandlers(navX, navY, confirm, cancel) {
     menuHandlers = { navX, navY, confirm, cancel };
   }
@@ -492,6 +498,7 @@ export function createInput(canvas, opts = {}) {
 
   return {
     setMode,
+    setView,
     debugLook,
     setMenuHandlers,
     setTouchInteractHeld,

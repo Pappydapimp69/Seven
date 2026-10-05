@@ -112,32 +112,42 @@ html, body {
   z-index: 20;
   display: grid;
   place-items: center;
-  padding: 1.5rem;
-  background: radial-gradient(ellipse at 50% 30%, rgba(14, 22, 32, 0.9), rgba(4, 7, 11, 0.97));
+  padding: 1.25rem;
+  background: linear-gradient(180deg, rgba(13, 18, 24, 0.96), rgba(5, 8, 12, 0.98));
   overflow-y: auto;
 }
 
 .title-card {
-  width: min(42.5rem, 100%);
-  background: var(--panel);
+  width: min(42rem, 100%);
+  background: rgba(8, 12, 18, 0.86);
   border: 1px solid var(--edge);
-  border-radius: 0.875rem;
-  padding: 1.75rem;
-  backdrop-filter: blur(0.375rem);
+  border-radius: 0.5rem;
+  padding: clamp(1rem, 2.5vw, 1.5rem);
+  backdrop-filter: blur(0.5rem);
+  box-shadow: 0 1.5rem 4rem rgba(0, 0, 0, 0.34);
 }
 .title-card.narrow { width: min(26.25rem, 100%); }
 
 .logo {
   margin: 0 0 0.375rem;
-  font-size: clamp(2.375rem, 9vw, 4.25rem);
-  letter-spacing: 0.22em;
+  font-size: clamp(2.2rem, 8vw, 3.9rem);
+  letter-spacing: 0.18em;
   font-weight: 300;
+  line-height: 0.95;
 }
 .tagline { color: var(--dim); line-height: 1.55; margin: 0 0 1.375rem; }
 .tagline.small { font-size: 0.8125rem; }
+.title-tagline { max-width: 35rem; margin-bottom: 1rem; }
 
 .row { display: flex; gap: 1.125rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+.title-settings {
+  display: grid;
+  grid-template-columns: minmax(11rem, 1fr) minmax(14rem, 1.2fr);
+  gap: 0.875rem;
+  margin-bottom: 0.875rem;
+}
 .field { flex: 1 1 12.5rem; }
+.menu-field { margin-bottom: 0.875rem; }
 .field-label {
   display: block;
   font-size: 0.8rem;
@@ -157,18 +167,48 @@ html, body {
 }
 input[type="range"] { width: 100%; margin-bottom: 1.125rem; accent-color: var(--cyan); }
 
-.diff-row { display: flex; gap: 0.5rem; }
+.diff-row { display: flex; gap: 0.5rem; align-items: stretch; }
 .diff {
   flex: 1;
   padding: 0.625rem 0.375rem;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.045);
   border: 1px solid var(--edge);
   border-radius: 0.5rem;
   color: var(--dim);
   font: inherit;
   cursor: pointer;
+  min-height: 2.35rem;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, transform 0.16s ease;
 }
+.diff:hover { border-color: rgba(116, 224, 255, 0.42); color: var(--ink); }
 .diff.sel { color: #071018; background: var(--cyan); border-color: var(--cyan); }
+.team-row { align-items: stretch; }
+.team-row .diff {
+  min-height: 4.45rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0.25rem;
+  padding: 0.7rem 0.75rem;
+  text-align: left;
+}
+.option-title {
+  display: block;
+  font-size: 0.92rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.option-detail {
+  display: block;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #7d8999;
+}
+.diff.sel .option-title,
+.diff.sel .option-detail { color: #071018; }
 
 /* The keyboard/gamepad focus ring for the row/col menu grid (see menuNavX/Y in
    main.js). Applied to whichever element currently has grid focus, on top of
@@ -218,41 +258,91 @@ input[type="range"] { width: 100%; margin-bottom: 1.125rem; accent-color: var(--
 
 .big-btn {
   width: 100%;
-  padding: 0.9375rem;
-  margin-top: 0.25rem;
+  padding: 0.875rem 1rem;
+  margin-top: 0;
   font: inherit;
-  font-size: 1.0625rem;
-  letter-spacing: 0.12em;
+  font-size: 1rem;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: #06111a;
   background: var(--cyan);
   border: 0;
-  border-radius: 0.625rem;
+  border-radius: 0.5rem;
   cursor: pointer;
+  min-height: 3.15rem;
+  box-shadow: 0 0.75rem 2.25rem rgba(116, 224, 255, 0.12);
 }
 .big-btn:hover { filter: brightness(1.08); }
+.title-actions {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+.big-btn.quiet {
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--edge);
+  color: var(--ink);
+  box-shadow: none;
+}
 .text-btn {
   display: block;
   margin: 0.75rem auto 0;
+  padding: 0.35rem 0.25rem;
   background: none;
   border: 0;
   color: var(--dim);
   font: inherit;
-  text-decoration: underline;
+  text-decoration: none;
   cursor: pointer;
 }
+.text-btn:hover { color: var(--ink); }
 
 .howto {
   margin-top: 1.125rem;
-  padding-top: 1.0rem;
+  padding: 1rem;
   border-top: 1px solid var(--edge);
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--edge);
+  border-radius: 0.5rem;
   color: var(--dim);
   font-size: 0.8438rem;
   line-height: 1.6;
+  max-height: min(48vh, 24rem);
+  overflow: auto;
+  scrollbar-color: rgba(140, 168, 200, 0.45) rgba(255, 255, 255, 0.04);
 }
+.howto::-webkit-scrollbar { width: 0.55rem; }
+.howto::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.04); }
+.howto::-webkit-scrollbar-thumb {
+  background: rgba(140, 168, 200, 0.45);
+  border-radius: 0.5rem;
+}
+.howto p:first-child { margin-top: 0; }
+.howto p:last-child { margin-bottom: 0; }
 .howto b { color: var(--ink); font-weight: 600; }
 .howto-keys { color: #6e7a8c; font-size: 0.8rem; }
 .build { margin: 1.25rem 0 0; color: #55606f; font-size: 0.8rem; letter-spacing: 0.1em; }
+
+.final-card h2 {
+  margin: 0 0 0.65rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 400;
+}
+.decision-state {
+  margin: 0 0 1rem;
+  padding: 0.75rem;
+  border: 1px solid rgba(255, 181, 98, 0.25);
+  border-radius: 0.5rem;
+  background: rgba(255, 181, 98, 0.055);
+  color: #d6c2aa;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+.final-actions {
+  display: grid;
+  gap: 0.5rem;
+}
 
 /* ---------- in-run HUD ---------- */
 .hud { position: fixed; inset: 0; z-index: 10; pointer-events: none; }
@@ -562,6 +652,11 @@ body[data-scheme="touch"] .touch-buttons { display: flex; }
 .debrief-foot { color: #5b6675; font-size: 0.8rem; }
 
 @media (max-width: 720px) {
+  .screen { place-items: start center; padding: 0.875rem; }
+  .title-card { padding: 1rem; }
+  .title-settings { grid-template-columns: 1fr; }
+  .diff-row { flex-wrap: wrap; }
+  .team-row .diff { flex-basis: 100%; min-height: 3.6rem; }
   .hud-left { width: 11.875rem; padding: 0.5625rem; top: 3.625rem; left: 0.625rem; }
   .r-role { display: none; }
   .subtitles { bottom: 8.125rem; font-size: 0.8125rem; }
@@ -694,7 +789,6 @@ body[data-coop="2"] .item-bar.p2 { display: flex; }
   margin-bottom: 0.25rem;
 }
 .objective-text { font-size: 0.9rem; color: var(--ink); line-height: 1.4; }
-.big-btn.quiet { background: transparent; border-color: var(--edge); }
 
 /* --- the morning ---------------------------------------------------------
    An account is TEXT the player reads carefully and compares against their own

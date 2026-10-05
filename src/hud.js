@@ -6,12 +6,12 @@
 // the one hallucinating. The only place a real number is ever printed is the
 // debrief, after the run is over.
 
-import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds, believedFireAt } from "./percept.js?v=seven-0.28.2";
-import { canWork, beatAt, holdFraction, PHASE } from "./woods.js?v=seven-0.28.2";
-import { KEYS } from "./keys.js?v=seven-0.28.2";
+import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems, perceivedInventory, chorusEcho, believedKinds, believedFireAt } from "./percept.js?v=seven-0.29.0";
+import { canWork, beatAt, holdFraction, PHASE } from "./woods.js?v=seven-0.29.0";
+import { KEYS } from "./keys.js?v=seven-0.29.0";
 import { reachOf, LOG_RADIUS, PYLON_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, gatherTarget, GATHER_HOLD_TIME, previewCraft, claimedEntryAt, pylonAt,
   mossedAt, FIRE_FUEL_MAX, FIRE_COST, phaseOf, holdTimeFor,
-} from "./state.js?v=seven-0.28.2";
+} from "./state.js?v=seven-0.29.0";
 
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 
@@ -64,6 +64,7 @@ export function createHud(sim, percept, opts = {}) {
     promptFill2: document.getElementById("actionPromptFill2"),
     promptText2: document.getElementById("actionPromptText2"),
     craftHint: document.getElementById("craftHint"),
+    levelPillLabel: document.getElementById("levelPillLabel"),
   };
 
   // Build the roster once; only the read-out text changes per frame.
@@ -453,7 +454,12 @@ export function createHud(sim, percept, opts = {}) {
         (sim.companions[selected] === c ? " selected" : "");
     }
     if (el.selection) el.selection.textContent = sim.companions[selected]?.name || "";
-    if (el.level) el.level.textContent = `${sim.level} / ${sim.campaignLength}`;
+    if (el.level) {
+      if (el.levelPillLabel) el.levelPillLabel.textContent = sim.expedition ? "Area" : "Basin";
+      el.level.textContent = sim.expedition
+        ? `${sim.expedition.area ?? 0} / 7`
+        : `${sim.level} / ${sim.campaignLength}`;
+    }
 
     const logged = sim.monoliths.filter((m) => m.logged).length;
     // The counter shows the LOG's length, not the truth — a false entry looks
@@ -481,14 +487,22 @@ export function createHud(sim, percept, opts = {}) {
     // notification, which is the opposite of the effect.
 
     const left = Math.max(0, TIME_LIMIT - sim.time);
-    el.clock.textContent = `${String(Math.floor(left / 60)).padStart(2, "0")}:${String(Math.floor(left % 60)).padStart(2, "0")}`;
-    el.clock.classList.toggle("low", left < 120);
+    if (sim.expedition) {
+      el.clock.textContent = `${sim.expedition.daylight}h`;
+      el.clock.classList.toggle("low", sim.expedition.daylight <= 2);
+    } else {
+      el.clock.textContent = `${String(Math.floor(left / 60)).padStart(2, "0")}:${String(Math.floor(left % 60)).padStart(2, "0")}`;
+      el.clock.classList.toggle("low", left < 120);
+    }
     // WHICH DAY, AND WHETHER IT IS DARK. Not a meter — a day number and a word,
     // the same way the roster says "falling behind" rather than 41/100. The
     // camp and the woods run no cycle, and phaseOf is only consulted when one
     // is actually running.
     if (el.dayLabel) {
-      if (sim.noDrain || sim.woods) {
+      if (sim.expedition) {
+        el.dayLabel.textContent = `DAY ${sim.expedition.day}`;
+        el.dayLabel.classList.remove("night");
+      } else if (sim.noDrain || sim.woods) {
         // NO CYCLE HERE, so say so rather than saying nothing. Skipping the
         // write left the element holding the PREVIOUS run's value: play a
         // basin into the dark, quit to the title, start the tutorial, and the
@@ -576,6 +590,12 @@ export function renderDebrief(container, report) {
   const VERDICTS = {
     extracted: "SURVEY COMPLETE",
     advance: "SURVEY COMPLETE",
+    throughWoods: "THE WOODS END",
+    leftSomeone: "THE WOODS END",
+    sealedWoods: "THE WOODS ARE SEALED",
+    sealedClean: "THE WOODS ARE SEALED",
+    turnedBack: "TURNED BACK FOR THEM",
+    vanishedBack: "LOST ON THE RETURN",
     dissolved: "THE PARTY DISSOLVED",
     discredited: "THE RECORD IS REJECTED",
     darkness: "DARK",
@@ -596,10 +616,17 @@ export function renderDebrief(container, report) {
   const craftNote = report.falseCrafts
     ? `<p class="debrief-warn">${report.falseCrafts} of the ${report.itemsCrafted} thing${report.itemsCrafted === 1 ? "" : "s"} you made ${report.falseCrafts === 1 ? "was" : "were"} never there.</p>`
     : "";
+  const expeditionLine = report.expedition
+    ? `Day ${report.expedition.day} · area ${report.expedition.area}/7 · team ${report.sevenTeam || "trail"} · missing ${report.expedition.missing} · recovered ${report.expedition.recovered} · left ${report.expedition.abandoned}`
+    : `Basin ${report.level} of ${report.campaignLength} · ${report.logged} of ${report.total} markers really surveyed`;
+  const decisionNote = report.finalDecision
+    ? `<p class="debrief-warn">Final choice: ${report.finalDecision.choice}. Missing ${report.finalDecision.missing}, recovered ${report.finalDecision.recovered}, left behind ${report.finalDecision.abandoned}.</p>`
+    : "";
   container.innerHTML = `
     <div class="debrief-card">
       <h2>${verdict}</h2>
-      <p class="debrief-sub">Basin ${report.level} of ${report.campaignLength} · ${report.logged} of ${report.total} markers really surveyed · ${Math.floor(report.time / 60)}m ${report.time % 60}s</p>
+      <p class="debrief-sub">${expeditionLine} · ${Math.floor(report.time / 60)}m ${report.time % 60}s</p>
+      ${decisionNote}
       ${discreditNote}
       ${falseNote}
       ${craftNote}
@@ -615,6 +642,6 @@ export function renderDebrief(container, report) {
           .join("")}
       </table>
       <p class="debrief-foot">Doses used ${report.doseUses} · recoveries ${report.recoveries} · items used ${report.itemsUsed} · crafted ${report.itemsCrafted} · phantom items ${report.phantomItemsUsed} · called out ${report.phantomsRevealed} · wood left ${report.wood} · stone left ${report.stone}</p>
-      <button id="againBtn" class="big-btn" data-row="0" data-col="0">New basin</button>
+      <button id="againBtn" class="big-btn" data-row="0" data-col="0">Back to title</button>
     </div>`;
 }

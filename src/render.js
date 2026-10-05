@@ -6,11 +6,11 @@
 // list as the real ones.
 
 import * as THREE from "../lib/three.module.js";
-import { CELL, cellToWorld, gridOf } from "./world.js?v=seven-0.28.2";
-import { nightFactor } from "./state.js?v=seven-0.28.2";
-import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, perceivedSelected, distortion } from "./percept.js?v=seven-0.28.2";
-import { PYLON_RADIUS } from "./state.js?v=seven-0.28.2";
-import { WEATHER_LOOK, dayMarks } from "./woods.js?v=seven-0.28.2";
+import { CELL, cellToWorld, gridOf } from "./world.js?v=seven-0.29.0";
+import { nightFactor } from "./state.js?v=seven-0.29.0";
+import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, perceivedSelected, distortion } from "./percept.js?v=seven-0.29.0";
+import { PYLON_RADIUS } from "./state.js?v=seven-0.29.0";
+import { WEATHER_LOOK, dayMarks } from "./woods.js?v=seven-0.29.0";
 
 const PALETTE = {
   sky: 0x0a0f16,
@@ -1371,7 +1371,7 @@ export function createRenderer(canvas, sim) {
     }
 
     // The trainer's lantern. Camp only — `sim.trainer` exists nowhere else.
-    ensureTrainerMark(sim.trainer || null);
+    ensureTrainerMark(sim.trainer && !sim.reachedTrainer ? sim.trainer : null);
 
     // The day's worksites. Camp only, and only once a day has been started —
     // `world.sites` exists nowhere else and `sim.woods` gates the lighting.

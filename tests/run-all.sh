@@ -47,6 +47,14 @@ echo "== fire (the structure the player adds, and the count that lies) =="
 node tests/fire.mjs
 echo
 
+echo "== expedition (one woods, many days) =="
+node tests/expedition.mjs
+echo
+
+echo "== seven (team loadouts and final choices) =="
+node tests/seven.mjs
+echo
+
 echo "== triggers (does the index fire on the mistakes it was built from?) =="
 node tests/triggers.mjs
 echo
