@@ -69,7 +69,7 @@ const DEADZONE = 0.18;
 // (x and y comparably sized) is untouched and only a near-cardinal push gets
 // cleaned up. That is exactly the case the player is complaining about and
 // exactly the case a square deadzone got wrong in the other direction.
-const AXIS_EPSILON = 0.16; // a component below 16% of the dominant one is drift
+const AXIS_EPSILON = 0.36; // below 36% of the dominant one (~20 degrees off an axis) is drift — 0.16 left an 18-degree lean on a real pad
 function stickVector(ax, ay) {
   const mag = Math.hypot(ax, ay);
   if (mag < DEADZONE) return { x: 0, y: 0 };
