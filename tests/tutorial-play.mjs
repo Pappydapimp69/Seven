@@ -193,6 +193,13 @@ await page.waitForFunction(() => !!window.__seven, null, { timeout: 20000 });
     M.act(M.ACTIONS.SURVEY);
     M.advance(0.1);
     note("ground", done().includes("ground"));
+    // The carried items are props: use, drop and give would strand the next
+    // step with nothing to finish it. Every one must be refused.
+    go(2);
+    const before = sim.inventory.length;
+    for (const act of [M.ACTIONS.USE_ITEM, M.ACTIONS.DROP_ITEM, M.ACTIONS.OFFER_ITEM]) { M.act(act); M.advance(0.1); }
+    out.propsBefore = before;
+    out.propsAfter = sim.inventory.length;
 
     // ---- 3: craft ----------------------------------------------------------
     go(2);
@@ -203,6 +210,11 @@ await page.waitForFunction(() => !!window.__seven, null, { timeout: 20000 });
     M.act(M.ACTIONS.CRAFT);
     M.advance(0.2);
     note("craft", done().includes("craft"));
+    go(3);
+    const emberBefore = sim.inventory.length;
+    for (const act of [M.ACTIONS.USE_ITEM, M.ACTIONS.DROP_ITEM]) { M.act(act); M.advance(0.1); }
+    out.emberBefore = emberBefore;
+    out.emberAfter = sim.inventory.length;
 
     // ---- 4: hand it to IREN ------------------------------------------------
     go(3);
@@ -286,6 +298,8 @@ await page.waitForFunction(() => !!window.__seven, null, { timeout: 20000 });
   assert(r.itemSpawned, "objective 2 did not spawn its item");
   assert(r.secondSpawned, "objective 3 did not spawn the second ingredient");
   assert(/Pick up/i.test(r.pickPrompt), `objective 2's prompt was "${r.pickPrompt}" — the taught verb is outranked at its own site`);
+  assert(r.propsBefore >= 1 && r.propsAfter === r.propsBefore, `use/drop/give spent a prop item: ${r.propsBefore} held, ${r.propsAfter} after`);
+  assert(r.emberBefore >= 1 && r.emberAfter === r.emberBefore, `use/drop spent the ember before it was handed over: ${r.emberBefore} -> ${r.emberAfter}`);
   assert(r.held === 2, `the player held ${r.held} ingredients at the craft, not 2`);
 
   // The pylon's two beats

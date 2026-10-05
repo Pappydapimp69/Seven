@@ -6,24 +6,24 @@ import {
   possess, release, possessableCompanions, activatePylon, pylonAt,
   callCompanion, clearMoss, mossedAt, feedFire, buildFire, FIRE_COST,
   PARTY_SIZE, DIFFICULTY, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=seven-0.28.0";
-import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.28.0";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.28.0";
+} from "./state.js?v=seven-0.28.1";
+import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.28.1";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.28.1";
 import {
   attachSites, startDay, beatAt, briefFor, canWork, workBeat, fallNight, ask, accuse,
   updateWorkHold, dawnLine, BEATS, PHASE, ASKS_ALLOWED,
-} from "./woods.js?v=seven-0.28.0";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.28.0";
-import { createRenderer } from "./render.js?v=seven-0.28.0";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.28.0";
-import { keyed } from "./keys.js?v=seven-0.28.0";
-import { createInput, ACTIONS } from "./input.js?v=seven-0.28.0";
-import { createAudio } from "./audio.js?v=seven-0.28.0";
-import { createDiag } from "./diag.js?v=seven-0.28.0";
-import { hashSeed, makeRng } from "./rng.js?v=seven-0.28.0";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.28.0";
+} from "./woods.js?v=seven-0.28.1";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.28.1";
+import { createRenderer } from "./render.js?v=seven-0.28.1";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.28.1";
+import { keyed } from "./keys.js?v=seven-0.28.1";
+import { createInput, ACTIONS } from "./input.js?v=seven-0.28.1";
+import { createAudio } from "./audio.js?v=seven-0.28.1";
+import { createDiag } from "./diag.js?v=seven-0.28.1";
+import { hashSeed, makeRng } from "./rng.js?v=seven-0.28.1";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.28.1";
 
-const BUILD = "seven-0.28.0";
+const BUILD = "seven-0.28.1";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -236,6 +236,8 @@ function refreshTitleSave() {
 // else, with its basin post-processed by applyStage. There is no tutorial mode
 // to exit and no second implementation of any verb — the overlay only watches
 // (brain: the-game-prologue#E15).
+// Objectives whose carried items are the lesson's props and must not be spent.
+const ITEM_PROPS = new Set(["ground", "craft", "hands"]);
 let tut = null; // { stage, index, done } while a stage is running; null otherwise
 
 function tutorialProgress() {
@@ -933,6 +935,20 @@ function handleAction(action, arg, player = run.players[0]) {
   const actor = player.eye;
   const percept = player.percept;
   if (sim.status !== "playing") return;
+  // THE WALK IN'S ITEMS ARE PROPS UNTIL THE STEP THAT NEEDS THEM IS DONE. The
+  // flare and tether are consumed by use, dropped by drop and handed away by
+  // give, and the next step needs them (craft needs both, hands needs the
+  // ember). Using one stranded the lesson with nothing left to finish it —
+  // a soft lock no step could recover from. So they are held, not spent.
+  if (tut && ITEM_PROPS.has(tut.stage.id)) {
+    const strands = action === ACTIONS.USE_ITEM || action === ACTIONS.DROP_ITEM ||
+      (action === ACTIONS.OFFER_ITEM && tut.stage.id !== "hands");
+    if (strands && sim.inventory.length) {
+      audio.play("deny");
+      hud.say(tut.stage.id === "hands" ? "Hold on to that — hand it to IREN." : "Hold on to that — the next step needs it.", "warn");
+      return;
+    }
+  }
   // THE WOODS intercepts three keys and nothing else. Placed here rather than
   // inside each case so the interception is in ONE place and readable as a
   // list: the interact key works a beat, check-in asks about yesterday, and
