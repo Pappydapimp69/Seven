@@ -1371,7 +1371,7 @@ export function createRenderer(canvas, sim) {
     }
 
     // The trainer's lantern. Camp only — `sim.trainer` exists nowhere else.
-    ensureTrainerMark(sim.trainer && !sim.reachedTrainer ? sim.trainer : null);
+    ensureTrainerMark(sim.trainer || null);
 
     // The day's worksites. Camp only, and only once a day has been started —
     // `world.sites` exists nowhere else and `sim.woods` gates the lighting.
