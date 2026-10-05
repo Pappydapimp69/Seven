@@ -82,7 +82,8 @@ export function createDiag(canvas) {
       "ZOOM",
       `  devicePixelRatio  ${dpr.toFixed(3)}   (render cap 2)`,
       `  window  inner ${innerWidth} x ${innerHeight}   outer ${outerWidth} x ${outerHeight}`,
-      `  browser zoom ~    ${outerWidth && innerWidth ? ((outerWidth / innerWidth) * 100).toFixed(0) : "?"}%   pinch scale ${vv ? vv.scale.toFixed(2) : "?"}`,
+      `  screen x ratio    ${(screen.width * dpr).toFixed(0)} x ${(screen.height * dpr).toFixed(0)}   (should equal your real resolution; larger = browser zoom is on)`,
+      `  pinch scale ${vv ? vv.scale.toFixed(2) : "?"}`,
       `  fov   horizontal ${d.hfov}   vertical ${d.camera.fov.toFixed(1)}`,
     ].join("\n");
   }
