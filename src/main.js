@@ -6,30 +6,31 @@ import {
   possess, release, possessableCompanions, activatePylon, pylonAt,
   callCompanion, clearMoss, mossedAt, feedFire, buildFire, FIRE_COST,
   PARTY_SIZE, DIFFICULTY, reachOf, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=seven-0.31.0";
-import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.31.0";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.31.0";
-import { generateWorld } from "./world.js?v=seven-0.31.0";
+} from "./state.js?v=seven-0.32.0";
+import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.32.0";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.32.0";
+import { generateWorld } from "./world.js?v=seven-0.32.0";
 import {
   attachSites, startDay, beatAt, briefFor, canWork, workBeat, fallNight, ask, accuse,
   updateWorkHold, dawnLine, BEATS, PHASE, ASKS_ALLOWED,
-} from "./woods.js?v=seven-0.31.0";
+} from "./woods.js?v=seven-0.32.0";
 import {
   createExpedition, spendDaylight, recordFact, sleep, resolveNight, advanceArea,
   recoverMissing, activeMystery, askMystery, accuseMystery, proveMystery, MYSTERY_ASKS_ALLOWED,
-} from "./expedition.js?v=seven-0.31.0";
-import { DEFAULT_TEAM, applyTeamLoadout, teamSkill, finalDecision } from "./seven.js?v=seven-0.31.0";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.31.0";
-import { createRenderer } from "./render.js?v=seven-0.31.0";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.31.0";
-import { keyed } from "./keys.js?v=seven-0.31.0";
-import { createInput, ACTIONS } from "./input.js?v=seven-0.31.0";
-import { createAudio } from "./audio.js?v=seven-0.31.0";
-import { createDiag } from "./diag.js?v=seven-0.31.0";
-import { hashSeed, makeRng } from "./rng.js?v=seven-0.31.0";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.31.0";
+  startKeystoneMorning, advanceKeystoneMorning,
+} from "./expedition.js?v=seven-0.32.0";
+import { DEFAULT_TEAM, applyTeamLoadout, teamSkill, finalDecision } from "./seven.js?v=seven-0.32.0";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.32.0";
+import { createRenderer } from "./render.js?v=seven-0.32.0";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.32.0";
+import { keyed } from "./keys.js?v=seven-0.32.0";
+import { createInput, ACTIONS } from "./input.js?v=seven-0.32.0";
+import { createAudio } from "./audio.js?v=seven-0.32.0";
+import { createDiag } from "./diag.js?v=seven-0.32.0";
+import { hashSeed, makeRng } from "./rng.js?v=seven-0.32.0";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.32.0";
 
-const BUILD = "seven-0.31.0";
+const BUILD = "seven-0.32.0";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -944,6 +945,8 @@ function resolveSevenNight(sim) {
   } else {
     emitToHud(sim, "expedition", "Night passes. In the morning, the trail is still there.");
   }
+  const key = startKeystoneMorning(e, sim.rng, sim.companions.map((c) => c.id), sim.time);
+  if (key) startSevenKeystone(sim, key);
 }
 
 function updateSevenObjective(sim) {
@@ -1130,6 +1133,48 @@ function searchSevenBackTrail(sim) {
   hudSay("The trail has already closed.");
   updateSevenObjective(sim);
   return true;
+}
+
+function startSevenKeystone(sim, key = sim.expedition?.keystone) {
+  if (!key?.active) return;
+  const base = sim.player;
+  for (const c of sim.companions) {
+    const i = key.order.indexOf(c.id);
+    const a = (i >= 0 ? i : c.index) * Math.PI * 0.4 + Math.PI * 0.15;
+    c.x = base.x + Math.cos(a) * 42;
+    c.z = base.z + Math.sin(a) * 42;
+    c.path = null;
+    c.jobSite = null;
+    c.wanderGoal = { x: c.x, z: c.z };
+    c.wanderUntil = sim.time + 60;
+    c.keystoneAway = true;
+  }
+  emitToHud(sim, "expedition", "Morning comes back empty. No one is standing where they slept.");
+  paintSevenMystery(sim);
+}
+
+function updateSevenKeystone(sim) {
+  const key = sim.expedition?.keystone;
+  if (!key?.active) return;
+  const returned = advanceKeystoneMorning(sim.expedition, sim.time);
+  if (!returned.length) return;
+  const ring = 5.5;
+  returned.forEach((id, n) => {
+    const c = sim.companions.find((x) => x.id === id);
+    if (!c) return;
+    const slot = key.returned.indexOf(id);
+    const a = -Math.PI / 2 + slot * 0.55 + n * 0.08;
+    c.x = sim.player.x + Math.cos(a) * ring;
+    c.z = sim.player.z + Math.sin(a) * ring;
+    c.path = null;
+    c.jobSite = null;
+    c.wanderGoal = null;
+    c.wanderUntil = sim.time + 4;
+    c.keystoneAway = false;
+    emitToHud(sim, "expedition", `${c.name} comes back through the trees.`);
+  });
+  if (!key.active) emitToHud(sim, "expedition", "The count is whole again. That is not the same as true.");
+  paintSevenMystery(sim);
 }
 
 function startSeven({ seed, difficulty, team } = {}) {
@@ -1712,6 +1757,7 @@ function step(dt, intent) {
   }
 
   tick(sim, dt, { move, run: intent.run, yaw, interact: intent.interact, others });
+  if (sim.expedition) updateSevenKeystone(sim);
   diag.update({ input: intent.move, move, yaw, x: sim.player.x, z: sim.player.z, camera: renderer.camera, hfov: renderer.hfov });
   // The camp's one place-based objective. Emits once, into the same merged
   // stream the observer reads, so "walk to the trainer" is an ordinary event

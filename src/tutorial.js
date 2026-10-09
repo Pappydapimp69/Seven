@@ -44,7 +44,7 @@
 // (brain: sandbox-resolver-starves-tutorial#E1, and #E2's warning that there is
 // one such candidate PER pipeline layer, so an endpoint-only "the input fired"
 // check would pass while the tutorial never does.)
-import { CELL } from "./world.js?v=seven-0.31.0";
+import { CELL } from "./world.js?v=seven-0.32.0";
 
 export const VERB_PRIORITY = Object.freeze(["pylon", "pickup", "gather", "survey", "strike"]);
 

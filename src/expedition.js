@@ -38,6 +38,7 @@ export function createExpedition({
     missing: [],
     replacements: [],
     mysteries: [],
+    keystone: { happened: false, active: false, day: null, order: [], returned: [], nextAt: 0 },
     night: null,
   };
 }
@@ -190,6 +191,38 @@ export function proveMystery(expedition, nameOf = (x) => x) {
   };
 }
 
+export function startKeystoneMorning(expedition, rng, partyIds, now = 0) {
+  if (!expedition || expedition.day < 3) return null;
+  const k = expedition.keystone || (expedition.keystone = { happened: false, active: false, day: null, order: [], returned: [], nextAt: 0 });
+  if (k.happened || k.active) return null;
+  const ids = (partyIds || []).slice();
+  if (!ids.length) return null;
+  const order = rng?.shuffled ? rng.shuffled(ids) : ids.slice().reverse();
+  expedition.keystone = {
+    happened: true,
+    active: true,
+    day: expedition.day,
+    order,
+    returned: [],
+    nextAt: now + 2,
+  };
+  return expedition.keystone;
+}
+
+export function advanceKeystoneMorning(expedition, now = 0, stepSeconds = 3) {
+  const k = expedition?.keystone;
+  if (!k?.active) return [];
+  const out = [];
+  while (k.active && now >= k.nextAt && k.returned.length < k.order.length) {
+    const id = k.order[k.returned.length];
+    k.returned.push(id);
+    out.push(id);
+    k.nextAt += stepSeconds;
+    if (k.returned.length >= k.order.length) k.active = false;
+  }
+  return out;
+}
+
 export function recoverMissing(expedition, id) {
   const m = (expedition?.missing || []).find((entry) => entry.id === id && !entry.recovered && !entry.abandoned);
   if (!m) return false;
@@ -243,6 +276,7 @@ export function serializeExpedition(expedition) {
     missing: (expedition.missing || []).map((m) => ({ ...m })),
     replacements: (expedition.replacements || []).map((r) => ({ ...r })),
     mysteries: (expedition.mysteries || []).map(packMystery),
+    keystone: packKeystone(expedition.keystone),
     night: expedition.night ? packNight(expedition.night) : null,
     lastSpend: expedition.lastSpend ? { ...expedition.lastSpend } : null,
   };
@@ -264,6 +298,7 @@ export function deserializeExpedition(data) {
     missing: (data.missing || []).map((m) => ({ ...m })),
     replacements: (data.replacements || []).map((r) => ({ ...r })),
     mysteries: (data.mysteries || []).map(unpackMystery),
+    keystone: packKeystone(data.keystone || { happened: false, active: false, day: null, order: [], returned: [], nextAt: 0 }),
     night: data.night ? packNight(data.night) : null,
     lastSpend: data.lastSpend ? { ...data.lastSpend } : null,
   };
@@ -364,6 +399,17 @@ function packMystery(m) {
 
 function unpackMystery(m) {
   return packMystery(m);
+}
+
+function packKeystone(k) {
+  return {
+    happened: !!k?.happened,
+    active: !!k?.active,
+    day: k?.day ?? null,
+    order: (k?.order || []).slice(),
+    returned: (k?.returned || []).slice(),
+    nextAt: k?.nextAt ?? 0,
+  };
 }
 
 function closeCurrentDay(expedition) {

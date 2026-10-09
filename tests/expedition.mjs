@@ -15,6 +15,8 @@ import {
   askMystery,
   accuseMystery,
   proveMystery,
+  startKeystoneMorning,
+  advanceKeystoneMorning,
   recoverMissing,
   advanceArea,
   serializeExpedition,
@@ -146,6 +148,22 @@ check("naming the replacement requires a pylon proof before recovery", () => {
   const badProof = proveMystery(bad, (id) => id);
   assert(!badProof.correct, "wrong proof passed");
   eq(activeMystery(bad), null, "wrong closed case still active");
+});
+
+check("the keystone morning happens once and returns the party one by one", () => {
+  const e = createExpedition({ day: 3 });
+  const k = startKeystoneMorning(e, makeRng(5), PARTY, 100);
+  assert(k?.active, "keystone did not start");
+  eq(k.returned.length, 0, "keystone returned someone immediately");
+  eq(startKeystoneMorning(e, makeRng(6), PARTY, 100), null, "keystone started twice");
+  eq(advanceKeystoneMorning(e, 101).length, 0, "returned before the first beat");
+  const first = advanceKeystoneMorning(e, 102);
+  eq(first.length, 1, "first return count");
+  assert(PARTY.includes(first[0]), "first return is not a party id");
+  const rest = advanceKeystoneMorning(e, 200);
+  eq(rest.length, PARTY.length - 1, "remaining return count");
+  eq(e.keystone.active, false, "keystone still active after everyone returned");
+  eq(JSON.stringify(e.keystone.returned), JSON.stringify(e.keystone.order), "return order drifted");
 });
 
 check("disappearance choice is deterministic from the same state and seed", () => {
