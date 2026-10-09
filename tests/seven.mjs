@@ -2,7 +2,7 @@
 
 import { createRun } from "../src/state.js";
 import { createExpedition } from "../src/expedition.js";
-import { applyTeamLoadout, teamSkill, finalDecision, expeditionSummary } from "../src/seven.js";
+import { applyTeamLoadout, teamSkill, finalDecision, expeditionSummary, finalCount } from "../src/seven.js";
 
 let passed = 0;
 const failures = [];
@@ -41,6 +41,8 @@ check("final choices produce distinct Seven endings", () => {
   eq(leave.status, "won", "leaving should end the run as a completion");
   eq(leave.ending, "leftSomeone", "leaving with somebody unresolved should be named");
   eq(leave.finalDecision.unresolved, 1, "unresolved count was wrong");
+  eq(leave.finalDecision.finalCount.real, 5, "final count did not expose the real count");
+  eq(leave.finalDecision.finalCount.pylons, 6, "final pylon count should be one more than real");
 
   const back = createRun({ seed: 54 });
   back.seven = true;
@@ -68,6 +70,18 @@ check("expedition summary separates recovered, abandoned and unresolved", () => 
   eq(got.recovered, 1, "recovered total wrong");
   eq(got.abandoned, 1, "abandoned total wrong");
   eq(got.unresolved, 1, "unresolved total wrong");
+});
+
+check("the final count names how many are real, not which ones", () => {
+  const e = createExpedition();
+  e.missing.push({ id: "c1", recovered: false, abandoned: false });
+  e.missing.push({ id: "c2", recovered: false, abandoned: true });
+  e.missing.push({ id: "c3", recovered: true, abandoned: false });
+  const count = finalCount(e, 6);
+  eq(count.bodies, 6, "body count wrong");
+  eq(count.real, 4, "real count wrong");
+  eq(count.falseOrLost, 2, "false/lost count wrong");
+  eq(count.pylons, 5, "pylons should be one more than the real count");
 });
 
 if (failures.length) {

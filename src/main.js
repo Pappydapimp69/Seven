@@ -6,31 +6,31 @@ import {
   possess, release, possessableCompanions, activatePylon, pylonAt,
   callCompanion, clearMoss, mossedAt, feedFire, buildFire, FIRE_COST,
   PARTY_SIZE, DIFFICULTY, reachOf, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=seven-0.32.0";
-import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.32.0";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.32.0";
-import { generateWorld } from "./world.js?v=seven-0.32.0";
+} from "./state.js?v=seven-0.33.0";
+import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.33.0";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.33.0";
+import { generateWorld } from "./world.js?v=seven-0.33.0";
 import {
   attachSites, startDay, beatAt, briefFor, canWork, workBeat, fallNight, ask, accuse,
   updateWorkHold, dawnLine, BEATS, PHASE, ASKS_ALLOWED,
-} from "./woods.js?v=seven-0.32.0";
+} from "./woods.js?v=seven-0.33.0";
 import {
   createExpedition, spendDaylight, recordFact, sleep, resolveNight, advanceArea,
   recoverMissing, activeMystery, askMystery, accuseMystery, proveMystery, MYSTERY_ASKS_ALLOWED,
   startKeystoneMorning, advanceKeystoneMorning,
-} from "./expedition.js?v=seven-0.32.0";
-import { DEFAULT_TEAM, applyTeamLoadout, teamSkill, finalDecision } from "./seven.js?v=seven-0.32.0";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.32.0";
-import { createRenderer } from "./render.js?v=seven-0.32.0";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.32.0";
-import { keyed } from "./keys.js?v=seven-0.32.0";
-import { createInput, ACTIONS } from "./input.js?v=seven-0.32.0";
-import { createAudio } from "./audio.js?v=seven-0.32.0";
-import { createDiag } from "./diag.js?v=seven-0.32.0";
-import { hashSeed, makeRng } from "./rng.js?v=seven-0.32.0";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.32.0";
+} from "./expedition.js?v=seven-0.33.0";
+import { DEFAULT_TEAM, applyTeamLoadout, teamSkill, finalDecision, finalCount } from "./seven.js?v=seven-0.33.0";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.33.0";
+import { createRenderer } from "./render.js?v=seven-0.33.0";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.33.0";
+import { keyed } from "./keys.js?v=seven-0.33.0";
+import { createInput, ACTIONS } from "./input.js?v=seven-0.33.0";
+import { createAudio } from "./audio.js?v=seven-0.33.0";
+import { createDiag } from "./diag.js?v=seven-0.33.0";
+import { hashSeed, makeRng } from "./rng.js?v=seven-0.33.0";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.33.0";
 
-const BUILD = "seven-0.32.0";
+const BUILD = "seven-0.33.0";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -1203,15 +1203,16 @@ function openFinalDecision(sim = run?.sim) {
   finalUi = true;
   const open = sim.expedition.missing.filter((m) => !m.recovered && !m.abandoned).length;
   const abandoned = sim.expedition.missing.filter((m) => m.abandoned).length;
+  const count = finalCount(sim.expedition, sim.party?.length || 6);
   el("finalHead").textContent = "The edge of the woods";
   el("finalBody").textContent = open || abandoned
-    ? "There is open air ahead, and there is still a question behind you."
-    : "There is open air ahead. For once, nobody is missing from the count.";
+    ? `There is open air ahead. ${count.pylons} pylons stand for ${count.bodies} bodies.`
+    : `There is open air ahead. ${count.pylons} pylons stand for ${count.bodies} bodies. One is extra.`;
   el("finalState").textContent = open
-    ? `${open} still out there behind you.`
+    ? `${open} still out there behind you. The count says ${count.real} real. It does not say which.`
     : abandoned
-      ? `${abandoned} left beyond the route.`
-      : "Everyone who can answer is here.";
+      ? `${abandoned} left beyond the route. The count says ${count.real} real. It does not say which.`
+      : `The count says ${count.real} real. It does not say which.`;
   layer.classList.remove("hidden");
   screens("finalLayer");
 }

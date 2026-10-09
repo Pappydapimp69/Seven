@@ -69,9 +69,22 @@ export function expeditionSummary(expedition) {
   };
 }
 
+export function finalCount(expedition, bodies = 6) {
+  const summary = expeditionSummary(expedition);
+  const notRealHere = summary.unresolved + summary.abandoned;
+  const real = Math.max(1, bodies - notRealHere);
+  return {
+    bodies,
+    real,
+    falseOrLost: Math.max(0, bodies - real),
+    pylons: real + 1,
+  };
+}
+
 export function finalDecision(sim, choice) {
   const summary = expeditionSummary(sim?.expedition);
   if (!sim || !sim.expedition) return null;
+  const count = finalCount(sim.expedition, sim.party?.length || 6);
   const unresolved = summary.unresolved;
   const abandoned = summary.abandoned;
   if (choice === "return") {
@@ -84,6 +97,6 @@ export function finalDecision(sim, choice) {
     sim.status = "won";
     sim.ending = unresolved || abandoned ? "leftSomeone" : "throughWoods";
   }
-  sim.finalDecision = { choice, ...summary };
+  sim.finalDecision = { choice, ...summary, finalCount: count };
   return sim.finalDecision;
 }
