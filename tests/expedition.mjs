@@ -5,11 +5,15 @@
 import {
   DEFAULT_DAYLIGHT,
   EXPEDITION_PHASE,
+  MYSTERY_ASKS_ALLOWED,
   createExpedition,
   spendDaylight,
   recordFact,
   sleep,
   resolveNight,
+  activeMystery,
+  askMystery,
+  accuseMystery,
   recoverMissing,
   advanceArea,
   serializeExpedition,
@@ -95,6 +99,47 @@ check("later nights make someone missing and leave a competent replacement at th
   eq(e.missing.length, 1, "missing count");
   eq(e.replacements.length, 1, "replacement count");
   eq(e.day, 3, "next day");
+});
+
+check("a disappearance opens a multi-day mystery with stable accounts", () => {
+  const e = createExpedition({ day: 2, replacementChance: 1 });
+  recordFact(e, { kind: "gather", actor: "c3", object: "wood", withWhom: ["c2"] });
+  recordFact(e, { kind: "pylon", actor: "c2", object: "P1", withWhom: ["c4"] });
+  sleep(e);
+  const r = resolveNight(e, makeRng(11), PARTY);
+  const m = activeMystery(e);
+  assert(r && m, "no active mystery");
+  eq(m.suspect, r.missing.id, "suspect follows missing person");
+  const nameOf = (id) => id.toUpperCase();
+  const first = askMystery(e, m.suspect, nameOf);
+  const again = askMystery(e, m.suspect, nameOf);
+  assert(first && again, "ask failed");
+  eq(again.repeat, true, "repeat flag");
+  eq(JSON.stringify(first.lines), JSON.stringify(again.lines), "stable answer");
+  eq(m.asksLeft, MYSTERY_ASKS_ALLOWED - 1, "repeat spent daylight");
+});
+
+check("naming the replacement unlocks recovery and wrong naming closes the case", () => {
+  const good = createExpedition({ day: 2, area: 2, replacementChance: 1 });
+  recordFact(good, { kind: "gather", actor: "c1", object: "wood", withWhom: ["c4"] });
+  sleep(good);
+  const r = resolveNight(good, makeRng(17), PARTY);
+  const m = activeMystery(good);
+  const verdict = accuseMystery(good, m.suspect, (id) => id);
+  assert(verdict.correct, "correct accusation failed");
+  eq(activeMystery(good).searchReady, true, "search not unlocked");
+  assert(recoverMissing(good, r.missing.id), "recovery failed");
+  eq(activeMystery(good), null, "recovered mystery still active");
+
+  const bad = createExpedition({ day: 2, replacementChance: 1 });
+  recordFact(bad, { kind: "gather", actor: "c1", object: "wood", withWhom: ["c4"] });
+  sleep(bad);
+  resolveNight(bad, makeRng(17), PARTY);
+  const bm = activeMystery(bad);
+  const wrong = PARTY.find((id) => id !== bm.suspect);
+  const badVerdict = accuseMystery(bad, wrong, (id) => id);
+  assert(!badVerdict.correct, "wrong accusation passed");
+  eq(activeMystery(bad), null, "wrong closed case still active");
 });
 
 check("disappearance choice is deterministic from the same state and seed", () => {

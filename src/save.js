@@ -17,11 +17,11 @@
 //     options (dbh#E4, wrong-sky#E2). And an ended run is never saved, so a
 //     "Resume" can't drop you back onto the frame you already lost.
 
-import { createRun } from "./state.js?v=seven-0.29.0";
-import { generateWorld } from "./world.js?v=seven-0.29.0";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.29.0";
-import { attachSites, serializeWoods, deserializeWoods } from "./woods.js?v=seven-0.29.0";
-import { serializeExpedition, deserializeExpedition } from "./expedition.js?v=seven-0.29.0";
+import { createRun } from "./state.js?v=seven-0.30.0";
+import { generateWorld } from "./world.js?v=seven-0.30.0";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.30.0";
+import { attachSites, serializeWoods, deserializeWoods } from "./woods.js?v=seven-0.30.0";
+import { serializeExpedition, deserializeExpedition } from "./expedition.js?v=seven-0.30.0";
 
 // SEVEN'S OWN KEYS, and this is not cosmetic. GitHub Pages serves every project
 // of one account from ONE origin — `pappydapimp69.github.io` — so /mirage/ and
@@ -72,7 +72,9 @@ export const SAVE_KEY = "seven:run";
 //
 // v7: Seven's merged woods crossing. The map is the dense world variant, and
 // the expedition record carries day/area/missing-person branch state.
-export const SAVE_VERSION = 7;
+// v8: Seven disappearances became playable mysteries: asks, accounts,
+// accusations, and search-ready recovery state now ride inside expedition.
+export const SAVE_VERSION = 8;
 
 const store = () => (typeof localStorage === "undefined" ? null : localStorage);
 

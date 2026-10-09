@@ -6,29 +6,30 @@ import {
   possess, release, possessableCompanions, activatePylon, pylonAt,
   callCompanion, clearMoss, mossedAt, feedFire, buildFire, FIRE_COST,
   PARTY_SIZE, DIFFICULTY, reachOf, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=seven-0.29.0";
-import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.29.0";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.29.0";
-import { generateWorld } from "./world.js?v=seven-0.29.0";
+} from "./state.js?v=seven-0.30.0";
+import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.30.0";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.30.0";
+import { generateWorld } from "./world.js?v=seven-0.30.0";
 import {
   attachSites, startDay, beatAt, briefFor, canWork, workBeat, fallNight, ask, accuse,
   updateWorkHold, dawnLine, BEATS, PHASE, ASKS_ALLOWED,
-} from "./woods.js?v=seven-0.29.0";
+} from "./woods.js?v=seven-0.30.0";
 import {
   createExpedition, spendDaylight, recordFact, sleep, resolveNight, advanceArea,
-} from "./expedition.js?v=seven-0.29.0";
-import { DEFAULT_TEAM, applyTeamLoadout, teamSkill, finalDecision } from "./seven.js?v=seven-0.29.0";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.29.0";
-import { createRenderer } from "./render.js?v=seven-0.29.0";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.29.0";
-import { keyed } from "./keys.js?v=seven-0.29.0";
-import { createInput, ACTIONS } from "./input.js?v=seven-0.29.0";
-import { createAudio } from "./audio.js?v=seven-0.29.0";
-import { createDiag } from "./diag.js?v=seven-0.29.0";
-import { hashSeed, makeRng } from "./rng.js?v=seven-0.29.0";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.29.0";
+  recoverMissing, activeMystery, askMystery, accuseMystery, MYSTERY_ASKS_ALLOWED,
+} from "./expedition.js?v=seven-0.30.0";
+import { DEFAULT_TEAM, applyTeamLoadout, teamSkill, finalDecision } from "./seven.js?v=seven-0.30.0";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.30.0";
+import { createRenderer } from "./render.js?v=seven-0.30.0";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.30.0";
+import { keyed } from "./keys.js?v=seven-0.30.0";
+import { createInput, ACTIONS } from "./input.js?v=seven-0.30.0";
+import { createAudio } from "./audio.js?v=seven-0.30.0";
+import { createDiag } from "./diag.js?v=seven-0.30.0";
+import { hashSeed, makeRng } from "./rng.js?v=seven-0.30.0";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.30.0";
 
-const BUILD = "seven-0.29.0";
+const BUILD = "seven-0.30.0";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -581,6 +582,8 @@ function openAccuse(sim) {
   if (!w || w.phase !== PHASE.MORNING) return;
   const row = el("accuseRow");
   row.innerHTML = "";
+  el("accusePanel").querySelector(".woods-who").textContent = "One of them was not here yesterday.";
+  el("accusePanel").querySelector(".woods-sub").textContent = "Name them. You get one answer, and it is the last thing that happens.";
   sim.companions.forEach((c, i) => {
     const b = document.createElement("button");
     b.className = "diff";
@@ -597,6 +600,8 @@ function woodsAccuse(sim, id) {
   const w = sim.woods;
   const v = accuse(sim, w, id);
   if (!v) return;
+  el("verdictAgain").classList.remove("hidden");
+  el("verdictDone").textContent = "Back to the trailhead";
   el("verdictHead").textContent = v.correct ? "You were right." : "You were wrong.";
   el("verdictHead").className = `woods-who ${v.correct ? "woods-right" : "woods-wrong"}`;
   el("verdictBody").textContent = v.correct
@@ -683,7 +688,7 @@ function enterObjective(index, sim = run.sim) {
 }
 
 /**
- * The objective banner. Text may carry {key} tokens (keys.js); they are filled
+ * The objective banner. Text may carry button tokens (keys.js); they are filled
  * for the controller in use NOW, and the raw text is kept so a controller
  * change can repaint it.
  */
@@ -935,8 +940,10 @@ function resolveSevenNight(sim) {
   if (gone && e.missing.length > before) {
     const c = sim.companions.find((x) => x.id === gone.missing.id);
     if (c) c.replacedDay = e.day - 1;
+    emitToHud(sim, "expedition", "Night passes. In the morning, the count is right and the day is not.");
+  } else {
+    emitToHud(sim, "expedition", "Night passes. In the morning, the trail is still there.");
   }
-  emitToHud(sim, "expedition", "Night passes. In the morning, the trail is still there.");
 }
 
 function updateSevenObjective(sim) {
@@ -945,10 +952,17 @@ function updateSevenObjective(sim) {
   const route = sevenRoute(sim);
   const pct = Math.round(route.progress * 100);
   const missing = e.missing.filter((m) => !m.recovered && !m.abandoned).length;
+  const mystery = activeMystery(e);
+  const mysteryLine = mystery
+    ? mystery.searchReady
+      ? " You named the one who came back wrong. Press {act} to search the back trail."
+      : ` Ask the party about day ${mystery.day} with {checkin}; ${mystery.asksLeft} question${mystery.asksLeft === 1 ? "" : "s"} left. Press {name} to name somebody.`
+    : "";
   setObjective(
     `Day ${e.day}  Area ${e.area}/${SEVEN_AREAS}`,
     `Make it through the woods. Progress ${pct}%. Light left: ${e.daylight}h.` +
       (missing ? " Someone is still out there behind you." : "") +
+      mysteryLine +
       " Deadfalls slow the route; pylons and supplies buy enough clarity to keep going.",
   );
 }
@@ -962,6 +976,7 @@ function updateSevenProgress(sim) {
     const abandoned = advanceArea(e, gained);
     const travelCost = Math.max(0.25, gained * (1 - Math.min(0.45, teamSkill(sim, "scout") * 0.08)));
     spendSevenDaylight(sim, Number(travelCost.toFixed(2)), "travel");
+    recordFact(e, { kind: "trail", actor: "you", object: `area ${e.area}`, t: sim.time });
     if (abandoned.length) emitToHud(sim, "expedition", "The old trail closes behind you.");
     else emitToHud(sim, "expedition", `The party pushes into area ${e.area}.`);
   }
@@ -1002,6 +1017,98 @@ function recordSevenEvents(sim, events) {
     }
   }
   resolveSevenNight(sim);
+}
+
+function nameOfSeven(sim, id) {
+  if (id === "you") return "You";
+  return sim.companions.find((c) => c.id === id)?.name || id;
+}
+
+function paintSevenMystery(sim) {
+  const e = sim.expedition;
+  const m = activeMystery(e);
+  if (!m) { updateSevenObjective(sim); return; }
+  const asked = m.asked.map((id) => nameOfSeven(sim, id)).join(", ");
+  setObjective(
+    "The morning after",
+    m.searchReady
+      ? `${nameOfSeven(sim, m.suspect)} is still out there. Press {act} to search the back trail.`
+      : `Ask about day ${m.day} with {checkin}. ${m.asksLeft} of ${MYSTERY_ASKS_ALLOWED} left.` +
+        (asked ? ` Already asked: ${asked}.` : "") +
+        " Press {name} to name who came back wrong.",
+  );
+}
+
+function sevenAsk(sim, id) {
+  const e = sim.expedition;
+  const acc = askMystery(e, id, (who) => nameOfSeven(sim, who));
+  if (!acc) {
+    hudSay("No more daylight for questions.");
+    return;
+  }
+  if (!acc.repeat) spendSevenDaylight(sim, 1, "ask");
+  showAccount(acc, { asksLeft: activeMystery(e)?.asksLeft ?? 0 });
+  paintSevenMystery(sim);
+  resolveSevenNight(sim);
+}
+
+function openSevenAccuse(sim) {
+  const m = activeMystery(sim.expedition);
+  if (!m || m.accused) return;
+  const row = el("accuseRow");
+  row.innerHTML = "";
+  sim.companions.forEach((c, i) => {
+    const b = document.createElement("button");
+    b.className = "diff";
+    b.textContent = c.name;
+    b.dataset.row = "0";
+    b.dataset.col = String(i);
+    b.addEventListener("click", () => sevenAccuse(sim, c.id));
+    row.appendChild(b);
+  });
+  el("accusePanel").querySelector(".woods-who").textContent = "One of them came back wrong.";
+  el("accusePanel").querySelector(".woods-sub").textContent = "Name them. If you are right, you can search the back trail.";
+  openWoodsPanel("accusePanel");
+}
+
+function sevenAccuse(sim, id) {
+  const v = accuseMystery(sim.expedition, id, (who) => nameOfSeven(sim, who));
+  if (!v) return;
+  el("verdictHead").textContent = v.correct ? "You found the break." : "That story holds.";
+  el("verdictHead").className = `woods-who ${v.correct ? "woods-right" : "woods-wrong"}`;
+  el("verdictBody").textContent = v.correct
+    ? `${v.taken} went out in the night. What came back can answer to the name, but not to the day.`
+    : `${v.accused} was in the day cleanly. Whoever is missing is still behind you.`;
+  el("verdictTell").textContent = v.tell;
+  el("verdictCost").textContent = v.correct
+    ? "Press survey after you step away to search for the original."
+    : "The daylight is gone from that question. The route still has to be walked.";
+  el("verdictTally").textContent = "";
+  el("verdictAgain").classList.add("hidden");
+  el("verdictDone").textContent = "Back to the fire";
+  openWoodsPanel("verdictPanel");
+  paintSevenMystery(sim);
+}
+
+function searchSevenBackTrail(sim) {
+  const e = sim.expedition;
+  const m = activeMystery(e);
+  if (!m?.searchReady) return false;
+  const skill = teamSkill(sim, "signal") * 0.2 + teamSkill(sim, "mend") * 0.15;
+  const cost = Math.max(1, Number((3 - skill).toFixed(2)));
+  spendSevenDaylight(sim, cost, "search");
+  if (recoverMissing(e, m.suspect)) {
+    recordFact(e, { kind: "recovered", actor: "you", object: m.suspect, t: sim.time });
+    emitToHud(sim, "expedition", `${nameOfSeven(sim, m.suspect)} answers from the back trail. You bring them home.`);
+    audio.play("recover");
+    updateSevenObjective(sim);
+    resolveSevenNight(sim);
+    return true;
+  }
+  audio.play("deny");
+  hudSay("The trail has already closed.");
+  updateSevenObjective(sim);
+  return true;
 }
 
 function startSeven({ seed, difficulty, team } = {}) {
@@ -1152,6 +1259,25 @@ function handleAction(action, arg, player = run.players[0]) {
       if (action === ACTIONS.SURVEY && woodsUi) { closeWoodsPanel(); return; }
     }
     if (sim.woods.phase === PHASE.VERDICT && action !== ACTIONS.PAUSE) return;
+  }
+
+  if (sim.expedition) {
+    const mystery = activeMystery(sim.expedition);
+    if (woodsUi && action === ACTIONS.SURVEY) { closeWoodsPanel(); return; }
+    if (mystery?.searchReady && action === ACTIONS.SURVEY) {
+      searchSevenBackTrail(sim);
+      return;
+    }
+    if (mystery && !mystery.accused && action === ACTIONS.CHECK_IN) {
+      if (typeof arg === "number") player.selected = arg;
+      const target = sim.companions[player.selected];
+      if (target) sevenAsk(sim, target.id);
+      return;
+    }
+    if (mystery && !mystery.accused && action === ACTIONS.OFFER_ITEM) {
+      openSevenAccuse(sim);
+      return;
+    }
   }
 
   switch (action) {
@@ -1834,6 +1960,11 @@ function boot() {
   });
   el("verdictDone")?.addEventListener("click", () => {
     closeWoodsPanel();
+    if (run?.sim?.expedition && !run.sim.woods) {
+      paintSevenMystery(run.sim);
+      screens("hudLayer");
+      return;
+    }
     run = null;
     paused = false;
     setObjective(null);
