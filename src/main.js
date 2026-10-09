@@ -6,31 +6,31 @@ import {
   possess, release, possessableCompanions, activatePylon, pylonAt,
   callCompanion, clearMoss, mossedAt, feedFire, buildFire, FIRE_COST,
   PARTY_SIZE, DIFFICULTY, reachOf, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=seven-0.33.0";
-import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.33.0";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.33.0";
-import { generateWorld } from "./world.js?v=seven-0.33.0";
+} from "./state.js?v=seven-0.34.0";
+import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.34.0";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.34.0";
+import { generateWorld } from "./world.js?v=seven-0.34.0";
 import {
   attachSites, startDay, beatAt, briefFor, canWork, workBeat, fallNight, ask, accuse,
   updateWorkHold, dawnLine, BEATS, PHASE, ASKS_ALLOWED,
-} from "./woods.js?v=seven-0.33.0";
+} from "./woods.js?v=seven-0.34.0";
 import {
   createExpedition, spendDaylight, recordFact, sleep, resolveNight, advanceArea,
   recoverMissing, activeMystery, askMystery, accuseMystery, proveMystery, MYSTERY_ASKS_ALLOWED,
   startKeystoneMorning, advanceKeystoneMorning,
-} from "./expedition.js?v=seven-0.33.0";
-import { DEFAULT_TEAM, applyTeamLoadout, teamSkill, finalDecision, finalCount } from "./seven.js?v=seven-0.33.0";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.33.0";
-import { createRenderer } from "./render.js?v=seven-0.33.0";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.33.0";
-import { keyed } from "./keys.js?v=seven-0.33.0";
-import { createInput, ACTIONS } from "./input.js?v=seven-0.33.0";
-import { createAudio } from "./audio.js?v=seven-0.33.0";
-import { createDiag } from "./diag.js?v=seven-0.33.0";
-import { hashSeed, makeRng } from "./rng.js?v=seven-0.33.0";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.33.0";
+} from "./expedition.js?v=seven-0.34.0";
+import { DEFAULT_TEAM, applyTeamLoadout, teamSkill, finalDecision, finalCount } from "./seven.js?v=seven-0.34.0";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.34.0";
+import { createRenderer } from "./render.js?v=seven-0.34.0";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.34.0";
+import { keyed } from "./keys.js?v=seven-0.34.0";
+import { createInput, ACTIONS } from "./input.js?v=seven-0.34.0";
+import { createAudio } from "./audio.js?v=seven-0.34.0";
+import { createDiag } from "./diag.js?v=seven-0.34.0";
+import { hashSeed, makeRng } from "./rng.js?v=seven-0.34.0";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.34.0";
 
-const BUILD = "seven-0.33.0";
+const BUILD = "seven-0.34.0";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -73,6 +73,7 @@ const LAYERS = ["title", "hudLayer", "pauseLayer", "debriefLayer", "finalLayer"]
 function screens(show) {
   for (const id of LAYERS) el(id).classList.toggle("hidden", id !== show);
   input.setMode(show === "hudLayer" ? "game" : "menu");
+  if (show !== "hudLayer") document.body.dataset.runKind = "";
   // Before focus is seated, so the grid is already its final shape: showing or
   // hiding Resume changes which rows exist.
   if (show === "title") { refreshTitleSave(); refreshLearnLabel(); }
@@ -815,6 +816,7 @@ function mountRun(sim, openingLine) {
   paused = false;
   whisperTimer = 0;
   run = { sim, percept, renderer, hud, players: [makeLocalPlayer(0, sim.player, percept)] };
+  document.body.dataset.runKind = sim.expedition ? "seven" : sim.woods ? "woods" : sim.trainer ? "training" : "basin";
   input.setView(sim.player.yaw || 0, 0);
   hud.setHints(input.activeScheme);
   hud.say(openingLine, "warn");
