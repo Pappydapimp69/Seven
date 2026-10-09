@@ -165,13 +165,25 @@ export function accuseMystery(expedition, id, nameOf = (x) => x) {
   const m = activeMystery(expedition);
   if (!m || !id || m.accused) return null;
   m.accused = id;
-  m.correct = id === m.suspect;
+  m.proofPending = true;
+  return {
+    mysteryId: m.id,
+    accused: nameOf(id),
+    proofPending: true,
+  };
+}
+
+export function proveMystery(expedition, nameOf = (x) => x) {
+  const m = activeMystery(expedition);
+  if (!m || !m.accused || !m.proofPending) return null;
+  m.correct = m.accused === m.suspect;
+  m.proofPending = false;
   m.closed = !m.correct;
   m.searchReady = !!m.correct;
   return {
     mysteryId: m.id,
     correct: m.correct,
-    accused: nameOf(id),
+    accused: nameOf(m.accused),
     taken: nameOf(m.suspect),
     tell: tellMystery(m, nameOf),
     searchReady: m.searchReady,
@@ -273,6 +285,7 @@ function createMystery(expedition, disappearance) {
     asksLeft: MYSTERY_ASKS_ALLOWED,
     accused: null,
     correct: null,
+    proofPending: false,
     searchReady: false,
     closed: false,
     recovered: false,

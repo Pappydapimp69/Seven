@@ -14,6 +14,7 @@ import {
   activeMystery,
   askMystery,
   accuseMystery,
+  proveMystery,
   recoverMissing,
   advanceArea,
   serializeExpedition,
@@ -119,14 +120,17 @@ check("a disappearance opens a multi-day mystery with stable accounts", () => {
   eq(m.asksLeft, MYSTERY_ASKS_ALLOWED - 1, "repeat spent daylight");
 });
 
-check("naming the replacement unlocks recovery and wrong naming closes the case", () => {
+check("naming the replacement requires a pylon proof before recovery", () => {
   const good = createExpedition({ day: 2, area: 2, replacementChance: 1 });
   recordFact(good, { kind: "gather", actor: "c1", object: "wood", withWhom: ["c4"] });
   sleep(good);
   const r = resolveNight(good, makeRng(17), PARTY);
   const m = activeMystery(good);
   const verdict = accuseMystery(good, m.suspect, (id) => id);
-  assert(verdict.correct, "correct accusation failed");
+  assert(verdict.proofPending, "accusation did not wait for proof");
+  eq(activeMystery(good).searchReady, false, "search unlocked before pylon proof");
+  const proved = proveMystery(good, (id) => id);
+  assert(proved.correct, "correct proof failed");
   eq(activeMystery(good).searchReady, true, "search not unlocked");
   assert(recoverMissing(good, r.missing.id), "recovery failed");
   eq(activeMystery(good), null, "recovered mystery still active");
@@ -138,7 +142,9 @@ check("naming the replacement unlocks recovery and wrong naming closes the case"
   const bm = activeMystery(bad);
   const wrong = PARTY.find((id) => id !== bm.suspect);
   const badVerdict = accuseMystery(bad, wrong, (id) => id);
-  assert(!badVerdict.correct, "wrong accusation passed");
+  assert(badVerdict.proofPending, "wrong accusation resolved without proof");
+  const badProof = proveMystery(bad, (id) => id);
+  assert(!badProof.correct, "wrong proof passed");
   eq(activeMystery(bad), null, "wrong closed case still active");
 });
 

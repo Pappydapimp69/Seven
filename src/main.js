@@ -6,30 +6,30 @@ import {
   possess, release, possessableCompanions, activatePylon, pylonAt,
   callCompanion, clearMoss, mossedAt, feedFire, buildFire, FIRE_COST,
   PARTY_SIZE, DIFFICULTY, reachOf, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=seven-0.30.0";
-import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.30.0";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.30.0";
-import { generateWorld } from "./world.js?v=seven-0.30.0";
+} from "./state.js?v=seven-0.31.0";
+import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.31.0";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.31.0";
+import { generateWorld } from "./world.js?v=seven-0.31.0";
 import {
   attachSites, startDay, beatAt, briefFor, canWork, workBeat, fallNight, ask, accuse,
   updateWorkHold, dawnLine, BEATS, PHASE, ASKS_ALLOWED,
-} from "./woods.js?v=seven-0.30.0";
+} from "./woods.js?v=seven-0.31.0";
 import {
   createExpedition, spendDaylight, recordFact, sleep, resolveNight, advanceArea,
-  recoverMissing, activeMystery, askMystery, accuseMystery, MYSTERY_ASKS_ALLOWED,
-} from "./expedition.js?v=seven-0.30.0";
-import { DEFAULT_TEAM, applyTeamLoadout, teamSkill, finalDecision } from "./seven.js?v=seven-0.30.0";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.30.0";
-import { createRenderer } from "./render.js?v=seven-0.30.0";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.30.0";
-import { keyed } from "./keys.js?v=seven-0.30.0";
-import { createInput, ACTIONS } from "./input.js?v=seven-0.30.0";
-import { createAudio } from "./audio.js?v=seven-0.30.0";
-import { createDiag } from "./diag.js?v=seven-0.30.0";
-import { hashSeed, makeRng } from "./rng.js?v=seven-0.30.0";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.30.0";
+  recoverMissing, activeMystery, askMystery, accuseMystery, proveMystery, MYSTERY_ASKS_ALLOWED,
+} from "./expedition.js?v=seven-0.31.0";
+import { DEFAULT_TEAM, applyTeamLoadout, teamSkill, finalDecision } from "./seven.js?v=seven-0.31.0";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.31.0";
+import { createRenderer } from "./render.js?v=seven-0.31.0";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.31.0";
+import { keyed } from "./keys.js?v=seven-0.31.0";
+import { createInput, ACTIONS } from "./input.js?v=seven-0.31.0";
+import { createAudio } from "./audio.js?v=seven-0.31.0";
+import { createDiag } from "./diag.js?v=seven-0.31.0";
+import { hashSeed, makeRng } from "./rng.js?v=seven-0.31.0";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.31.0";
 
-const BUILD = "seven-0.30.0";
+const BUILD = "seven-0.31.0";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
@@ -956,6 +956,8 @@ function updateSevenObjective(sim) {
   const mysteryLine = mystery
     ? mystery.searchReady
       ? " You named the one who came back wrong. Press {act} to search the back trail."
+      : mystery.proofPending
+        ? ` Bring ${nameOfSeven(sim, mystery.accused)} into a pylon and spend it.`
       : ` Ask the party about day ${mystery.day} with {checkin}; ${mystery.asksLeft} question${mystery.asksLeft === 1 ? "" : "s"} left. Press {name} to name somebody.`
     : "";
   setObjective(
@@ -1033,6 +1035,8 @@ function paintSevenMystery(sim) {
     "The morning after",
     m.searchReady
       ? `${nameOfSeven(sim, m.suspect)} is still out there. Press {act} to search the back trail.`
+      : m.proofPending
+        ? `Bring ${nameOfSeven(sim, m.accused)} into a pylon and spend it. If you are wrong, the pylon is still gone.`
       : `Ask about day ${m.day} with {checkin}. ${m.asksLeft} of ${MYSTERY_ASKS_ALLOWED} left.` +
         (asked ? ` Already asked: ${asked}.` : "") +
         " Press {name} to name who came back wrong.",
@@ -1074,20 +1078,37 @@ function openSevenAccuse(sim) {
 function sevenAccuse(sim, id) {
   const v = accuseMystery(sim.expedition, id, (who) => nameOfSeven(sim, who));
   if (!v) return;
-  el("verdictHead").textContent = v.correct ? "You found the break." : "That story holds.";
-  el("verdictHead").className = `woods-who ${v.correct ? "woods-right" : "woods-wrong"}`;
-  el("verdictBody").textContent = v.correct
-    ? `${v.taken} went out in the night. What came back can answer to the name, but not to the day.`
-    : `${v.accused} was in the day cleanly. Whoever is missing is still behind you.`;
-  el("verdictTell").textContent = v.tell;
-  el("verdictCost").textContent = v.correct
-    ? "Press survey after you step away to search for the original."
-    : "The daylight is gone from that question. The route still has to be walked.";
+  el("verdictHead").textContent = "Take them to a pylon.";
+  el("verdictHead").className = "woods-who";
+  el("verdictBody").textContent = `${v.accused} is named. The woods will not answer until you spend real light on it.`;
+  el("verdictTell").textContent = "Bring them into a live pylon and fire it. Correct or wrong, that pylon is gone.";
+  el("verdictCost").textContent = "The accusation is only a suspicion until the pylon burns.";
   el("verdictTally").textContent = "";
   el("verdictAgain").classList.add("hidden");
-  el("verdictDone").textContent = "Back to the fire";
+  el("verdictDone").textContent = "Back to the trail";
   openWoodsPanel("verdictPanel");
   paintSevenMystery(sim);
+}
+
+function sevenProveAtPylon(sim, pylon) {
+  const m = activeMystery(sim.expedition);
+  if (!m?.proofPending) return false;
+  const suspect = sim.companions.find((c) => c.id === m.accused);
+  if (!suspect || !pylon || Math.hypot(suspect.x - pylon.x, suspect.z - pylon.z) > PYLON_RADIUS) {
+    hudSay(`Bring ${nameOfSeven(sim, m.accused)} into the pylon before you burn it.`);
+    return false;
+  }
+  const v = proveMystery(sim.expedition, (who) => nameOfSeven(sim, who));
+  if (!v) return false;
+  if (v.correct) {
+    emitToHud(sim, "expedition", `${v.taken} is not what came back. The pylon goes dark.`);
+    hudSay("The pylon answers. Search the back trail while there is still light.");
+  } else {
+    emitToHud(sim, "expedition", `${v.accused} stands in the light and nothing breaks. The pylon is still gone.`);
+    hudSay(`${v.accused} was real enough for the pylon. The missing one is still behind you.`);
+  }
+  paintSevenMystery(sim);
+  return true;
 }
 
 function searchSevenBackTrail(sim) {
@@ -1325,8 +1346,18 @@ function handleAction(action, arg, player = run.players[0]) {
           : "Moss has grown right over it. It will not shift.", mres.ok ? "good" : "warn");
         break;
       }
-      const believedPylon = pylonAt(sim, actor) || nearestBelievedPylon(sim, percept, actor);
+      const realPylon = pylonAt(sim, actor);
+      const believedPylon = realPylon || nearestBelievedPylon(sim, percept, actor);
       if (believedPylon) {
+        const mystery = activeMystery(sim.expedition);
+        const suspect = mystery?.proofPending
+          ? sim.companions.find((c) => c.id === mystery.accused)
+          : null;
+        if (mystery?.proofPending && realPylon && (!suspect || Math.hypot(suspect.x - realPylon.x, suspect.z - realPylon.z) > PYLON_RADIUS)) {
+          audio.play("deny");
+          hud.say(`Bring ${nameOfSeven(sim, mystery.accused)} into the pylon before you burn it.`, "warn");
+          break;
+        }
         const ares = activatePylon(sim, actor);
         audio.play(ares.confirmed ? "recover" : "log");
         if (ares.confirmed) {
@@ -1334,6 +1365,7 @@ function handleAction(action, arg, player = run.players[0]) {
             `The pylon gives out. ${ares.caught} of you caught it — it will not light again.`,
             "good",
           );
+          sevenProveAtPylon(sim, realPylon);
         } else {
           hud.say("Hands on the pylon. It needs a second pair before it will give.", "warn");
         }
