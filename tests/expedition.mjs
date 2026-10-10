@@ -122,6 +122,20 @@ check("a disappearance opens a multi-day mystery with stable accounts", () => {
   eq(m.asksLeft, MYSTERY_ASKS_ALLOWED - 1, "repeat spent daylight");
 });
 
+check("accounts carry who was close by, who stayed at camp and who answered a call", () => {
+  const e = createExpedition({ day: 2, replacementChance: 1 });
+  recordFact(e, { kind: "deadfall", actor: "c3", object: "deadfall", withWhom: ["c2", "you"] });
+  recordFact(e, { kind: "call", actor: "c4", object: "your call", withWhom: [] });
+  recordFact(e, { kind: "camp", actor: "c1", object: "camp", withWhom: [] });
+  sleep(e);
+  resolveNight(e, makeRng(11), PARTY);
+  const m = activeMystery(e);
+  const lines = askMystery(e, m.suspect, (id) => id.toUpperCase()).lines;
+  assert(lines.some((l) => /close by/.test(l) && /C2/.test(l)), `no "close by" line naming a neighbour: ${lines.join(" | ")}`);
+  assert(lines.some((l) => /came when you called/.test(l)), "no answered-call line");
+  assert(lines.some((l) => /stayed at camp/.test(l)), "no stayed-at-camp line");
+});
+
 check("naming the replacement requires a pylon proof before recovery", () => {
   const good = createExpedition({ day: 2, area: 2, replacementChance: 1 });
   recordFact(good, { kind: "gather", actor: "c1", object: "wood", withWhom: ["c4"] });

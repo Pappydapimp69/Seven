@@ -100,3 +100,25 @@ export function finalDecision(sim, choice) {
   sim.finalDecision = { choice, ...summary, finalCount: count };
   return sim.finalDecision;
 }
+
+/**
+ * WHO WAS THERE. The history a fake has to lie about is made of true facts about
+ * who did what and who was standing near, so these read real positions (never
+ * what anyone believes) and return ids: "you" for the lead, c1.. for the rest.
+ */
+export function nearbyIds(sim, actorId, radius) {
+  const at = actorId === "you" || !actorId ? sim.player : sim.companions.find((c) => c.id === actorId);
+  if (!at) return [];
+  const out = [];
+  for (const c of sim.companions) {
+    if (c.id !== actorId && Math.hypot(c.x - at.x, c.z - at.z) <= radius) out.push(c.id);
+  }
+  if (actorId !== "you" && actorId && Math.hypot(sim.player.x - at.x, sim.player.z - at.z) <= radius) out.push("you");
+  return out;
+}
+
+/** Companions standing at camp: the ones who stayed. */
+export function campIds(sim, radius) {
+  const camp = sim.world.camp;
+  return sim.companions.filter((c) => Math.hypot(c.x - camp.x, c.z - camp.z) <= radius).map((c) => c.id);
+}

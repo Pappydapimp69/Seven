@@ -336,6 +336,7 @@ function normalizeFacts(facts) {
     object: f.object ?? null,
     amount: f.amount ?? null,
     day: f.day ?? null,
+    withWhom: (f.withWhom || []).slice(),
   }));
 }
 
@@ -366,8 +367,16 @@ function accountForMystery(m, nameOf, lying) {
 }
 
 function phraseMysteryFact(f, nameOf) {
+  const line = phraseFactCore(f, nameOf);
+  const near = (f.withWhom || []).map((id) => (id === "you" ? "you" : nameOf(id)));
+  return near.length ? `${line}, with ${near.join(" and ")} close by` : line;
+}
+
+function phraseFactCore(f, nameOf) {
   const who = f.actor === "you" ? "You" : nameOf(f.actor);
   switch (f.kind) {
+    case "call": return `${who} came when you called`;
+    case "camp": return `${who} stayed at camp`;
     case "deadfall": return `${who} opened the deadfall on the trail`;
     case "gather": return `${who} brought back ${f.object || "supplies"}`;
     case "pylon": return `${who} worked the pylon marked ${f.object || "unknown"}`;

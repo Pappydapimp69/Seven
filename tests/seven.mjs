@@ -2,7 +2,7 @@
 
 import { createRun, tickLucidity, depthOf, DEPTH_DRAIN } from "../src/state.js";
 import { createExpedition } from "../src/expedition.js";
-import { applyTeamLoadout, teamSkill, finalDecision, expeditionSummary, finalCount } from "../src/seven.js";
+import { nearbyIds, campIds, applyTeamLoadout, teamSkill, finalDecision, expeditionSummary, finalCount } from "../src/seven.js";
 
 let passed = 0;
 const failures = [];
@@ -35,6 +35,21 @@ check("depth: the far edge drains faster than camp, by the stated factor", () =>
 check("depth: a run that is not an expedition keeps its exact rates", () => {
   eq(drained(1, false), drained(0, false), "a non-expedition drained differently by position");
   eq(depthOf(createRun({ seed: 1 }), { z: -999 }), 0, "depth is not 0 outside an expedition");
+});
+
+check("who was nearby and who stayed at camp come from real positions", () => {
+  const sim = createRun({ seed: 91 });
+  const [a, b, c] = sim.companions;
+  sim.player.x = 0; sim.player.z = 0;
+  a.x = 3; a.z = 0; b.x = 8; b.z = 0; c.x = 40; c.z = 0;
+  const near = nearbyIds(sim, "you", 11);
+  assert(near.includes(a.id) && near.includes(b.id) && !near.includes(c.id), `lead's neighbours wrong: ${near}`);
+  const nearA = nearbyIds(sim, a.id, 3.5);
+  assert(nearA.includes("you") && !nearA.includes(a.id) && !nearA.includes(b.id), `a's neighbours wrong: ${nearA}`);
+  const camp = sim.world.camp;
+  a.x = camp.x; a.z = camp.z; b.x = camp.x + 50; b.z = camp.z;
+  const stayed = campIds(sim, 9);
+  assert(stayed.includes(a.id) && !stayed.includes(b.id), `camp stayers wrong: ${stayed}`);
 });
 
 check("team loadouts assign different useful skills", () => {

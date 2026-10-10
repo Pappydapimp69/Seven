@@ -5,7 +5,7 @@ import {
   createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem, dropItem, craftItem, gatherTarget, offerItem,
   possess, release, possessableCompanions, activatePylon, pylonAt,
   callCompanion, clearMoss, mossedAt, feedFire, buildFire, FIRE_COST,
-  PARTY_SIZE, DIFFICULTY, reachOf, LOG_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
+  PARTY_SIZE, DIFFICULTY, reachOf, LOG_RADIUS, CORROBORATE_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
 } from "./state.js?v=seven-0.34.0";
 import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.34.0";
 import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.34.0";
@@ -19,7 +19,7 @@ import {
   recoverMissing, activeMystery, askMystery, accuseMystery, proveMystery, MYSTERY_ASKS_ALLOWED,
   startKeystoneMorning, advanceKeystoneMorning,
 } from "./expedition.js?v=seven-0.34.0";
-import { DEFAULT_TEAM, applyTeamLoadout, teamSkill, finalDecision, finalCount } from "./seven.js?v=seven-0.34.0";
+import { DEFAULT_TEAM, applyTeamLoadout, teamSkill, finalDecision, finalCount, nearbyIds, campIds } from "./seven.js?v=seven-0.34.0";
 import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.34.0";
 import { createRenderer } from "./render.js?v=seven-0.34.0";
 import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.34.0";
@@ -934,9 +934,12 @@ function spendSevenDaylight(sim, amount, reason) {
   return false;
 }
 
+const CAMP_RADIUS = 9; // the same reach extraction counts as being at camp
 function resolveSevenNight(sim) {
   const e = sim.expedition;
   if (!e || e.phase !== "day" || e.daylight > 0 || sim.status !== "playing") return;
+  // Who stayed at camp today, written down before the day closes.
+  for (const id of campIds(sim, CAMP_RADIUS)) recordFact(e, { kind: "camp", actor: id, object: "camp", withWhom: [], t: sim.time });
   sleep(e);
   const before = e.missing.length;
   const gone = resolveNight(e, sim.rng, sim.companions.map((c) => c.id));
@@ -1001,6 +1004,7 @@ function updateSevenProgress(sim) {
 function recordSevenEvents(sim, events) {
   const e = sim.expedition;
   if (!e) return;
+  const near = (who) => nearbyIds(sim, who || "you", CORROBORATE_RADIUS);
   for (const ev of events) {
     if (ev.kind === "gather") {
       const deadfall = /deadfall/i.test(ev.text || "");
@@ -1009,18 +1013,27 @@ function recordSevenEvents(sim, events) {
         object: deadfall ? "deadfall" : ev.resource,
         actor: ev.who || "you",
         amount: ev.amount ?? 0,
+        withWhom: near(ev.who),
         t: sim.time,
       });
       const base = deadfall ? 2.5 : 0.5;
       const skill = deadfall ? teamSkill(sim, "cut") : teamSkill(sim, "carry");
       spendSevenDaylight(sim, Math.max(0.25, Number((base - skill * 0.2).toFixed(2))), deadfall ? "deadfall" : "gather");
     } else if (ev.kind === "draw") {
-      recordFact(e, { kind: "pylon", actor: ev.who || "you", object: ev.id, t: sim.time });
+      recordFact(e, { kind: "pylon", actor: ev.who || "you", object: ev.id, withWhom: near(ev.who), t: sim.time });
       spendSevenDaylight(sim, 0.25, "pylon");
     } else if (ev.kind === "log") {
-      recordFact(e, { kind: "survey", actor: ev.who || "you", object: ev.id, t: sim.time });
+      recordFact(e, { kind: "survey", actor: ev.who || "you", object: ev.id, withWhom: near(ev.who), t: sim.time });
+    } else if (ev.kind === "call") {
+      // The call event fires whether or not anyone answers (same text either
+      // way, on purpose), so the FACT is read off the world: only a mind that
+      // is actually summoned by the lead right now answered.
+      const c = sim.companions.find((x) => x.id === ev.who);
+      if (c && c.summonBy === sim.player.id && c.summonUntil > sim.time) {
+        recordFact(e, { kind: "call", actor: c.id, object: "your call", withWhom: near(c.id), t: sim.time });
+      }
     } else if (ev.kind === "recover") {
-      recordFact(e, { kind: "recovered", actor: ev.who || "you", t: sim.time });
+      recordFact(e, { kind: "recovered", actor: ev.who || "you", withWhom: near(ev.who), t: sim.time });
     }
   }
   resolveSevenNight(sim);
