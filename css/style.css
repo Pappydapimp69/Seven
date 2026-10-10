@@ -1051,3 +1051,7 @@ body[data-coop="2"] .item-bar.p2 { display: flex; }
    bookkeeping, and the roster must never look like a place where the answer
    might be. */
 .roster-row.tag-asked .r-read { color: var(--dim); font-style: italic; }
+
+/* Training, in the pause menu of an expedition. */
+.train-name { flex: 1; text-align: center; align-self: center; font-weight: 600; letter-spacing: 0.04em; }
+.diff.dim { opacity: 0.45; }

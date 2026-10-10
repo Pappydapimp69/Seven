@@ -144,3 +144,26 @@ export function restCheck(sim, campRadius) {
   if (Math.hypot(sim.player.x - camp.x, sim.player.z - camp.z) > campRadius) return { ok: false, reason: "away" };
   return { ok: true, forfeits: e.daylight };
 }
+
+/**
+ * TRAINING. Points are spent on one person's skill at a time, up to SKILL_MAX.
+ * A replacement keeps the same skill surface as the person they replaced (they
+ * are the same object with the same skills), so spending points can never make
+ * a fake detectable by a stopwatch.
+ */
+export const SKILLS = Object.freeze(["scout", "cut", "carry", "mend", "signal"]);
+export const SKILL_MAX = 5;
+
+export function raiseSkill(sim, companionId, skill) {
+  const e = sim?.expedition;
+  if (!e) return { ok: false, reason: "no-expedition" };
+  if (!SKILLS.includes(skill)) return { ok: false, reason: "no-skill" };
+  const c = (sim.companions || []).find((x) => x.id === companionId);
+  if (!c) return { ok: false, reason: "no-person" };
+  if (!(e.skillPoints > 0)) return { ok: false, reason: "no-points" };
+  const level = c.skills?.[skill] || 0;
+  if (level >= SKILL_MAX) return { ok: false, reason: "maxed" };
+  c.skills = { ...(c.skills || {}), [skill]: level + 1 };
+  e.skillPoints -= 1;
+  return { ok: true, level: level + 1, left: e.skillPoints };
+}

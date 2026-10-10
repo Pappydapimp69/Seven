@@ -16,6 +16,9 @@ export const REPLACEMENT_START_DAY = 2;
 export const RECOVERY_WINDOW_AREAS = 1;
 export const MYSTERY_ASKS_ALLOWED = 3;
 
+/** Points to spend on the team before the woods starts taking people, and one more each morning. */
+export const SKILL_POINTS_START = 2;
+
 export function createExpedition({
   day = 1,
   daylight = DEFAULT_DAYLIGHT,
@@ -23,8 +26,10 @@ export function createExpedition({
   recoveryWindowAreas = RECOVERY_WINDOW_AREAS,
   replacementChance = 1,
   area = 0,
+  skillPoints = SKILL_POINTS_START,
 } = {}) {
   return {
+    skillPoints,
     day,
     phase: EXPEDITION_PHASE.DAY,
     area,
@@ -90,6 +95,7 @@ export function resolveNight(expedition, rng, partyIds) {
     expedition.night.disappearance = disappearance;
   }
   expedition.day += 1;
+  expedition.skillPoints = (expedition.skillPoints || 0) + 1;
   expedition.phase = EXPEDITION_PHASE.DAY;
   expedition.daylight = expedition.dayLength;
   expedition.current = { day: expedition.day, facts: [] };
@@ -263,6 +269,7 @@ export function advanceArea(expedition, areas = 1) {
 export function serializeExpedition(expedition) {
   if (!expedition) return null;
   return {
+    skillPoints: expedition.skillPoints || 0,
     day: expedition.day,
     phase: expedition.phase,
     area: expedition.area,
@@ -285,6 +292,7 @@ export function serializeExpedition(expedition) {
 export function deserializeExpedition(data) {
   if (!data) return null;
   return {
+    skillPoints: data.skillPoints ?? 0,
     day: data.day,
     phase: data.phase,
     area: data.area ?? 0,

@@ -1,8 +1,9 @@
 // seven.mjs — pure tests for Seven's expedition-specific rules.
 
 import { createRun, tickLucidity, depthOf, DEPTH_DRAIN } from "../src/state.js";
-import { createExpedition } from "../src/expedition.js";
-import { restCheck, FIRE_DAYLIGHT, nearbyIds, campIds, applyTeamLoadout, teamSkill, finalDecision, expeditionSummary, finalCount } from "../src/seven.js";
+import { createExpedition, sleep, resolveNight, serializeExpedition, deserializeExpedition, SKILL_POINTS_START } from "../src/expedition.js";
+import { makeRng } from "../src/rng.js";
+import { raiseSkill, SKILL_MAX, restCheck, FIRE_DAYLIGHT, nearbyIds, campIds, applyTeamLoadout, teamSkill, finalDecision, expeditionSummary, finalCount } from "../src/seven.js";
 
 let passed = 0;
 const failures = [];
@@ -71,6 +72,32 @@ check("resting is a choice made at camp, and means the same to every mind", () =
 });
 check("lighting a fire costs more daylight than keeping one", () => {
   assert(FIRE_DAYLIGHT.build > FIRE_DAYLIGHT.feed && FIRE_DAYLIGHT.feed > 0, "fire costs are not ordered build > feed > 0");
+});
+
+check("training spends points on one person, caps at the maximum, and survives a save", () => {
+  const sim = createRun({ seed: 94 });
+  sim.expedition = createExpedition();
+  applyTeamLoadout(sim, "trail", { overwrite: true });
+  const c = sim.companions[0];
+  const before = c.skills.cut || 0;
+  const otherBefore = sim.companions[1].skills.cut || 0;
+  eq(sim.expedition.skillPoints, SKILL_POINTS_START, "starting points");
+  const r = raiseSkill(sim, c.id, "cut");
+  assert(r.ok && c.skills.cut === before + 1 && sim.expedition.skillPoints === SKILL_POINTS_START - 1, "raise did not move skill and points together");
+  eq(sim.companions[1].skills.cut || 0, otherBefore, "someone else's skill moved");
+  sim.expedition.skillPoints = 0;
+  eq(raiseSkill(sim, c.id, "cut").reason, "no-points", "spent a point that was not there");
+  sim.expedition.skillPoints = 9; c.skills.cut = SKILL_MAX;
+  eq(raiseSkill(sim, c.id, "cut").reason, "maxed", "raised past the cap");
+  eq(raiseSkill(sim, c.id, "nonsense").reason, "no-skill", "raised an unknown skill");
+  eq(deserializeExpedition(serializeExpedition(sim.expedition)).skillPoints, 9, "points lost across a save");
+  eq(deserializeExpedition({ ...serializeExpedition(sim.expedition), skillPoints: undefined }).skillPoints, 0, "an old save did not default to 0 points");
+});
+check("a new morning earns a point", () => {
+  const e = createExpedition({ day: 1, replacementChance: 0 });
+  sleep(e);
+  resolveNight(e, makeRng(5), ["c1", "c2", "c3", "c4", "c5"]);
+  eq(e.skillPoints, SKILL_POINTS_START + 1, "no point for surviving the day");
 });
 
 check("team loadouts assign different useful skills", () => {

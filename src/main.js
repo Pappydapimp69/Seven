@@ -19,7 +19,7 @@ import {
   recoverMissing, activeMystery, askMystery, accuseMystery, proveMystery, MYSTERY_ASKS_ALLOWED,
   startKeystoneMorning, advanceKeystoneMorning,
 } from "./expedition.js?v=seven-0.34.0";
-import { DEFAULT_TEAM, applyTeamLoadout, teamSkill, finalDecision, finalCount, nearbyIds, campIds, FIRE_DAYLIGHT, restCheck } from "./seven.js?v=seven-0.34.0";
+import { DEFAULT_TEAM, applyTeamLoadout, teamSkill, finalDecision, finalCount, nearbyIds, campIds, FIRE_DAYLIGHT, restCheck, raiseSkill, SKILL_MAX } from "./seven.js?v=seven-0.34.0";
 import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.34.0";
 import { createRenderer } from "./render.js?v=seven-0.34.0";
 import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.34.0";
@@ -1649,22 +1649,45 @@ function handleAction(action, arg, player = run.players[0]) {
   }
 }
 
-// "Rest until morning" exists only in an expedition, and is a menu choice rather
-// than a key: ending the day should be deliberate, and the menu already works on
-// keyboard, pad and touch. The grid rows move with it so pad navigation never
-// meets a gap.
-function syncRestButton(sim) {
-  const rest = el("restBtn"), quit = el("quitBtn");
-  if (!rest || !quit) return;
+// The pause menu's grid, rebuilt every time it opens. Training and "Rest until
+// morning" exist only in an expedition, and are menu choices rather than keys:
+// ending the day or spending a point should be deliberate, and the menu already
+// works on keyboard, pad and touch. Rows are numbered over what is VISIBLE, in
+// order, so pad navigation never meets a gap.
+let trainIdx = 0;
+const PAUSE_ROWS = [".vol", ".fov", "#trainNav button", "#trainSkills button", ".ui", "#resumeBtn", "#restBtn", "#quitBtn"];
+function syncPauseGrid(sim) {
   const on = !!sim.expedition;
-  rest.classList.toggle("hidden", !on);
-  if (on) { rest.dataset.row = "4"; quit.dataset.row = "5"; } else { delete rest.dataset.row; quit.dataset.row = "4"; }
+  el("trainBlock")?.classList.toggle("hidden", !on);
+  el("restBtn")?.classList.toggle("hidden", !on);
+  if (on) paintTraining(sim);
+  let row = 0;
+  for (const sel of PAUSE_ROWS) {
+    const els = [...document.querySelectorAll(`#pauseLayer ${sel}`)].filter((b) => !b.closest("#trainBlock.hidden, #restBtn.hidden"));
+    if (!els.length) continue;
+    els.forEach((b, col) => { b.dataset.row = String(row); b.dataset.col = String(col); });
+    row++;
+  }
+}
+
+function paintTraining(sim) {
+  const e = sim.expedition;
+  const n = sim.companions.length;
+  trainIdx = ((trainIdx % n) + n) % n;
+  const c = sim.companions[trainIdx];
+  el("trainPoints").textContent = `${e.skillPoints || 0} point${e.skillPoints === 1 ? "" : "s"}`;
+  el("trainName").textContent = c.name;
+  for (const b of document.querySelectorAll("#trainSkills [data-skill]")) {
+    const k = b.dataset.skill;
+    b.textContent = `${k[0].toUpperCase()}${k.slice(1)} ${c.skills?.[k] || 0}`;
+    b.classList.toggle("dim", !(e.skillPoints > 0) || (c.skills?.[k] || 0) >= SKILL_MAX);
+  }
 }
 
 function togglePause() {
   if (!run || run.sim.status !== "playing") return;
   paused = !paused;
-  if (paused) syncRestButton(run.sim);
+  if (paused) syncPauseGrid(run.sim);
   screens(paused ? "pauseLayer" : "hudLayer");
   if (!paused && input.activeScheme !== "gamepad") input.requestLock();
 }
@@ -2110,6 +2133,17 @@ function boot() {
   el("howBtn").addEventListener("click", () => el("howto").classList.toggle("hidden"));
   el("resumeBtn").addEventListener("click", togglePause);
   el("restBtn")?.addEventListener("click", () => restUntilMorning());
+  const trainStep = (d) => { if (!run?.sim.expedition) return; trainIdx += d; paintTraining(run.sim); };
+  el("trainPrev")?.addEventListener("click", () => trainStep(-1));
+  el("trainNext")?.addEventListener("click", () => trainStep(1));
+  for (const b of document.querySelectorAll("#trainSkills [data-skill]")) {
+    b.addEventListener("click", () => {
+      const sim = run?.sim;
+      if (!sim?.expedition) return;
+      raiseSkill(sim, sim.companions[trainIdx]?.id, b.dataset.skill);
+      paintTraining(sim);
+    });
+  }
   el("quitBtn").addEventListener("click", () => {
     run = null;
     paused = false;

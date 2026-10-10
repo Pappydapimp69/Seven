@@ -32,6 +32,17 @@ await pg.evaluate(()=>{const s=window.__seven.sim;s.player.x=s.world.camp.x;s.pl
 await pg.evaluate(()=>document.getElementById("restBtn").click()); await pg.waitForTimeout(400);
 const home=await pg.evaluate(()=>({day:window.__seven.sim.expedition.day,phase:window.__seven.sim.expedition.phase,paused:window.__seven.paused}));
 A(vis, "Rest until morning is not offered in an expedition");
+const tr=await pg.evaluate(async()=>{const M=window.__seven,s=M.sim,e=s.expedition;
+  const rows=[...new Set([...document.querySelectorAll("#pauseLayer [data-row]")].filter(b=>!b.closest(".hidden")).map(b=>Number(b.dataset.row)))].sort((a,b)=>a-b);
+  const pts=e.skillPoints; const c=s.companions[0]; const lvl=c.skills?.scout||0;
+  document.querySelector('#trainSkills [data-skill="scout"]').click();
+  const label=document.querySelector('#trainSkills [data-skill="scout"]').textContent;
+  document.getElementById("trainNext").click();
+  return {rows,pts,after:e.skillPoints,lvl,lvl2:c.skills.scout,label,name:document.getElementById("trainName").textContent,second:s.companions[1].name};});
+A(tr.rows.every((r,i)=>r===i), `pause grid rows are not contiguous: ${tr.rows}`);
+A(tr.after===tr.pts-1 && tr.lvl2===tr.lvl+1, `training did not spend a point and add a level: ${JSON.stringify(tr)}`);
+A(tr.label===`Scout ${tr.lvl+1}`, `training label is stale: ${tr.label}`);
+A(tr.name===tr.second, "the next arrow did not move to the next person");
 A(away.day===1&&away.phase==="day", "rest worked away from camp");
 A(home.day===2&&!home.paused, "resting at camp did not end the day and return to play");
 A(errs.length===0, "page errors: "+errs.join("|"));
