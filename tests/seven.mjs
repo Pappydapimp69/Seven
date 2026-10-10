@@ -2,7 +2,7 @@
 
 import { createRun, tickLucidity, depthOf, DEPTH_DRAIN } from "../src/state.js";
 import { createExpedition } from "../src/expedition.js";
-import { nearbyIds, campIds, applyTeamLoadout, teamSkill, finalDecision, expeditionSummary, finalCount } from "../src/seven.js";
+import { restCheck, FIRE_DAYLIGHT, nearbyIds, campIds, applyTeamLoadout, teamSkill, finalDecision, expeditionSummary, finalCount } from "../src/seven.js";
 
 let passed = 0;
 const failures = [];
@@ -50,6 +50,27 @@ check("who was nearby and who stayed at camp come from real positions", () => {
   a.x = camp.x; a.z = camp.z; b.x = camp.x + 50; b.z = camp.z;
   const stayed = campIds(sim, 9);
   assert(stayed.includes(a.id) && !stayed.includes(b.id), `camp stayers wrong: ${stayed}`);
+});
+
+check("resting is a choice made at camp, and means the same to every mind", () => {
+  const sim = createRun({ seed: 92 });
+  sim.expedition = createExpedition();
+  const camp = sim.world.camp;
+  sim.player.x = camp.x; sim.player.z = camp.z;
+  const here = restCheck(sim, 9);
+  assert(here.ok && here.forfeits === sim.expedition.daylight, "could not rest at camp, or forfeit amount is wrong");
+  sim.player.x = camp.x + 40;
+  eq(restCheck(sim, 9).reason, "away", "rest allowed away from camp");
+  // the answer must not depend on how clear the lead's head is
+  sim.player.x = camp.x;
+  sim.player.hallucinating = true; sim.player.lucidity = 0;
+  assert(restCheck(sim, 9).ok, "a hallucinating lead was refused rest at camp: the refusal would be a tell");
+  sim.expedition.phase = "night";
+  eq(restCheck(sim, 9).reason, "no-day", "rest allowed outside the day");
+  eq(restCheck(createRun({ seed: 93 }), 9).reason, "no-day", "rest allowed outside an expedition");
+});
+check("lighting a fire costs more daylight than keeping one", () => {
+  assert(FIRE_DAYLIGHT.build > FIRE_DAYLIGHT.feed && FIRE_DAYLIGHT.feed > 0, "fire costs are not ordered build > feed > 0");
 });
 
 check("team loadouts assign different useful skills", () => {

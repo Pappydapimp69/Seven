@@ -127,6 +127,7 @@ check("accounts carry who was close by, who stayed at camp and who answered a ca
   recordFact(e, { kind: "deadfall", actor: "c3", object: "deadfall", withWhom: ["c2", "you"] });
   recordFact(e, { kind: "call", actor: "c4", object: "your call", withWhom: [] });
   recordFact(e, { kind: "camp", actor: "c1", object: "camp", withWhom: [] });
+  recordFact(e, { kind: "fire", actor: "c2", object: "the fire", withWhom: [] });
   sleep(e);
   resolveNight(e, makeRng(11), PARTY);
   const m = activeMystery(e);
@@ -134,6 +135,7 @@ check("accounts carry who was close by, who stayed at camp and who answered a ca
   assert(lines.some((l) => /close by/.test(l) && /C2/.test(l)), `no "close by" line naming a neighbour: ${lines.join(" | ")}`);
   assert(lines.some((l) => /came when you called/.test(l)), "no answered-call line");
   assert(lines.some((l) => /stayed at camp/.test(l)), "no stayed-at-camp line");
+  assert(lines.some((l) => /lit the fire/.test(l)), "no lit-the-fire line");
 });
 
 check("naming the replacement requires a pylon proof before recovery", () => {

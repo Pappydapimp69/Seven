@@ -122,3 +122,25 @@ export function campIds(sim, radius) {
   const camp = sim.world.camp;
   return sim.companions.filter((c) => Math.hypot(c.x - camp.x, c.z - camp.z) <= radius).map((c) => c.id);
 }
+
+/**
+ * DAYLIGHT FOR CAMP WORK. The day is 12 hours and the currency that prices the
+ * route (a deadfall is 2.5, a pylon 0.25, a question 1). A fire is camp work:
+ * lighting one is dearer than keeping one. Feeding is charged whether or not
+ * there is a real fire to feed, for the same reason it spends wood either way —
+ * a charge that only landed on a real fire would be a readout.
+ */
+export const FIRE_DAYLIGHT = Object.freeze({ build: 0.75, feed: 0.25 });
+
+/**
+ * Can the lead choose to end the day here? Camp is the only safe place to
+ * sleep, and "at camp" is a fact of position — the same answer for a lucid
+ * mind and a hallucinating one — so a refusal tells nobody anything.
+ */
+export function restCheck(sim, campRadius) {
+  const e = sim.expedition;
+  if (!e || e.phase !== "day" || sim.status !== "playing") return { ok: false, reason: "no-day" };
+  const camp = sim.world.camp;
+  if (Math.hypot(sim.player.x - camp.x, sim.player.z - camp.z) > campRadius) return { ok: false, reason: "away" };
+  return { ok: true, forfeits: e.daylight };
+}

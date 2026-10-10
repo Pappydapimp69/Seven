@@ -375,6 +375,8 @@ function phraseMysteryFact(f, nameOf) {
 function phraseFactCore(f, nameOf) {
   const who = f.actor === "you" ? "You" : nameOf(f.actor);
   switch (f.kind) {
+    case "fire": return `${who} lit the fire`;
+    case "feed": return `${who} fed the fire`;
     case "call": return `${who} came when you called`;
     case "camp": return `${who} stayed at camp`;
     case "deadfall": return `${who} opened the deadfall on the trail`;

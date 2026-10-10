@@ -19,7 +19,7 @@ import {
   recoverMissing, activeMystery, askMystery, accuseMystery, proveMystery, MYSTERY_ASKS_ALLOWED,
   startKeystoneMorning, advanceKeystoneMorning,
 } from "./expedition.js?v=seven-0.34.0";
-import { DEFAULT_TEAM, applyTeamLoadout, teamSkill, finalDecision, finalCount, nearbyIds, campIds } from "./seven.js?v=seven-0.34.0";
+import { DEFAULT_TEAM, applyTeamLoadout, teamSkill, finalDecision, finalCount, nearbyIds, campIds, FIRE_DAYLIGHT, restCheck } from "./seven.js?v=seven-0.34.0";
 import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.34.0";
 import { createRenderer } from "./render.js?v=seven-0.34.0";
 import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.34.0";
@@ -934,6 +934,22 @@ function spendSevenDaylight(sim, amount, reason) {
   return false;
 }
 
+/** Rest until morning: the lead's choice to end the day, at camp. Forfeits what is left. */
+function restUntilMorning() {
+  if (!run) return;
+  const sim = run.sim;
+  const chk = restCheck(sim, CAMP_RADIUS);
+  if (!chk.ok) {
+    if (chk.reason === "away") run.hud.say("You can only rest at camp.", "warn");
+    return;
+  }
+  const e = sim.expedition;
+  e.lastSpend = { day: e.day, amount: e.daylight, reason: "rest" };
+  e.daylight = 0;
+  resolveSevenNight(sim);
+  if (paused) togglePause();
+}
+
 const CAMP_RADIUS = 9; // the same reach extraction counts as being at camp
 function resolveSevenNight(sim) {
   const e = sim.expedition;
@@ -1024,6 +1040,8 @@ function recordSevenEvents(sim, events) {
       spendSevenDaylight(sim, 0.25, "pylon");
     } else if (ev.kind === "log") {
       recordFact(e, { kind: "survey", actor: ev.who || "you", object: ev.id, withWhom: near(ev.who), t: sim.time });
+    } else if (ev.kind === "fire" && /kindling catches/i.test(ev.text || "")) {
+      recordFact(e, { kind: "fire", actor: ev.who || "you", object: "the fire", withWhom: near(ev.who), t: sim.time });
     } else if (ev.kind === "call") {
       // The call event fires whether or not anyone answers (same text either
       // way, on purpose), so the FACT is read off the world: only a mind that
@@ -1445,6 +1463,10 @@ function handleAction(action, arg, player = run.players[0]) {
           hud.say("Nothing left to burn.", "warn");
         } else {
           if (!fres.fed) notePhantomFeed(percept);
+          // Charged either way, like the wood: the daylight bar must not tell a
+          // real fire from a believed one. The FACT is only written for a real one.
+          spendSevenDaylight(sim, FIRE_DAYLIGHT.feed, "fire");
+          if (fres.fed && sim.expedition) recordFact(sim.expedition, { kind: "feed", actor: "you", object: "the fire", withWhom: nearbyIds(sim, "you", CORROBORATE_RADIUS), t: sim.time });
           audio.play("log");
           hud.say("You feed the fire.", "good");
         }
@@ -1458,6 +1480,7 @@ function handleAction(action, arg, player = run.players[0]) {
       const marker = nearestPhantom(sim, percept, actor);
       if (!marker && !sim.fire && sim.wood >= FIRE_COST.wood) {
         const bres = buildFire(sim, actor);
+        if (bres.ok) spendSevenDaylight(sim, FIRE_DAYLIGHT.build, "fire");
         audio.play(bres.ok ? "recover" : "deny");
         hud.say(bres.ok
           ? "The kindling catches. It will burn as long as you feed it."
@@ -1626,9 +1649,22 @@ function handleAction(action, arg, player = run.players[0]) {
   }
 }
 
+// "Rest until morning" exists only in an expedition, and is a menu choice rather
+// than a key: ending the day should be deliberate, and the menu already works on
+// keyboard, pad and touch. The grid rows move with it so pad navigation never
+// meets a gap.
+function syncRestButton(sim) {
+  const rest = el("restBtn"), quit = el("quitBtn");
+  if (!rest || !quit) return;
+  const on = !!sim.expedition;
+  rest.classList.toggle("hidden", !on);
+  if (on) { rest.dataset.row = "4"; quit.dataset.row = "5"; } else { delete rest.dataset.row; quit.dataset.row = "4"; }
+}
+
 function togglePause() {
   if (!run || run.sim.status !== "playing") return;
   paused = !paused;
+  if (paused) syncRestButton(run.sim);
   screens(paused ? "pauseLayer" : "hudLayer");
   if (!paused && input.activeScheme !== "gamepad") input.requestLock();
 }
@@ -2073,6 +2109,7 @@ function boot() {
   });
   el("howBtn").addEventListener("click", () => el("howto").classList.toggle("hidden"));
   el("resumeBtn").addEventListener("click", togglePause);
+  el("restBtn")?.addEventListener("click", () => restUntilMorning());
   el("quitBtn").addEventListener("click", () => {
     run = null;
     paused = false;

@@ -120,6 +120,9 @@ if [ -d /opt/pw-browsers ] && node -e 'require("/opt/node22/lib/node_modules/pla
   echo
   echo "== the woods (real browser, a whole day to a verdict) =="
   node tests/woods-play.mjs
+  echo
+  echo "== seven play (real browser, camp work costs the day, rest at camp) =="
+  node tests/seven-play.mjs
 else
   echo "== smoke + gamepad: SKIPPED — Playwright/Chromium not available here =="
   echo "   (the 3D layer was NOT exercised in this run)"
