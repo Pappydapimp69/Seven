@@ -122,6 +122,23 @@ export const NIGHT_LENGTH = 150;
 export const CYCLE_LENGTH = DAY_LENGTH + NIGHT_LENGTH;
 export const NIGHT_DRAIN_MULT = 2.2;
 export const NIGHT_SLIP_MULT = 2.2;
+/**
+ * DEPTH. In Seven, sanity is a place: the deeper a mind is on the route
+ * (0 at camp, 1 at the far edge), the faster it drains and the likelier a
+ * slip. 1 + 1.5 * depth, so the edge costs 2.5x what camp does. Per MIND, off
+ * its own position, so a companion left behind recovers pace while you push
+ * on. Only an expedition has a route: every other run has depth 0, a
+ * multiplier of exactly 1, and keeps its exact rates. A rate only — it
+ * draws nothing, so the rng stream is untouched.
+ */
+export const DEPTH_DRAIN = 1.5;
+export function depthOf(sim, ch) {
+  if (!sim || !sim.expedition || !sim.world || !ch) return 0;
+  const exitZ = -(sim.world.grid / 2 - 2) * sim.world.cell;
+  const startZ = sim.world.camp.z;
+  const total = Math.max(1, startZ - exitZ);
+  return Math.max(0, Math.min(1, (startZ - ch.z) / total));
+}
 export const FIRE_WARMTH = 9; // stand this close to a burning fire and the night lets go
 
 /** Which day it is, 1-based. */
@@ -857,13 +874,15 @@ export function tickLucidity(sim, ch, dt) {
   // the draw count are exactly what they were in daylight.
   const night = nightFactor(sim, ch);
   if (night > 0) mult *= 1 + (NIGHT_DRAIN_MULT - 1) * night;
+  const depthMult = 1 + DEPTH_DRAIN * depthOf(sim, ch);
+  mult *= depthMult;
 
   // Slip check, using the draw taken at the top. Gated on the same grace window
   // as the drain — the opening calm means calm, not "calm unless unlucky".
   if (
     !ch.hallucinating &&
     sim.time >= (ch.microCooldownUntil || 0) &&
-    slipRoll < (MICRO_RATE[bandOf(ch.lucidity)] || 0) * dt * (1 + (NIGHT_SLIP_MULT - 1) * night)
+    slipRoll < (MICRO_RATE[bandOf(ch.lucidity)] || 0) * dt * (1 + (NIGHT_SLIP_MULT - 1) * night) * depthMult
   ) {
     beginMicroEpisode(sim, ch, slipDur);
     return 0;

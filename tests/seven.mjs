@@ -1,6 +1,6 @@
 // seven.mjs — pure tests for Seven's expedition-specific rules.
 
-import { createRun } from "../src/state.js";
+import { createRun, tickLucidity, depthOf, DEPTH_DRAIN } from "../src/state.js";
 import { createExpedition } from "../src/expedition.js";
 import { applyTeamLoadout, teamSkill, finalDecision, expeditionSummary, finalCount } from "../src/seven.js";
 
@@ -11,6 +11,31 @@ function check(name, fn) {
 }
 function assert(cond, msg) { if (!cond) throw new Error(msg); }
 function eq(a, b, msg) { if (a !== b) throw new Error(`${msg} — got ${a}, expected ${b}`); }
+
+// DEPTH: sanity is a place. Same mind, same seed, same ticks — only the ground
+// it stands on differs — and the deeper one must lose more.
+function drained(depthFrac, expedition = true) {
+  const sim = createRun({ seed: 77, difficulty: "standard" });
+  if (expedition) sim.expedition = createExpedition();
+  sim.time = 600; // well past the dead-calm window
+  const ch = sim.companions[0];
+  const exitZ = -(sim.world.grid / 2 - 2) * sim.world.cell;
+  ch.z = sim.world.camp.z - depthFrac * (sim.world.camp.z - exitZ);
+  ch.lucidity = 90; ch.steadyUntil = 0;
+  sim.party = [ch]; sim.player = ch; // alone in its own chain either way
+  return tickLucidity(sim, ch, 1); // the rate this tick
+}
+check("depth: the far edge drains faster than camp, by the stated factor", () => {
+  const camp = drained(0), edge = drained(1);
+  assert(camp > 0, "no drain at camp — the test is not measuring anything");
+  const ratio = edge / camp;
+  assert(Math.abs(ratio - (1 + DEPTH_DRAIN)) < 1e-9, `edge/camp drain was ${ratio}, expected ${1 + DEPTH_DRAIN}`);
+  assert(drained(0.5) > camp && drained(0.5) < edge, "drain is not monotone with depth");
+});
+check("depth: a run that is not an expedition keeps its exact rates", () => {
+  eq(drained(1, false), drained(0, false), "a non-expedition drained differently by position");
+  eq(depthOf(createRun({ seed: 1 }), { z: -999 }), 0, "depth is not 0 outside an expedition");
+});
 
 check("team loadouts assign different useful skills", () => {
   const trail = createRun({ seed: 51 });
