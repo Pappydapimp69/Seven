@@ -25,10 +25,10 @@ const fails=[];const A=(c,m)=>{if(!c)fails.push(m)};
  await page.goto(`http://localhost:${s.address().port}/index.html`,{waitUntil:"networkidle"});
  // create a save, return to title
  await page.evaluate(()=>{const M=window.__seven;M.startRun({seed:99});M.sim.time=300;M.advance(8);M.toTitle();});
- // walk the menu grid down from the top and collect what focus lands on
+ // walk the menu grid down from the top and collect what focus lands on  (9 steps: the title grew a team row, so Start is now the seventh stop)
  const seen = await page.evaluate(()=>{
    const M=window.__seven; const out=[];
-   for(let i=0;i<6;i++){ const f=document.querySelector("#title .gpfocus");
+   for(let i=0;i<9;i++){ const f=document.querySelector("#title .gpfocus");
      out.push(f? (f.id||f.dataset.diff||f.dataset.coopOpt||f.tagName) : null); M.menuDown(); }
    return out;
  });
