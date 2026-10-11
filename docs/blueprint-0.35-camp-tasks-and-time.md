@@ -105,6 +105,14 @@ fakes come from.
   light — never the HUD. The fire's light reaching past its protection is a
   deliberate trap, consistent with "light is not safety".
 
+- **Lighting:** a fire can be lit any time, but it only shields at night and
+  burns wood whenever lit, so the natural moment is dusk. Lighting it is a
+  dusk choice (or the lead's own hands).
+- **The woodpile belongs to camp.** Wood counts only once it is carried back
+  to the pile; a gatherer still out at dark is wood not yet in it. Stocking
+  the fire at dusk draws from the pile. Moving camp means carrying the pile or
+  leaving it behind. (Today `sim.wood` is one global number; that changes.)
+
 ## Open
 
 - What a "chunk" is for each task, in clock time.
