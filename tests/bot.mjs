@@ -21,7 +21,7 @@ const MEMORY_ODDS = 0.65;
 export function playRun(seed) {
   const sim = S.createSim({ seed });
   const rand = createRng(seed ^ 0xabcdef).next;
-  const log = { fireNights: 0, coldNights: 0, campsMoved: 0, calls: 0, found: 0, keptReal: 0, keptFake: 0 };
+  const log = { lieDay: 0, lieArea: 0, deadFireDay: 0, fireNights: 0, coldNights: 0, campsMoved: 0, calls: 0, found: 0, keptReal: 0, keptFake: 0 };
   const panels = (s) => {
     if (s.pending === "dawn") {
       const ranked = [...s.mates].sort((a, b) => (b.skills.cut || 0) - (a.skills.cut || 0));
@@ -50,6 +50,8 @@ export function playRun(seed) {
   let guard = 0, triedDay = 0, calledHome = false;
   while (sim.status === "playing" && sim.day <= MAX_DAYS && guard++ < 3000) {
     if (sim.pending) { panels(sim); continue; }
+    if (sim.lead.lucidity < 40 && !log.lieDay) { log.lieDay = sim.day; log.lieArea = campArea() + 1; }
+    if (sim.lead.lucidity < 25 && !log.deadFireDay) log.deadFireDay = sim.day;
     if (!sim.camp.built && guard === 1) { S.campAction(sim); finish(sim, panels); continue; }
     const left = S.lightLeft(sim);
     // Dusk: home, fire stocked, sleep through.
@@ -130,6 +132,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
   const by = (k) => rows.filter((r) => r.ending === k).length;
   const avg = (k) => (rows.reduce((s, r) => s + (r[k] || 0), 0) / rows.length).toFixed(1);
+  const lied = rows.filter((r) => r.lieDay);
+  console.log(`hallucinations begin (lucidity under 40): ${lied.length}/${rows.length} runs, on day ${lied.length ? (lied.reduce((a, r) => a + r.lieDay, 0) / lied.length).toFixed(1) : "-"} (range ${lied.length ? Math.min(...lied.map((r) => r.lieDay)) + "-" + Math.max(...lied.map((r) => r.lieDay)) : "-"}), in woods ${lied.length ? (lied.reduce((a, r) => a + r.lieArea, 0) / lied.length).toFixed(1) : "-"}`);
   console.log(`bot: ${rows.length} runs in ${((Date.now() - t0) / 1000).toFixed(1)}s — home ${by("home")}, alone ${by("alone")}, lost ${by("lost")}, stuck ${by("stuck")} · days ${avg("day")} · saved ${avg("saved")} · taken→found ${avg("calls")}/${avg("found")} · cold nights ${avg("coldNights")}`);
   assert(by("stuck") === 0, "a run stalled");
 }
