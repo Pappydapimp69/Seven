@@ -22,6 +22,7 @@ import { TRIGGERS, PREFLIGHT } from "../tools/triggers.mjs";
 // sat in my head at the moment I made it — not the way the lesson was later
 // filed. That gap IS the thing being tested.
 const MISTAKES = [
+  ["adding a listener", "the menu click sound went in with requestAnimationFrame and registered every frame"],
   ["changing a default", "DEFAULT_HFOV 90 -> 78 left the pause ladder and main.js on the old value"],
   ["adding a field", "sim.woods gated branches and was nearly not save state"],
   ["play again", "a new run one press from the verdict, mounting a renderer each time"],

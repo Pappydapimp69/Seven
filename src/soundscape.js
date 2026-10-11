@@ -9,7 +9,7 @@
 // place: deeper woods sound lower, sparser and stranger — for everyone, whether
 // or not they are well.
 
-import { DIRS8 } from "./config.js?v=seven-1.12.0";
+import { DIRS8 } from "./config.js?v=seven-1.12.1";
 
 /** World angle of a compass word. y grows south, so north is -y. */
 export function dirAngle(dir) {
@@ -65,6 +65,21 @@ export function mixFor(s) {
     humPitch: 140 - 55 * Math.min(1, s.litAge || 0),      // blue sings higher than red
     music: (0.16 + 0.1 * (1 - s.daylight)) * (s.panelOpen ? 0.55 : 1),
   };
+}
+
+/**
+ * The menu sounds: a soft, low tap, not a blip. Sine only, no pitch sweep, a
+ * gentle attack, and a low-pass over the top so nothing is ever sharp. A press
+ * is a little fuller (two partials a fifth apart); a step between buttons is
+ * the quietest; going back is lower.
+ */
+export function uiSound(kind) {
+  const spec = {
+    move: { freqs: [330], gain: 0.03, attack: 0.012, len: 0.09, lp: 1100 },
+    select: { freqs: [262, 392], gain: 0.045, attack: 0.014, len: 0.17, lp: 1200 },
+    back: { freqs: [196], gain: 0.04, attack: 0.014, len: 0.14, lp: 900 },
+  };
+  return spec[kind] || spec.move;
 }
 
 /** How long between footsteps, and how they sound, by the ground under you. */

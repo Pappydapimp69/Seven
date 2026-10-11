@@ -40,6 +40,12 @@ export const TRIGGERS = [
     from: "seven 0.23.0: four identical cairns made `place` — one of six chronicle perturbation kinds — impossible to catch, while the code's own comment claimed spacing had solved it",
   },
   {
+    when: ["adding a listener", "event listener", "addeventlistener", "wiring a handler", "click sound", "hooking a button"],
+    ask: "Does the line that registers this run MORE THAN ONCE — inside the frame loop, a panel's render function, or anything called on every open?",
+    then: "Each pass adds another copy. Register once, at startup. Then assert the EFFECT of one user action is counted once (one press, one sound, one handler call), not that the handler exists.",
+    from: "seven 1.12.0: the menu click sound was registered inside frame(); after 150 ms one press played 44 stacked sounds, which sounded harsh long before the tone itself was",
+  },
+  {
     when: ["changing a constant", "changing a default", "tuning a value", "new default"],
     ask: "Is this value ALSO written somewhere else — a pre-selected control, a static class in markup, a pre-load copy, a test asserting the literal?",
     then: "Move every copy together, and assert the copies against EACH OTHER on a cleared profile rather than each against a number.",

@@ -5,14 +5,14 @@
 // exported actions. Messages for the player go through sim.say(); they never
 // mention the hidden meter.
 
-import { createRng } from "./rng.js?v=seven-1.12.0";
-import { composeRoster } from "./names.js?v=seven-1.12.0";
-import { createWorld, areaOfRow, K, kindAt, walkable, lostSpots, fellTree } from "./world.js?v=seven-1.12.0";
-import { dist, cellOf, moveBody, nearestWalkable, walkTo } from "./body.js?v=seven-1.12.0";
-import { openDay, record, recordPlan, account } from "./chronicle.js?v=seven-1.12.0";
-import { makeCampAt, takeCampDown as campDown, campWood, stackWood, takeWood } from "./camp.js?v=seven-1.12.0";
-import { updateMate, setTask, chopAt, frontDeadfall, practice, moving, DAY_TASKS, NIGHT_TASKS } from "./mates.js?v=seven-1.12.0";
-import * as C from "./config.js?v=seven-1.12.0";
+import { createRng } from "./rng.js?v=seven-1.12.1";
+import { composeRoster } from "./names.js?v=seven-1.12.1";
+import { createWorld, areaOfRow, K, kindAt, walkable, lostSpots, fellTree } from "./world.js?v=seven-1.12.1";
+import { dist, cellOf, moveBody, nearestWalkable, walkTo } from "./body.js?v=seven-1.12.1";
+import { openDay, record, recordPlan, account } from "./chronicle.js?v=seven-1.12.1";
+import { makeCampAt, takeCampDown as campDown, campWood, stackWood, takeWood } from "./camp.js?v=seven-1.12.1";
+import { updateMate, setTask, chopAt, frontDeadfall, practice, moving, DAY_TASKS, NIGHT_TASKS } from "./mates.js?v=seven-1.12.1";
+import * as C from "./config.js?v=seven-1.12.1";
 
 // ---- the clock ---------------------------------------------------------------
 export const minutes = (sim) => sim.ticks * C.TICK_MIN;

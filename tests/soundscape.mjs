@@ -5,7 +5,7 @@ import fs from "fs";
 import { harness, assert, S } from "./lib.mjs";
 import { createRng } from "../src/rng.js";
 import { serialize } from "../src/save.js";
-import { dirAngle, placeSound, placeAngle, scaleFor, mixFor, stepFor } from "../src/soundscape.js";
+import { dirAngle, placeSound, placeAngle, scaleFor, mixFor, stepFor, uiSound } from "../src/soundscape.js";
 import { clearDeadfall } from "../src/world.js";
 import * as C from "../src/config.js";
 
@@ -44,6 +44,21 @@ T.check("the layers: birds fade with depth and dusk, crickets come with dark, fi
   assert(mixFor({ ...base, litDist: 2, litAge: 0 }).humPitch > mixFor({ ...base, litDist: 2, litAge: 1 }).humPitch, "a blue pylon does not sing higher than a red one");
   assert(mixFor({ ...base, panelOpen: true }).music < mixFor(base).music, "music does not duck behind a panel");
   assert(stepFor(1).freq !== stepFor(2).freq, "dirt and grass sound the same");
+});
+
+T.check("menu sounds are soft: low, sine, no sweep, a gentle attack, a low-pass, quiet", () => {
+  for (const k of ["move", "select", "back", "anything-else"]) {
+    const u = uiSound(k);
+    assert(Math.max(...u.freqs) <= 450, `${k}: ${Math.max(...u.freqs)} Hz is sharp (limit 450)`);
+    assert(u.lp <= 1300, `${k}: low-pass at ${u.lp} Hz lets the top through`);
+    assert(u.attack >= 0.01, `${k}: ${u.attack}s attack clicks`);
+    assert(u.gain <= 0.06, `${k}: gain ${u.gain} is loud for a menu`);
+    assert(u.len >= 0.08 && u.len <= 0.25, `${k}: ${u.len}s is not a short tap`);
+  }
+  assert(uiSound("move").gain < uiSound("select").gain, "stepping is not quieter than pressing");
+  const code = strip(fs.readFileSync(new URL("../src/audio.js", import.meta.url), "utf8"));
+  const ui = code.slice(code.indexOf("export function ui("), code.indexOf("export function sting"));
+  assert(/"sine"/.test(ui) && !/triangle|sawtooth|square|exponentialRampToValueAtTime\(u\.freq|frequency\.exponential/.test(ui), "the menu sound is not a plain sine with no pitch sweep");
 });
 
 T.check("THE RULE: sound never reads the hidden meter — checked in the source, not by trust", () => {

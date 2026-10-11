@@ -2,20 +2,20 @@
 // this file reads sim.pending and opens the matching panel, and the panel
 // answers through the sim's exported actions.
 
-import * as S from "./sim.js?v=seven-1.12.0";
-import { perceive } from "./percept.js?v=seven-1.12.0";
-import { createView, SLOT_COLORS } from "./view.js?v=seven-1.12.0";
-import { createInput } from "./input.js?v=seven-1.12.0";
-import * as UI from "./ui.js?v=seven-1.12.0";
-import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.12.0";
-import * as Audio from "./audio.js?v=seven-1.12.0";
-import { createRng } from "./rng.js?v=seven-1.12.0";
-import { composeRoster } from "./names.js?v=seven-1.12.0";
-import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, TASK_SKILL, frontDeadfall } from "./mates.js?v=seven-1.12.0";
-import { areaOfRow, kindAt } from "./world.js?v=seven-1.12.0";
-import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_INFO, NO_SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.12.0";
+import * as S from "./sim.js?v=seven-1.12.1";
+import { perceive } from "./percept.js?v=seven-1.12.1";
+import { createView, SLOT_COLORS } from "./view.js?v=seven-1.12.1";
+import { createInput } from "./input.js?v=seven-1.12.1";
+import * as UI from "./ui.js?v=seven-1.12.1";
+import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.12.1";
+import * as Audio from "./audio.js?v=seven-1.12.1";
+import { createRng } from "./rng.js?v=seven-1.12.1";
+import { composeRoster } from "./names.js?v=seven-1.12.1";
+import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, TASK_SKILL, frontDeadfall } from "./mates.js?v=seven-1.12.1";
+import { areaOfRow, kindAt } from "./world.js?v=seven-1.12.1";
+import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_INFO, NO_SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.12.1";
 
-const BUILD = "seven-1.12.0";
+const BUILD = "seven-1.12.1";
 const esc = UI.esc;
 const store = (() => { try { return window.localStorage; } catch { return null; } })();
 const readJSON = (k, d) => { try { const v = store && store.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
@@ -34,7 +34,8 @@ const input = createInput({
 // ---- play actions ---------------------------------------------------------------
 function onAction(a, e) {
   if (splashOn) { leaveSplash(); return; }
-  if (UI.isOpen()) { UI.navigate(a, e); Audio.ui(a === "act" ? "select" : a === "back" || a === "pause" ? "back" : "move"); return; }
+  // "act" plays no sound here: it presses the button, and the click does.
+  if (UI.isOpen()) { UI.navigate(a, e); if (a !== "act") Audio.ui(a === "back" || a === "pause" ? "back" : "move"); return; }
   if (!sim || sim.status !== "playing" || sim.pending) return;
   if (a === "pause") return pausePanel();
   if (S.busy(sim)) return;
@@ -371,8 +372,7 @@ function frame(now) {
     if (sim) afterTicks();
     if (sim) draw(dt);
   }
-  document.getElementById("modal").addEventListener("click", (e) => { if (e.target.closest("button")) Audio.ui("select"); });
-requestAnimationFrame(frame);
+  requestAnimationFrame(frame);
 }
 
 /** Stick to world: forward is -my along yaw, strafe is mx to its right. */
@@ -478,4 +478,6 @@ for (const ev of ["keydown", "pointerdown", "touchstart"]) {
   // Capture, and stop it there: the press that leaves the splash must not also press a menu button.
   window.addEventListener(ev, (e) => { if (splashOn) { e.preventDefault(); e.stopImmediatePropagation(); leaveSplash(); } }, { capture: true, passive: false });
 }
+// One listener, once: a menu press is one soft sound.
+document.getElementById("modal").addEventListener("click", (e) => { if (e.target.closest("button")) Audio.ui("select"); });
 requestAnimationFrame(frame);

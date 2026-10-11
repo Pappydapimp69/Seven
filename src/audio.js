@@ -12,9 +12,9 @@
 // What the always-on layers do comes from soundscape.js, which only knows
 // public facts (the woods you are in, night, fire, pylons) — never lucidity.
 
-import { mixFor, scaleFor, placeSound, placeAngle, dirAngle, stepFor } from "./soundscape.js?v=seven-1.12.0";
+import { mixFor, scaleFor, placeSound, placeAngle, dirAngle, stepFor, uiSound } from "./soundscape.js?v=seven-1.12.1";
 
-export const stats = { steps: 0, plays: 0 };
+export const stats = { steps: 0, plays: 0, ui: 0 };
 let ctx = null, master = null, analyser = null, sfx = null, music = null, amb = null, verb = null;
 const wet = { sfx: null, amb: null, music: null };   // each bus's own send to the shared reverb, switched with it
 let noiseBuf = null;
@@ -363,11 +363,16 @@ function dawn(t) {
 // ---- interface -----------------------------------------------------------------
 export function ui(kind) {
   if (!ctx || ctx.state !== "running" || !settings.sfx) return;
-  const t = ctx.currentTime, o = ctx.createOscillator(), g = ctx.createGain();
-  const spec = { move: [620, 0.05, 0.05], select: [880, 0.09, 0.09], back: [440, 0.09, 0.07] }[kind] || [700, 0.05, 0.05];
-  o.type = "triangle"; o.frequency.setValueAtTime(spec[0], t); o.frequency.exponentialRampToValueAtTime(spec[0] * (kind === "back" ? 0.75 : 1.2), t + spec[1]);
-  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(spec[2], t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + spec[1] + 0.02);
-  o.connect(g); out(g, sfx); o.start(t); o.stop(t + spec[1] + 0.05);
+  stats.ui++;
+  const t = ctx.currentTime, u = uiSound(kind);
+  const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = u.lp; lp.Q.value = 0.4;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(u.gain, t + u.attack);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + u.len);
+  lp.connect(g);
+  for (const f of u.freqs) { const o = ctx.createOscillator(); o.type = "sine"; o.frequency.value = f; o.connect(lp); o.start(t); o.stop(t + u.len + 0.05); }
+  out(g, sfx, { send: 0.05 });
 }
 
 /** The studio's sting, and proof that sound is allowed. */

@@ -71,6 +71,17 @@ await p.keyboard.down("KeyW"); await p.waitForTimeout(1600); await p.keyboard.up
 const walked = await p.evaluate((s1) => window.__seven.Audio.stats.steps - s1, steps.s1);
 ok(steps.still === 0 && walked >= 2, `footsteps follow movement: standing ${steps.still}, walking ${walked}`);
 
+// A menu press makes ONE soft sound: the key and the click it causes used to play it twice.
+await p.keyboard.press("Escape");
+const ui0 = await p.evaluate(() => window.__seven.Audio.stats.ui);
+await p.focus("#modal [data-do='how']");
+await p.keyboard.press("Enter");
+await p.waitForTimeout(150);
+const uiPress = (await p.evaluate(() => window.__seven.Audio.stats.ui)) - ui0;
+ok(uiPress === 1, `pressing a menu button with the keyboard plays one sound (${uiPress})`);
+await p.keyboard.press("Escape");
+await p.evaluate(() => window.__seven.click("Resume"));
+
 // Settings: effects off silences the whistle; music off thins the bed; both persist.
 await p.keyboard.press("Escape");
 await p.evaluate(() => window.__seven.click("Sound effects"));
