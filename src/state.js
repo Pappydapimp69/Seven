@@ -877,6 +877,7 @@ export function activatePylon(sim, actor = sim.player) {
   emit(sim, "draw", `The pylon gives out — ${inside.length} of you caught it. It will not light again.`, {
     id: p.id,
     count: inside.length,
+    who: actor.id,   // the second pair of hands, who made it fire
   });
   return { ok: true, primed: true, confirmed: true, caught: inside.length };
 }

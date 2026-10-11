@@ -186,7 +186,12 @@ export function proveMystery(expedition, nameOf = (x) => x) {
   m.correct = m.accused === m.suspect;
   m.proofPending = false;
   m.closed = !m.correct;
-  m.searchReady = !!m.correct;
+  // Exposing the fake no longer brings anyone home (Brain: gating rescue on
+  // exposure brought the real one back 0.27 of the time). The real one is
+  // still out there and has to be FOUND; finding them now walks them straight
+  // in, with no second one at the fire to choose between.
+  m.exposed = !!m.correct;
+  m.searchReady = false;
   return {
     mysteryId: m.id,
     correct: m.correct,
@@ -244,6 +249,38 @@ export function recoverMissing(expedition, id) {
   return true;
 }
 
+/** Where the missing one is, out in their area. Hidden; only walking there finds them. */
+export function placeMissing(expedition, id, x, z) {
+  const m = (expedition?.missing || []).find((e) => e.id === id && !e.recovered && !e.abandoned);
+  if (!m) return null;
+  m.x = x; m.z = z; m.nights = 0;
+  return m;
+}
+
+/**
+ * The two at the fire, asked about the same day (Brain: rescue returns a
+ * duplicate; comparing answers locates the bent fact, memory decides). The real
+ * account comes from the log; the other is the same log with one fact bent.
+ */
+export function twinAccounts(expedition, id, nameOf = (x) => x) {
+  const m = (expedition?.mysteries || []).find((x) => x.suspect === id && !x.recovered && !x.abandoned);
+  if (!m) return null;
+  return { day: m.day, real: accountForMystery(m, nameOf, false).lines, fake: accountForMystery(m, nameOf, true).lines };
+}
+
+/** The lead keeps one of the two. Keeping the fake loses the real one for good. */
+export function resolveTwin(expedition, id, keptReal) {
+  if (keptReal) return recoverMissing(expedition, id);
+  const m = (expedition?.missing || []).find((e) => e.id === id && !e.recovered && !e.abandoned);
+  if (!m) return false;
+  m.abandoned = true;
+  m.sentAway = true;
+  m.abandonedDay = expedition.day;
+  const mystery = (expedition.mysteries || []).find((x) => x.suspect === id && !x.recovered);
+  if (mystery) { mystery.abandoned = true; mystery.closed = true; mystery.searchReady = false; }
+  return true;
+}
+
 export function advanceArea(expedition, areas = 1) {
   if (!expedition || !(areas > 0)) return [];
   expedition.area += areas;
@@ -274,6 +311,7 @@ export function serializeExpedition(expedition) {
     sleeping: !!expedition.sleeping,
     planDawnPending: !!expedition.planDawnPending,
     duskPlanDay: expedition.duskPlanDay ?? null,
+    hereArea: expedition.hereArea ?? 0,
     day: expedition.day,
     phase: expedition.phase,
     area: expedition.area,
@@ -301,6 +339,7 @@ export function deserializeExpedition(data) {
     sleeping: !!data.sleeping,
     planDawnPending: !!data.planDawnPending,
     duskPlanDay: data.duskPlanDay ?? null,
+    hereArea: data.hereArea ?? 0,
     day: data.day,
     phase: data.phase,
     area: data.area ?? 0,
@@ -392,6 +431,8 @@ function phraseFactCore(f, nameOf) {
   const who = f.actor === "you" ? "You" : nameOf(f.actor);
   switch (f.kind) {
     case "fire": return `${who} lit the fire`;
+    case "found": return `${who} found someone out in the trees`;
+    case "kept": return `${who} chose who stayed at the fire`;
     case "breakcamp": return `${who} took camp down`;
     case "makecamp": return `${who} made camp`;
     case "feed": return `${who} fed the fire`;
@@ -401,7 +442,7 @@ function phraseFactCore(f, nameOf) {
     case "gather": return `${who} brought back ${f.object || "supplies"}`;
     case "pylon": return `${who} worked the pylon marked ${f.object || "unknown"}`;
     case "survey": return `${who} logged ${f.object || "a marker"}`;
-    case "recovered": return `${who} came back into their own head`;
+    case "recovered": return who === "You" ? "You came back to yourself" : `${who} came back into their own head`;
     case "trail": return `${who} pushed the route forward`;
     case "shadow": return `${who} says there was a call from the trees`;
     default: return `${who} remembers ${f.object || f.kind || "the work"}`;

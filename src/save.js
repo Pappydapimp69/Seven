@@ -319,6 +319,8 @@ export function serializeRun(sim) {
     fire: sim.fire ? { x: sim.fire.x, z: sim.fire.z, fuel: sim.fire.fuel, builtAt: sim.fire.builtAt ?? 0 } : null,
     // Seven's movable camp and its woodpile.
     camp: sim.camp ? { x: sim.camp.x, z: sim.camp.z, pile: sim.camp.pile || 0, built: !!sim.camp.built } : null,
+    // Seven: the one you found and are walking home.
+    found: sim.found ? { id: sim.found.id, x: sim.found.x, z: sim.found.z } : null,
     // Ids only. The cells come back from the regenerated world; what cannot be
     // regenerated is the fact that somebody cut through them.
     deadfallsCleared: (sim.deadfalls || []).filter((d) => d.cleared).map((d) => d.id),
@@ -455,6 +457,7 @@ export function deserializeRun(data) {
   sim.fire = data.fire
     ? { x: data.fire.x, z: data.fire.z, fuel: data.fire.fuel ?? 0, builtAt: data.fire.builtAt ?? 0 }
     : null;
+  if (data.found) sim.found = { id: data.found.id, x: data.found.x, z: data.found.z, facing: 0 };
   if (data.camp) sim.camp = { x: data.camp.x, z: data.camp.z, pile: data.camp.pile ?? 0, built: !!data.camp.built };
   sim.sightTimer = data.sightTimer ?? 0;
   sim.lastDt = data.lastDt ?? 0;

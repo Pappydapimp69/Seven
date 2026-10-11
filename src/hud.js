@@ -459,7 +459,7 @@ export function createHud(sim, percept, opts = {}) {
     if (el.level) {
       if (el.levelPillLabel) el.levelPillLabel.textContent = sim.expedition ? "Area" : "Basin";
       el.level.textContent = sim.expedition
-        ? `${Math.min(7, (sim.expedition.area ?? 0) + 1)} / 7`
+        ? `${Math.min(7, (sim.expedition.hereArea ?? sim.expedition.area ?? 0) + 1)} / 7`
         : `${sim.level} / ${sim.campaignLength}`;
     }
 

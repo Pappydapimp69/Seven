@@ -1,3 +1,5 @@
+import { moveWithCollision, cellToWorld } from "./world.js?v=seven-0.36.0";
+import { areaOfRow } from "./trail.js?v=seven-0.36.0";
 // seven.js — Seven-specific campaign rules that do not need DOM or Three.
 
 export const TEAM_LOADOUTS = Object.freeze({
@@ -205,4 +207,73 @@ export function makeCamp(sim) {
   if (c && c.built) return { ok: false, reason: "already" };
   sim.camp = createCamp(sim.player);
   return { ok: true };
+}
+
+// ---- the missing, out in the woods (blueprint 0.35, Brain disappearance) ---
+export const DIRS8 = Object.freeze(["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"]);
+/** Eight directions — what can actually be heard (Brain: size the tell to the ear). North is -z. */
+export function bearingWord(from, to) {
+  const a = Math.atan2(to.x - from.x, -(to.z - from.z));
+  const i = ((Math.round(a / (Math.PI / 4)) % 8) + 8) % 8;
+  return DIRS8[i];
+}
+/** The call fades with every night out, but never to nothing (Brain: unfloored, it is silent by night 6). */
+export const CALL_FLOOR = 0.25;
+export const callLoudness = (nights) => Math.max(CALL_FLOOR, 0.9 * Math.pow(0.6, nights));
+export const loudWord = (l) => (l > 0.7 ? "clear" : l > 0.45 ? "faint" : "barely there");
+/** False calls depend on nobody (Brain: a call that only comes when someone is missing announces it). */
+export const FALSE_CALL_RATE = 0.3;
+
+/**
+ * The calls heard at first light. Real ones come from where the missing stand;
+ * a false one can come any morning from day two. The tell is a bearing that
+ * holds from dawn to dawn. `rFalse`/`rBear` are drawn every dawn by the caller.
+ */
+export function dawnCalls(expedition, from, rFalse, rBear) {
+  const out = [];
+  for (const m of expedition.missing || []) {
+    if (m.recovered || m.abandoned || m.x == null) continue;
+    out.push({ real: true, bearing: bearingWord(from, m), loud: callLoudness(m.nights || 0) });
+  }
+  if (expedition.day >= 2 && rFalse < FALSE_CALL_RATE) {
+    out.push({ real: false, bearing: DIRS8[Math.floor(rBear * 8) % 8], loud: 0.4 + rBear * 0.4 });
+  }
+  // Order says nothing: a false call is not always the second one.
+  if (out.length > 1 && rBear < 0.5) out.reverse();
+  return out;
+}
+
+/** An open spot in an area, at least `minDist` from camp. Deterministic given `r`. */
+export function missingSpot(world, area, from, r, minDist = 15) {
+  const G = world.grid, spots = [];
+  for (let cz = 1; cz < G - 1; cz++) {
+    if (areaOfRow(cz) !== area) continue;
+    for (let cx = 1; cx < G - 1; cx++) {
+      if (world.blocked[cz * G + cx]) continue;
+      const p = cellToWorld(cx, cz, G);
+      if (Math.hypot(p.x - from.x, p.z - from.z) >= minDist) spots.push(p);
+    }
+  }
+  if (!spots.length) return null;
+  return spots[Math.min(spots.length - 1, Math.floor(r * spots.length))];
+}
+
+/** Has the lead walked up to someone missing? */
+export const FIND_RADIUS = 5;
+export function checkFound(sim) {
+  const e = sim.expedition;
+  if (!e || sim.found) return null;
+  return (e.missing || []).find((m) => !m.recovered && !m.abandoned && m.x != null &&
+    Math.hypot(sim.player.x - m.x, sim.player.z - m.z) <= FIND_RADIUS) || null;
+}
+/** The one you found walks home with you. */
+export function stepFound(sim, dt) {
+  const f = sim.found;
+  if (!f) return;
+  const d = Math.hypot(sim.player.x - f.x, sim.player.z - f.z);
+  if (d <= 2.5) return;
+  const sp = Math.min(4.6, 2 + d * 0.3) * dt;
+  const next = moveWithCollision(sim.world, f, ((sim.player.x - f.x) / d) * sp, ((sim.player.z - f.z) / d) * sp);
+  f.facing = Math.atan2(next.x - f.x, next.z - f.z);
+  f.x = next.x; f.z = next.z;
 }

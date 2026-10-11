@@ -1033,6 +1033,13 @@ export function perceivedCompanions(percept, sim) {
     // companion; a phantom is already fully fake and gains nothing from it.
     monstrous: lying && c.id === percept.monsterId,
   }));
+  // SEVEN: the one you found, walking home with you. A real body with a name
+  // already on the roster — drawn, never listed.
+  if (sim.found) {
+    const who = sim.companions.find((c) => c.id === sim.found.id);
+    real.push({ id: `${sim.found.id}-found`, name: who ? who.name : "", role: who ? who.role : "", x: sim.found.x, z: sim.found.z,
+      facing: sim.found.facing || 0, hallucinating: false, goalKind: "follow", phantom: false, monstrous: false });
+  }
   return lying ? [...real, ...percept.phantomCompanions] : real;
 }
 

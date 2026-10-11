@@ -1074,3 +1074,8 @@ body[data-run-kind="seven"] .pill-seed { display: none; }
 .plan-name { flex: 0 0 7.5rem; font-weight: 600; letter-spacing: 0.04em; }
 .plan-skill { flex: 0 0 6.5rem; color: var(--dim); font-size: 0.8rem; }
 .plan-row .diff { flex: 1; text-align: left; }
+
+/* Seven: two of one name at the fire. */
+.twin-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; margin: 0.6rem 0 0.9rem; }
+.twin-label { color: var(--dim); font-size: 0.8rem; margin: 0 0 0.3rem; }
+@media (max-width: 720px) { .twin-cols { grid-template-columns: 1fr; } }

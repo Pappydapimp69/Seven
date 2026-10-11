@@ -71,6 +71,10 @@ echo "== tasks (companions chop, gather, keep camp and watch) =="
 node tests/tasks.mjs
 echo
 
+echo "== rescue (the missing are out there; two come home as one name) =="
+node tests/rescue.mjs
+echo
+
 echo "== seven (team loadouts and final choices) =="
 node tests/seven.mjs
 echo
@@ -143,6 +147,9 @@ if [ -d /opt/pw-browsers ] && node -e 'require("/opt/node22/lib/node_modules/pla
   echo
   echo "== seven play (real browser, camp work costs the day, rest at camp) =="
   node tests/seven-play.mjs
+  echo
+  echo "== rescue play (real browser: missing, found, two at the fire) =="
+  node tests/rescue-play.mjs
 else
   echo "== smoke + gamepad: SKIPPED — Playwright/Chromium not available here =="
   echo "   (the 3D layer was NOT exercised in this run)"

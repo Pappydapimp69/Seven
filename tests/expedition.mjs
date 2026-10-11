@@ -149,7 +149,10 @@ check("naming the replacement requires a pylon proof before recovery", () => {
   eq(activeMystery(good).searchReady, false, "search unlocked before pylon proof");
   const proved = proveMystery(good, (id) => id);
   assert(proved.correct, "correct proof failed");
-  eq(activeMystery(good).searchReady, true, "search not unlocked");
+  // blueprint 0.35 / Brain: a proof EXPOSES the fake; it does not bring anyone
+  // home. The real one still has to be found out in the woods.
+  eq(activeMystery(good).exposed, true, "a correct proof did not expose the fake");
+  eq(activeMystery(good).searchReady, false, "a proof unlocked an instant search");
   assert(recoverMissing(good, r.missing.id), "recovery failed");
   eq(activeMystery(good), null, "recovered mystery still active");
 

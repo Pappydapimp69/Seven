@@ -9,17 +9,18 @@ import {
 } from "./state.js?v=seven-0.36.0";
 import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.36.0";
 import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.36.0";
-import { generateWorld } from "./world.js?v=seven-0.36.0";
+import { generateWorld, worldToCell } from "./world.js?v=seven-0.36.0";
 import {
   attachSites, startDay, beatAt, briefFor, canWork, workBeat, fallNight, ask, accuse,
   updateWorkHold, dawnLine, BEATS, PHASE, ASKS_ALLOWED,
 } from "./woods.js?v=seven-0.36.0";
 import {
-  createExpedition, spendDaylight, recordFact, sleep, resolveNight, advanceArea,
+  createExpedition, spendDaylight, recordFact, sleep, resolveNight, advanceArea, placeMissing, twinAccounts, resolveTwin,
   recoverMissing, activeMystery, askMystery, accuseMystery, proveMystery, MYSTERY_ASKS_ALLOWED,
   startKeystoneMorning, advanceKeystoneMorning,
 } from "./expedition.js?v=seven-0.36.0";
-import { DEFAULT_TEAM, applyTeamLoadout, teamSkill, finalDecision, finalCount, nearbyIds, campIds, FIRE_DAYLIGHT, restCheck, raiseSkill, SKILL_MAX, createCamp, depositWood, dismantleCamp, makeCamp } from "./seven.js?v=seven-0.36.0";
+import { DEFAULT_TEAM, applyTeamLoadout, teamSkill, finalDecision, finalCount, nearbyIds, campIds, FIRE_DAYLIGHT, restCheck, raiseSkill, SKILL_MAX, createCamp, depositWood, dismantleCamp, makeCamp,
+  dawnCalls, loudWord, missingSpot, checkFound, stepFound } from "./seven.js?v=seven-0.36.0";
 import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.36.0";
 import { createRenderer } from "./render.js?v=seven-0.36.0";
 import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.36.0";
@@ -71,7 +72,7 @@ const AUTOSAVE_EVERY = 5;
 let lastFrame = 0;
 let campaignSeed = 0; // the seed the player actually entered/rolled — each basin in the campaign derives its own seed from this so "New basin" always starts a fresh campaign
 
-const LAYERS = ["title", "hudLayer", "pauseLayer", "debriefLayer", "finalLayer", "planLayer"];
+const LAYERS = ["title", "hudLayer", "pauseLayer", "debriefLayer", "finalLayer", "planLayer", "twinLayer"];
 const runKindOf = (sim) => (sim.expedition ? "seven" : sim.woods ? "woods" : sim.trainer ? "training" : "basin");
 function screens(show) {
   for (const id of LAYERS) el(id).classList.toggle("hidden", id !== show);
@@ -98,7 +99,7 @@ function screens(show) {
 // or a keyboard cannot reach.
 const ROOT_SELECTOR = {
   title: "#title", pauseLayer: "#pauseLayer", debriefLayer: "#debriefLayer",
-  finalLayer: "#finalLayer", planLayer: "#planLayer",
+  finalLayer: "#finalLayer", planLayer: "#planLayer", twinLayer: "#twinLayer",
   accusePanel: "#accusePanel", verdictPanel: "#verdictPanel",
 };
 const menu = { root: null, row: 0, col: 0 };
@@ -995,6 +996,52 @@ function closePlan() {
   if (input.activeScheme !== "gamepad") input.requestLock();
 }
 
+// ---- the one you found, at the fire ---------------------------------------
+let twinUi = null; // { id, realLeft } while the choice is open
+function bringFoundHome(sim) {
+  const e = sim.expedition, id = sim.found.id;
+  const m = (e.missing || []).find((x) => x.id === id);
+  const mystery = (e.mysteries || []).find((x) => x.suspect === id && !x.recovered && !x.abandoned);
+  const name = nameOfSeven(sim, id);
+  // The fake was already exposed at a pylon: nobody to choose between.
+  if (!mystery || mystery.exposed) {
+    resolveTwin(e, id, true);
+    const c = sim.companions.find((x) => x.id === id);
+    if (c) c.replacedDay = null;
+    sim.found = null;
+    recordFact(e, { kind: "recovered", actor: "you", object: id, t: sim.time });
+    hudSay(`${name} is home.`);
+    audio.play("recover");
+    return;
+  }
+  const acc = twinAccounts(e, id, (who) => nameOfSeven(sim, who));
+  if (!acc || !m) { sim.found = null; return; }
+  // Which side the real one stands on: fixed by the day and the name, no draw.
+  const realLeft = (mystery.day + id.charCodeAt(id.length - 1)) % 2 === 0;
+  twinUi = { id, realLeft };
+  el("twinHead").textContent = `Two of ${name} at the fire.`;
+  el("twinSub").textContent = `Same name, same face. One of them never left. Ask them both about day ${acc.day}.`;
+  const fill = (ul, lines) => { ul.textContent = ""; for (const t of lines) ul.appendChild(Object.assign(document.createElement("li"), { textContent: t })); };
+  fill(el("twinLeft"), realLeft ? acc.real : acc.fake);
+  fill(el("twinRight"), realLeft ? acc.fake : acc.real);
+  screens("twinLayer");
+}
+function chooseTwin(left) {
+  if (!twinUi || !run) return;
+  const sim = run.sim, e = sim.expedition, id = twinUi.id;
+  const keptReal = left === twinUi.realLeft;
+  resolveTwin(e, id, keptReal);
+  const c = sim.companions.find((x) => x.id === id);
+  if (c && keptReal) c.replacedDay = null;
+  sim.found = null;
+  twinUi = null;
+  screens("hudLayer");
+  if (input.activeScheme !== "gamepad") input.requestLock();
+  // The same words either way: the game never says which one you kept.
+  hudSay(`One ${nameOfSeven(sim, id)} stays at the fire. The other walks into the trees.`);
+  recordFact(e, { kind: "kept", actor: "you", object: id, t: sim.time });
+}
+
 /** Dawn and dusk open the plan — at the camp. Away from it, nobody gets new orders. */
 function sevenPlanTriggers(sim) {
   const e = sim.expedition;
@@ -1028,6 +1075,9 @@ function campAction() {
   } else {
     makeCamp(sim);
     recordFact(e, { kind: "makecamp", actor: "you", object: "camp", withWhom: nearbyIds(sim, "you", CORROBORATE_RADIUS), t: sim.time });
+    // Walking forward is how you abandon them: no prompt, the window just closes.
+    const campArea = areaOfRow(worldToCell(sim.camp.x, sim.camp.z, sim.world.grid).cz);
+    if (campArea > e.area) advanceArea(e, campArea - e.area);
     spendSevenDaylight(sim, 2, "camp");
     hudSay("Camp, here. It wants a fire before dark.");
   }
@@ -1059,12 +1109,26 @@ function resolveSevenNight(sim) {
   sleep(e);
   const before = e.missing.length;
   const gone = resolveNight(e, sim.rng, sim.companions.map((c) => c.id));
+  // FOUR DRAWS EVERY DAWN, whatever the night did: where a missing one stands
+  // (two), whether a false call comes, and its bearing.
+  const rSpot = sim.rng(), rSpare = sim.rng(), rFalse = sim.rng(), rBear = sim.rng();
+  void rSpare;
+  for (const m of e.missing) if (!m.recovered && !m.abandoned && m.x != null) m.nights = (m.nights || 0) + 1;
   if (gone && e.missing.length > before) {
     const c = sim.companions.find((x) => x.id === gone.missing.id);
     if (c) c.replacedDay = e.day - 1;
-    emitToHud(sim, "expedition", "Night passes. In the morning, the count is right and the day is not.");
-  } else {
-    emitToHud(sim, "expedition", "Night passes. In the morning, the trail is still there.");
+    const from = sim.camp && sim.camp.built ? sim.camp : sim.world.camp;
+    const spot = missingSpot(sim.world, gone.missing.area, from, rSpot);
+    if (spot) placeMissing(e, gone.missing.id, spot.x, spot.z);
+  }
+  // NOTHING IS ANNOUNCED (IDEAS): the same line whether or not anyone went.
+  emitToHud(sim, "expedition", "Night passes.");
+  // First light: calls from the trees, heard at the camp. Real ones hold their
+  // bearing from dawn to dawn; false ones come from nowhere in particular.
+  if (atBuiltCamp(sim)) {
+    for (const call of dawnCalls(e, sim.camp, rFalse, rBear)) {
+      emitToHud(sim, "expedition", `At first light, a voice from the trees to the ${call.bearing}. ${loudWord(call.loud)[0].toUpperCase()}${loudWord(call.loud).slice(1)}.`);
+    }
   }
   const key = startKeystoneMorning(e, sim.rng, sim.companions.map((c) => c.id), sim.time);
   if (key) startSevenKeystone(sim, key);
@@ -1099,12 +1163,21 @@ function updateSevenProgress(sim) {
   const e = sim.expedition;
   if (!e || sim.status !== "playing") return;
   const route = sevenRoute(sim);
-  if (route.area > e.area) {
-    const gained = route.area - e.area;
-    const abandoned = advanceArea(e, gained);
-    recordFact(e, { kind: "trail", actor: "you", object: `area ${e.area}`, t: sim.time });
-    if (abandoned.length) emitToHud(sim, "expedition", "The old trail closes behind you.");
-    else emitToHud(sim, "expedition", `The party pushes into area ${e.area}.`);
+  // Where the lead stands is for the HUD. The rescue window moves with the
+  // CAMP (owner, 2026-10-11): making camp in a new area is moving forward.
+  if (route.area !== e.hereArea) {
+    if (route.area > (e.hereArea ?? 0)) recordFact(e, { kind: "trail", actor: "you", object: `area ${route.area + 1}`, t: sim.time });
+    e.hereArea = route.area;
+  }
+  // The one you found walks home with you; at a built camp, they are home.
+  const found = checkFound(sim);
+  if (found) {
+    sim.found = { id: found.id, x: found.x, z: found.z, facing: 0 };
+    recordFact(e, { kind: "found", actor: "you", object: found.id, t: sim.time });
+    hudSay(`You find ${nameOfSeven(sim, found.id)} out here. Bring them home.`);
+  }
+  if (sim.found && !twinUi && atBuiltCamp(sim) && Math.hypot(sim.found.x - sim.camp.x, sim.found.z - sim.camp.z) <= CAMP_RADIUS) {
+    bringFoundHome(sim);
   }
   if (route.progress >= 1) {
     sim.status = "decision";
@@ -1465,10 +1538,6 @@ function handleAction(action, arg, player = run.players[0]) {
   if (sim.expedition) {
     const mystery = activeMystery(sim.expedition);
     if (woodsUi && action === ACTIONS.SURVEY) { closeWoodsPanel(); return; }
-    if (mystery?.searchReady && action === ACTIONS.SURVEY) {
-      searchSevenBackTrail(sim);
-      return;
-    }
     if (mystery && !mystery.accused && action === ACTIONS.CHECK_IN) {
       if (typeof arg === "number") player.selected = arg;
       const target = sim.companions[player.selected];
@@ -1951,6 +2020,7 @@ function step(dt, intent) {
   for (let r = 0; r < reps; r++) {
     tick(sim, dt, lapseInput);
     tickEvents.push(...sim.events);
+    if (sim.found) stepFound(sim, Math.min(dt, 0.1));
     if (ex) {
       if (ex.lapse > 0 && !ex.sleeping) ex.lapse = Math.max(0, ex.lapse - Math.min(dt, 0.1));
       if (sim.status !== "playing" || (r > 0 && sevenClock(sim.time).day > ex.day)) break;
@@ -2124,7 +2194,7 @@ function frame(now) {
   // frames where there is nothing to step — a paused game or a run that has
   // ended must not leave the screen black.
   updateNightfall();
-  if (!run || paused || planUi || run.sim.status !== "playing" || !intent) return;
+  if (!run || paused || planUi || twinUi || run.sim.status !== "playing" || !intent) return;
   pollCoopJoin();
   step(dt, intent);
 }
@@ -2267,6 +2337,8 @@ function boot() {
   el("restBtn")?.addEventListener("click", () => restUntilMorning());
   el("campBtn")?.addEventListener("click", () => campAction());
   el("planGo")?.addEventListener("click", () => closePlan());
+  el("twinKeepLeft")?.addEventListener("click", () => chooseTwin(true));
+  el("twinKeepRight")?.addEventListener("click", () => chooseTwin(false));
   const trainStep = (d) => { if (!run?.sim.expedition) return; trainIdx += d; paintTraining(run.sim); };
   el("trainPrev")?.addEventListener("click", () => trainStep(-1));
   el("trainNext")?.addEventListener("click", () => trainStep(1));
