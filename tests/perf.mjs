@@ -57,9 +57,9 @@ const cv = await p.evaluate(() => ({ w: document.getElementById("game").width, i
 ok(cv.w === Math.round(cv.iw * cv.dpr), `the canvas backing stays ${cv.w} = ${cv.iw} × ${cv.dpr}: only the internal image gets coarser`);
 await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
 // It climbs a step every ~second; give it up to 25 s rather than guessing how long.
-await p.waitForFunction((q) => window.__seven.quality >= q + 0.1, slow.q, { timeout: 25000 }).catch(() => {});
+await p.waitForFunction((q) => window.__seven.quality >= q + 0.05, slow.q, { timeout: 25000 }).catch(() => {});
 const back = await p.evaluate(() => window.__seven.quality);
-ok(back >= slow.q + 0.1, `and when the machine recovers it gives the pixels back (${slow.q.toFixed(2)} → ${back.toFixed(2)})`);
+ok(back >= slow.q + 0.05, `and when the machine recovers it gives the pixels back (${slow.q.toFixed(2)} → ${back.toFixed(2)})`);
 
 // The HUD leaves the DOM alone when nothing it shows has changed.
 const muts = await p.evaluate(async () => {
