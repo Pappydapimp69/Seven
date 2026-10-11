@@ -27,6 +27,10 @@ and `docs/blueprint-1.0-remake.md` first.
   soundscape.js is PURE (what the woods sound like; panning; the music's scale by
   woods and night). THE RULE: sound is built from the percept and public facts,
   never lucidity — tests/soundscape.mjs checks the source for it.
+- `src/whistle.js` — everyone's whistle, derived from the seed; a fake's is theirs with
+  ONE thing off. `src/tutorial.js` — the training camp (steps advance on state).
+  Landmarks (creek, pond, birches, rocks, old burn, stones) live in world.js: chosen by
+  hash, never the rng, so no map changed (tests/world.mjs holds fingerprints).
 - `src/save.js`, `src/input.js`, `src/ui.js`, `src/main.js` (panels + loop).
 - Tests: `tests/run-all.sh` — world, sim, chronicle, save, triggers, a
   whole-run bot (`tests/bot.mjs`), `tests/play.mjs` and `tests/view.mjs` (drift,

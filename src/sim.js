@@ -5,14 +5,16 @@
 // exported actions. Messages for the player go through sim.say(); they never
 // mention the hidden meter.
 
-import { createRng } from "./rng.js?v=seven-1.12.2";
-import { composeRoster } from "./names.js?v=seven-1.12.2";
-import { createWorld, areaOfRow, K, kindAt, walkable, lostSpots, fellTree } from "./world.js?v=seven-1.12.2";
-import { dist, cellOf, moveBody, nearestWalkable, walkTo } from "./body.js?v=seven-1.12.2";
-import { openDay, record, recordPlan, account } from "./chronicle.js?v=seven-1.12.2";
-import { makeCampAt, takeCampDown as campDown, campWood, stackWood, takeWood } from "./camp.js?v=seven-1.12.2";
-import { updateMate, setTask, chopAt, frontDeadfall, practice, moving, DAY_TASKS, NIGHT_TASKS } from "./mates.js?v=seven-1.12.2";
-import * as C from "./config.js?v=seven-1.12.2";
+import { createRng } from "./rng.js?v=seven-1.13.0";
+import { composeRoster } from "./names.js?v=seven-1.13.0";
+import { createWorld, areaOfRow, K, kindAt, walkable, lostSpots, fellTree, nearestLandmark } from "./world.js?v=seven-1.13.0";
+import { dist, cellOf, moveBody, nearestWalkable, walkTo } from "./body.js?v=seven-1.13.0";
+import { openDay, record, recordPlan, account } from "./chronicle.js?v=seven-1.13.0";
+import { makeCampAt, takeCampDown as campDown, campWood, stackWood, takeWood } from "./camp.js?v=seven-1.13.0";
+import { updateMate, setTask, chopAt, frontDeadfall, practice, moving, DAY_TASKS, NIGHT_TASKS } from "./mates.js?v=seven-1.13.0";
+import * as C from "./config.js?v=seven-1.13.0";
+import { signature, whistleOf } from "./whistle.js?v=seven-1.13.0";
+import { startTutorial } from "./tutorial.js?v=seven-1.13.0";
 
 // ---- the clock ---------------------------------------------------------------
 export const minutes = (sim) => sim.ticks * C.TICK_MIN;
@@ -34,6 +36,7 @@ export function createSim(opts = {}) {
   const seed = (opts.seed ?? 1) >>> 0;
   const rng = createRng(seed);
   const world = createWorld(seed);
+  const count = opts.tutorial ? opts.team.length : C.TEAM;
   const names = opts.team ? opts.team.map((t) => t.name) : composeRoster(rng, C.TEAM);
   const sim = {
     v: 1, seed, rng, world, ticks: 0, day: 1, status: "playing", ending: null,
@@ -48,9 +51,12 @@ export function createSim(opts = {}) {
     exposure: {}, nightHours: 0,
     pending: null, twin: null, home: null, exitLeft: true,
     msgs: [], saveDue: false,
+    stats: { asked: 0, whistled: 0, felled: 0 },       // what the training camp watches for
+    tutorial: !!opts.tutorial,
   };
-  for (let i = 0; i < C.TEAM; i++) {
-    const a = (i / C.TEAM) * Math.PI * 2;
+  if (opts.tutorial) { sim.dawnDone = 1; startTutorial(sim); }
+  for (let i = 0; i < count; i++) {
+    const a = (i / count) * Math.PI * 2;
     const spot = nearestWalkable(world, sim.camp.x + Math.cos(a) * 2, sim.camp.y + Math.sin(a) * 2);
     const skills = { ...C.NO_SKILLS, ...(opts.team && opts.team[i] ? opts.team[i].skills : {}) };
     const id = `m${i}`;
@@ -162,6 +168,7 @@ export function act(sim) {
 
 /** Days someone can be asked about: the last three finished days. */
 export function askableDays(sim) {
+  if (sim.tutorial) return [1];                 // the training camp lets you ask about today
   const out = [];
   for (let d = sim.day - 1; d >= 1 && out.length < 3; d--) out.push(d);
   return out;
@@ -172,6 +179,7 @@ export function askAbout(sim, id, day) {
   const who = f && f.id === id && !sim.mates.some((m) => m.id === id) ? f : sim.mates.find((m) => m.id === id) || f;
   if (!who) return [];
   startBusy(sim, "ask", C.ASK_MIN);
+  sim.stats.asked++;
   return account(sim, who, day);
 }
 
@@ -237,7 +245,8 @@ export function rest(sim) {
  */
 export function callOut(sim) {
   sim.say("You whistle.");
-  sim.sfx("whistle");
+  sim.stats.whistled++;
+  sim.sfx("whistle", { sig: signature(sim.seed, "lead") });
   for (const m of sim.mates) {
     if (m.asleep || m.hidden || dist(m, sim.lead) > C.CALL_RANGE) continue;
     if (!m.fake && m.lucidity < C.CALL_MIN_LUCIDITY) continue;
@@ -260,7 +269,7 @@ function finishBusy(sim) {
       const n = sim.rng.int(C.FELL_YIELD[0], C.FELL_YIELD[1]);
       if (t && !t.felled) {
         fellTree(w, t);
-        L.carry += n;
+        L.carry += n; sim.stats.felled++;
         record(sim, "fell", ["lead"]);
         sim.say(`The tree comes down. You carry ${n} wood.`);
         sim.sfx("treefall", { x: t.cx + 0.5, y: t.cy + 0.5 });
@@ -313,7 +322,7 @@ function lightPylon(sim, b) {
     return;
   }
   p.state = "lit"; p.litAt = minutes(sim);
-  record(sim, "pylon", ["lead", partner.id]);
+  record(sim, "pylon", ["lead", partner.id], { place: p.landmark, area: p.area });
   sim.say("The pylon burns blue.");
   sim.sfx("pylon");
 }
@@ -339,6 +348,16 @@ export function twinAccounts(sim) {
   const fakeLines = account(sim, fake, day);
   const realLeft = ((sim.seed + day * 7 + ms.id.charCodeAt(1)) % 2) === 0;
   return { name: ms.name, day, realLeft, left: realLeft ? realLines : fakeLines, right: realLeft ? fakeLines : realLines };
+}
+/**
+ * Hear the one on the left or the right whistle. They each whistle the way they
+ * do now — the real one the way they always did, the other with one thing off.
+ * It costs nothing: only your memory of how they used to whistle can tell.
+ */
+export function hearTwin(sim, left) {
+  const t = twinAccounts(sim), ms = sim.missing, fake = sim.mates.find((m) => m.id === ms.id);
+  const sig = left === t.realLeft ? signature(sim.seed, ms.id) : whistleOf(sim, fake);
+  sim.sfx("hear", { sig, pan: left ? -0.6 : 0.6 });
 }
 /** Keep one. The other walks into the trees. The message is the same either way. */
 export function keepTwin(sim, keepLeft) {
@@ -557,6 +576,8 @@ export function tick(sim, input = {}) {
   const wasNight = isNight(sim);
   let walked = false;
   sim.ticks++;
+  // The training camp holds a fine morning: the clock rolls back an hour when it would pass nine.
+  if (sim.tutorial && sim.ticks * C.TICK_MIN > 3 * 60) sim.ticks -= Math.round(60 / C.TICK_MIN);
 
   // The lead.
   if (L.busy) {
@@ -591,7 +612,10 @@ export function tick(sim, input = {}) {
   if (ms && !ms.found && dist(ms, L) <= findReach(sim)) {
     const t = sim.mates.filter((m) => dist(m, L) <= 4 && !m.asleep).sort((a, b) => (b.skills.track || 0) - (a.skills.track || 0))[0];
     if (t) practice(t, "track");
-    ms.found = true; ms.path = null; sim.say(`${ms.name} is here, in the trees. They follow you.`); sim.sfx("found"); }
+    ms.found = true; ms.path = null; sim.say(`${ms.name} is here, in the trees. They follow you.`); sim.sfx("found");
+    const lm = nearestLandmark(w, ms.x, ms.y, 7);
+    record(sim, "found", [ms.id], lm ? { place: lm.kind, area: lm.area } : {});
+  }
   if (ms && ms.found) {
     if (dist(ms, L) > 2.2) { const c = cellOf(L); walkTo(w, ms, c.cx, c.cy, C.MATE_SPEED); }
     const twin = sim.mates.find((m) => m.id === ms.id);

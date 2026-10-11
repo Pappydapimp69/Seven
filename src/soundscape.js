@@ -9,7 +9,7 @@
 // place: deeper woods sound lower, sparser and stranger — for everyone, whether
 // or not they are well.
 
-import { DIRS8 } from "./config.js?v=seven-1.12.2";
+import { DIRS8 } from "./config.js?v=seven-1.13.0";
 
 /** World angle of a compass word. y grows south, so north is -y. */
 export function dirAngle(dir) {
@@ -64,6 +64,8 @@ export function mixFor(s) {
     hum: near(s.litDist, 9) * 0.5,
     humPitch: 140 - 55 * Math.min(1, s.litAge || 0),      // blue sings higher than red
     music: (0.16 + 0.1 * (1 - s.daylight)) * (s.panelOpen ? 0.55 : 1),
+    // Asleep, the world goes dull and far off: the whole mix through a low-pass.
+    muffle: s.asleep ? 520 : 20000,
   };
 }
 

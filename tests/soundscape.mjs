@@ -43,6 +43,7 @@ T.check("the layers: birds fade with depth and dusk, crickets come with dark, fi
   assert(mixFor({ ...base, fireDist: 3, fireFuel: 0 }).fire === 0, "a dead fire still roars");
   assert(mixFor({ ...base, litDist: 2, litAge: 0 }).humPitch > mixFor({ ...base, litDist: 2, litAge: 1 }).humPitch, "a blue pylon does not sing higher than a red one");
   assert(mixFor({ ...base, panelOpen: true }).music < mixFor(base).music, "music does not duck behind a panel");
+  assert(mixFor({ ...base, asleep: true }).muffle < 1000 && mixFor(base).muffle >= 20000, "asleep, the world does not go dull and far off");
   assert(stepFor(1).freq !== stepFor(2).freq, "dirt and grass sound the same");
 });
 
@@ -102,7 +103,7 @@ T.check("a real answer and a false one sound the same; sounds are not saved and 
   s.mates[1].fake = true; s.mates[1].since = 2;
   const shape = (m) => { s.sounds.length = 0; m.task = { kind: "camp", chunk: 0, carry: 0 }; m.following = false; m.x = s.lead.x + 3; m.y = s.lead.y; m.heard = { wait: 0.1 }; S.tick(s, {}); const e = s.sounds.find((x) => x.name === "answer"); return e && Object.keys(e).sort().join(); };
   const real = shape(s.mates[0]), fake = shape(s.mates[1]);
-  assert(real && real === fake && real === "name,slot,x,y".split(",").sort().join(), `an answer carries more than where and whose slot: ${real} vs ${fake}`);
+  assert(real && real === fake && real === "name,sig,slot,x,y".split(",").sort().join(), `an answer carries more than where and whose slot: ${real} vs ${fake}`);
   const before = s.rng.state; s.sfx("whistle"); s.sfx("voice", { dir: "north" });
   assert(s.rng.state === before, "announcing a sound drew a random number");
   assert(!JSON.stringify(serialize(s)).includes("sounds"), "sounds were saved");

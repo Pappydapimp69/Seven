@@ -12,9 +12,10 @@
 // What the always-on layers do comes from soundscape.js, which only knows
 // public facts (the woods you are in, night, fire, pylons) — never lucidity.
 
-import { mixFor, scaleFor, placeSound, placeAngle, dirAngle, stepFor, uiSound } from "./soundscape.js?v=seven-1.12.2";
+import { mixFor, scaleFor, placeSound, placeAngle, dirAngle, stepFor, uiSound } from "./soundscape.js?v=seven-1.13.0";
 
 export const stats = { steps: 0, plays: 0, ui: 0 };
+let muffle = null;
 let ctx = null, master = null, analyser = null, sfx = null, music = null, amb = null, verb = null;
 const wet = { sfx: null, amb: null, music: null };   // each bus's own send to the shared reverb, switched with it
 let noiseBuf = null;
@@ -64,7 +65,8 @@ function build() {
   const comp = ctx.createDynamicsCompressor();
   comp.threshold.value = -14; comp.ratio.value = 4;
   analyser = ctx.createAnalyser(); analyser.fftSize = 1024;
-  master.connect(comp); comp.connect(analyser); analyser.connect(ctx.destination);
+  muffle = ctx.createBiquadFilter(); muffle.type = "lowpass"; muffle.frequency.value = 20000; muffle.Q.value = 0.5;
+  master.connect(muffle); muffle.connect(comp); comp.connect(analyser); analyser.connect(ctx.destination);
   sfx = ctx.createGain(); music = ctx.createGain(); amb = ctx.createGain();
   sfx.connect(master); music.connect(master); amb.connect(master);
   // One shared tail: generated noise that fades, so everything can sit in air.
@@ -222,6 +224,7 @@ function layers(m, t, ease, fire, lit) {
   if (lit) live.humPan.pan.setTargetAtTime(lit.pan, t, 0.1);
   live.hum.forEach((o, i) => o.frequency.setTargetAtTime(m.humPitch * (i ? 1.006 : 1), t, 0.5));
   ease(live.musicGain.gain, m.music, 2);
+  muffle.frequency.setTargetAtTime(m.muffle, t, 0.6);
 }
 
 function footsteps(st, L) {
@@ -252,8 +255,9 @@ export function play(ev, lead) {
   const t = ctx.currentTime;
   const at = (ev.x != null ? placeSound(lead, lead.yaw, ev) : ev.dir ? placeAngle(dirAngle(ev.dir), lead.yaw) : { pan: 0, front: 1, dist: 0 });
   switch (ev.name) {
-    case "whistle": whistle(t, 0, 1, 0, 1); break;
-    case "answer": whistle(t, at.pan, 0.35 + 0.25 * at.front, ev.slot || 0, 0.85, true); break;
+    case "whistle": whistle(t, 0, 1, ev.sig); break;
+    case "answer": whistle(t, at.pan, 0.35 + 0.25 * at.front, ev.sig, true); break;
+    case "hear": whistle(t, ev.pan || 0, 0.7, ev.sig, true); break;
     case "voice": voice(t, at); break;
     case "treefall": treefall(t, at); break;
     case "crack": crack(t, at); break;
@@ -271,26 +275,31 @@ export function play(ev, lead) {
   }
 }
 
+const DEFAULT_SIG = { reg: 1, jump: 1.5, pace: 1, shape: "rise" };
+
 /**
- * A whistle: a pure tone that rises and falls, with a breath of noise, and
- * air round it so it carries. `slot` shifts the pitch a little, so you can
- * learn whose answer is whose — for real and false alike.
+ * A whistle, in the whistler's own way (whistle.js): a pure tone whose register,
+ * leap and pace are theirs, in one of four contours — rise, leap, trill, call —
+ * with a breath of noise and air round it so it carries and echoes back.
  */
-function whistle(t, pan, gain, slot, shape, soft = false) {
+function whistle(t, pan, gain, sig = DEFAULT_SIG, soft = false) {
+  const base = 1750 * sig.reg * (soft ? 0.96 : 1), P = sig.pace, J = sig.jump;
+  const len = 0.72 * P;
   const o = ctx.createOscillator(), g = ctx.createGain(), vib = ctx.createOscillator(), vg = ctx.createGain();
-  const base = 1750 * (1 + slot * 0.055) * (soft ? 0.94 : 1);
   o.type = "sine";
-  o.frequency.setValueAtTime(base, t);
-  o.frequency.exponentialRampToValueAtTime(base * 1.5, t + 0.22);
-  o.frequency.setValueAtTime(base * 1.5, t + 0.3);
-  o.frequency.exponentialRampToValueAtTime(base * 1.18, t + 0.62 * shape);
+  const at = (f, when) => o.frequency.exponentialRampToValueAtTime(Math.max(300, f), t + when);
+  const set = (f, when) => o.frequency.setValueAtTime(Math.max(300, f), t + when);
+  if (sig.shape === "leap") { set(base * 0.8, 0); set(base * 0.8, 0.16 * P); at(base * J * 1.05, 0.2 * P); set(base * J * 1.05, 0.5 * P); at(base * J, len); }
+  else if (sig.shape === "trill") { set(base, 0); for (let i = 0; i < 5; i++) { set(base * (i % 2 ? 1 : J * 0.9), (0.04 + i * 0.09) * P); } set(base * J * 0.9, 0.5 * P); at(base * 1.1, len); }
+  else if (sig.shape === "call") { set(base * J, 0); set(base * J, 0.26 * P); at(base, 0.3 * P); set(base, len); }
+  else { set(base, 0); at(base * J, 0.22 * P); set(base * J, 0.3 * P); at(base * 1.18, len); }
   vib.frequency.value = 6.5; vg.gain.value = 18; vib.connect(vg); vg.connect(o.frequency);
   g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.32 * gain, t + 0.05);
-  g.gain.setValueAtTime(0.32 * gain, t + 0.3); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.7);
+  g.gain.setValueAtTime(0.32 * gain, t + 0.3 * P); g.gain.exponentialRampToValueAtTime(0.0001, t + len + 0.05);
   o.connect(g);
   const br = noiseSrc(false), bf = ctx.createBiquadFilter(), bg = ctx.createGain();
   bf.type = "bandpass"; bf.frequency.value = base * 1.3; bf.Q.value = 3;
-  bg.gain.setValueAtTime(0.0001, t); bg.gain.exponentialRampToValueAtTime(0.07 * gain, t + 0.05); bg.gain.exponentialRampToValueAtTime(0.0001, t + 0.7);
+  bg.gain.setValueAtTime(0.0001, t); bg.gain.exponentialRampToValueAtTime(0.07 * gain, t + 0.05); bg.gain.exponentialRampToValueAtTime(0.0001, t + len + 0.05);
   br.connect(bf); bf.connect(bg);
   const bus = ctx.createGain(); bus.gain.value = 1; g.connect(bus); bg.connect(bus);
   out(bus, sfx, { pan, send: soft ? 0.7 : 0.5 });
@@ -298,7 +307,7 @@ function whistle(t, pan, gain, slot, shape, soft = false) {
   const d = ctx.createDelay(1.5), fb = ctx.createGain(), lp = ctx.createBiquadFilter(), eg = ctx.createGain();
   d.delayTime.value = soft ? 0.5 : 0.38; fb.gain.value = soft ? 0.25 : 0.42; lp.type = "lowpass"; lp.frequency.value = 2600; eg.gain.value = 0.7;
   bus.connect(d); d.connect(lp); lp.connect(fb); fb.connect(d); lp.connect(eg); out(eg, sfx, { pan: -pan * 0.5, send: 0.5 });
-  o.start(t); vib.start(t); br.start(t, Math.random(), 0.8); o.stop(t + 0.8); vib.stop(t + 0.8);
+  o.start(t); vib.start(t); br.start(t, Math.random(), 0.8); o.stop(t + len + 0.2); vib.stop(t + len + 0.2);
   setTimeout(() => { try { eg.disconnect(); d.disconnect(); fb.disconnect(); } catch { /* gone already */ } }, 3500);
 }
 

@@ -3,6 +3,7 @@
 
 import { harness, assert, S } from "./lib.mjs";
 import { account, facts, record, recordPlan } from "../src/chronicle.js";
+import { LANDMARK_NAME } from "../src/world.js";
 
 const T = harness("chronicle");
 
@@ -60,4 +61,27 @@ T.check("the bent fact varies across runs — not a list of tells", () => {
 });
 
 void recordPlan;
+T.check("a pylon is told with its place; a fake bends the PLACE to another real clearing of the same woods", () => {
+  let bentPlace = 0;
+  for (let seed = 1; seed <= 60; seed++) {
+    const s = S.createSim({ seed });
+    const pk = s.world.pylons.find((p) => p.area === 0);
+    S.applyPlan(s, "dawn", {});
+    record(s, "pylon", ["lead", "m1"], { place: pk.landmark, area: pk.area });
+    S.resolveNight(s);
+    const real = account(s, s.mates[0], 1);
+    assert(real.some((l) => l.includes(LANDMARK_NAME[pk.landmark])), `seed ${seed}: the account does not name ${pk.landmark}`);
+    const fake = account(s, { ...s.mates[0], fake: true, since: 2 }, 1);
+    const diff = real.filter((l, i) => l !== fake[i]);
+    assert(diff.length === 1, `seed ${seed}: ${diff.length} sentences differ`);
+    const said = fake.find((l) => l.includes("pylon at"));
+    if (said && !said.includes(LANDMARK_NAME[pk.landmark])) {
+      bentPlace++;
+      const named = Object.entries(LANDMARK_NAME).find(([, n]) => said.includes(n));
+      assert(named && s.world.pockets.some((p) => p.area === 0 && p.kind === named[0]), `seed ${seed}: the wrong place is not a clearing in these woods: ${said}`);
+    }
+  }
+  assert(bentPlace > 5, `only ${bentPlace} of 60 fakes ever got the place wrong`);
+});
+
 T.done();

@@ -7,11 +7,11 @@
 // stands at the edge of the light who is not there. The count always says
 // "Seven of you" — that one is not the percept lying, it is the game.
 
-import { hash01 } from "./rng.js?v=seven-1.12.2";
-import { walkable } from "./world.js?v=seven-1.12.2";
-import { isNight, minutes, found } from "./sim.js?v=seven-1.12.2";
-import { working } from "./mates.js?v=seven-1.12.2";
-import { LIE_BELOW, FIRE_LIE_BELOW, PYLON_BURN } from "./config.js?v=seven-1.12.2";
+import { hash01 } from "./rng.js?v=seven-1.13.0";
+import { walkable } from "./world.js?v=seven-1.13.0";
+import { isNight, minutes, found } from "./sim.js?v=seven-1.13.0";
+import { working } from "./mates.js?v=seven-1.13.0";
+import { LIE_BELOW, FIRE_LIE_BELOW, PYLON_BURN } from "./config.js?v=seven-1.13.0";
 
 export function perceive(sim) {
   const L = sim.lead, luc = L.lucidity, now = minutes(sim);
@@ -57,6 +57,8 @@ export function perceive(sim) {
     building, takingDown,
     lead: { x: L.x, y: L.y, facing: L.facing, busy: L.busy ? L.busy.kind : null, carry: L.carry, asleep: L.asleep },
     people, pylons,
+    // The clearings and what each is (public: the world never lies about its ground).
+    landmarks: sim.world.pockets.map((p) => ({ id: p.id, kind: p.kind, x: p.x + 0.5, y: p.y + 0.5, decor: p.decor })),
     camp: c.built ? { x: c.x, y: c.y, pile: c.pile, surplus: c.surplus || 0, fire } : null,
     piles: sim.piles.map((p) => ({ id: p.id, x: p.x, y: p.y, wood: p.wood, surplus: !!p.surplus })),
     count: "Seven of you",

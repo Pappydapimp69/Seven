@@ -9,7 +9,7 @@
 export const TICKS_PER_SEC = 30;
 export const TICK_MIN = 0.2;                 // 1 game hour = 300 ticks = 10 real seconds
 export const SPEED_BUSY = 5;                 // the lead's hands are on a job: quicker, but you see the work
-export const SPEED_SLEEP = 60;               // the lead is asleep
+export const SPEED_SLEEP = 20;                // asleep: a whole night is about nine seconds, long enough to be a scene
 
 export const DAWN = 6 * 60;                  // minute of day
 export const DUSK = 18 * 60;

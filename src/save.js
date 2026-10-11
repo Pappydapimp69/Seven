@@ -4,10 +4,10 @@
 // (Brain mirage#E8: a round trip agreeing with itself is not proof); a body
 // standing in a wall is moved to the nearest open cell.
 
-import { createRng } from "./rng.js?v=seven-1.12.2";
-import { createWorld, clearDeadfall, fellTree, walkable } from "./world.js?v=seven-1.12.2";
-import { nearestWalkable } from "./body.js?v=seven-1.12.2";
-import { attach } from "./sim.js?v=seven-1.12.2";
+import { createRng } from "./rng.js?v=seven-1.13.0";
+import { createWorld, clearDeadfall, fellTree, walkable } from "./world.js?v=seven-1.13.0";
+import { nearestWalkable } from "./body.js?v=seven-1.13.0";
+import { attach } from "./sim.js?v=seven-1.13.0";
 
 export const SAVE_VERSION = 1;
 export const SAVE_KEY = "seven:run";
@@ -51,7 +51,7 @@ export function deserialize(data) {
     dawnDone: data.dawnDone, duskDone: data.duskDone, duskSeen: data.duskSeen,
     exposure: data.exposure || {}, nightHours: data.nightHours || 0,
     pending: data.pending, twin: data.twin, home: data.home, exitLeft: data.exitLeft, keystone: data.keystone || null,
-    msgs: [], saveDue: false,
+    msgs: [], saveDue: false, stats: { asked: 0, whistled: 0, felled: 0 },
   };
   // A path is cells {cx, cy}; one that does not resolve to open ground is dropped (re-planned).
   const okCell = (c) => c && Number.isInteger(c.cx) && Number.isInteger(c.cy) && walkable(world, c.cx, c.cy);

@@ -134,6 +134,53 @@ ok(Math.max(...mouseTurns) - Math.min(...mouseTurns) < 1e-6, `the same hand move
   await ctx.close();
 }
 
+// Landmarks: each clearing LOOKS like what it is called, so a wrong place is checkable.
+// Assert it in the live scene (pixels), not in the data: six different clearings, six different pictures.
+{
+  const ctx = await browser.newContext({ viewport: { width: 800, height: 500 } });
+  const p = await ctx.newPage();
+  p.on("pageerror", (e) => errs.push(String(e)));
+  await p.goto(`http://127.0.0.1:${server.address().port}/`);
+  await p.waitForFunction(() => window.__seven);
+  await p.keyboard.press("Space"); await p.waitForFunction(() => !window.__seven.splash);
+  const seen = {};
+  for (const kind of ["creek", "birches", "rocks", "old burn", "pond", "stones"]) {
+    await p.evaluate((kind) => {
+      const M = window.__seven; let pk = null;
+      for (let seed = 1; seed < 80 && !pk; seed++) { M.newRun({ seed, startCamp: true }); pk = M.sim.world.pockets.find((q) => q.kind === kind); }
+      const sim = M.sim; M.S.applyPlan(sim, "dawn", {}); M.setQ(1);
+      const side = pk.x > sim.world.trailX[pk.y] ? 1 : -1;
+      sim.lead.x = pk.x + 0.5 - side * 4.5; sim.lead.y = pk.y + 0.5; sim.lead.yaw = side > 0 ? 0 : Math.PI;
+      sim.mates.forEach((m) => { m.x = sim.camp.x; m.y = sim.camp.y; });
+      window.__pk = pk; window.__decor = pk.decor; window.__tint = sim.world.tint.slice();
+    }, kind);
+    await p.keyboard.press("Escape");                   // hold still and draw
+    const grab = async () => { await p.waitForTimeout(300); return p.evaluate(() => {
+      const c = document.getElementById("game"), g = c.getContext("2d");
+      const x0 = Math.floor(c.width * 0.25), y0 = Math.floor(c.height * 0.25), w = Math.floor(c.width * 0.5), h = Math.floor(c.height * 0.5);
+      return Array.from(g.getImageData(x0, y0, w, h).data);
+    }); };
+    const withIt = await grab();
+    // The same spot, the same pose, with only the clearing's dressing taken away.
+    await p.evaluate(() => { window.__pk.decor = []; window.__seven.sim.world.tint.fill(0); });
+    const without = await grab();
+    await p.evaluate(() => { window.__pk.decor = window.__decor; window.__seven.sim.world.tint.set(window.__tint); });
+    let n = 0, r = 0, gg = 0, b = 0;
+    for (let i = 0; i < withIt.length; i += 4) {
+      if (Math.abs(withIt[i] - without[i]) + Math.abs(withIt[i + 1] - without[i + 1]) + Math.abs(withIt[i + 2] - without[i + 2]) > 24) { n++; r += withIt[i]; gg += withIt[i + 1]; b += withIt[i + 2]; }
+    }
+    seen[kind] = { n, rgb: n ? [r / n, gg / n, b / n].map(Math.round) : [0, 0, 0] };
+    await p.keyboard.press("Escape");
+  }
+  const kinds = Object.keys(seen);
+  ok(kinds.every((k) => seen[k].n > 120), `every clearing adds something to the picture (changed pixels: ${kinds.map((k) => `${k} ${seen[k].n}`).join(" · ")})`);
+  const sig = kinds.map((k) => seen[k].rgb.map((v) => Math.round(v / 14)).join(","));
+  ok(new Set(sig).size >= 4, `and not the same thing each time (colour of what each adds: ${kinds.map((k, i) => `${k} ${seen[k].rgb}`).join(" · ")})`);
+  const blueness = (k) => seen[k].rgb[2] - seen[k].rgb[0];
+  ok(blueness("pond") > blueness("old burn") && blueness("creek") > blueness("rocks"), "water reads bluer than burn and rock");
+  await ctx.close();
+}
+
 // The 360° sweep: everyone around you is seen at some heading.
 {
   const ctx = await browser.newContext({ viewport: { width: 1000, height: 640 } });

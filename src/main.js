@@ -2,20 +2,21 @@
 // this file reads sim.pending and opens the matching panel, and the panel
 // answers through the sim's exported actions.
 
-import * as S from "./sim.js?v=seven-1.12.2";
-import { perceive } from "./percept.js?v=seven-1.12.2";
-import { createView, SLOT_COLORS } from "./view.js?v=seven-1.12.2";
-import { createInput } from "./input.js?v=seven-1.12.2";
-import * as UI from "./ui.js?v=seven-1.12.2";
-import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.12.2";
-import * as Audio from "./audio.js?v=seven-1.12.2";
-import { createRng } from "./rng.js?v=seven-1.12.2";
-import { composeRoster } from "./names.js?v=seven-1.12.2";
-import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, TASK_SKILL, frontDeadfall } from "./mates.js?v=seven-1.12.2";
-import { areaOfRow, kindAt } from "./world.js?v=seven-1.12.2";
-import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_INFO, NO_SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.12.2";
+import * as S from "./sim.js?v=seven-1.13.0";
+import { perceive } from "./percept.js?v=seven-1.13.0";
+import { createView, SLOT_COLORS } from "./view.js?v=seven-1.13.0";
+import { createInput } from "./input.js?v=seven-1.13.0";
+import * as UI from "./ui.js?v=seven-1.13.0";
+import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.13.0";
+import { STEPS, TRAINEES, tutorialStep } from "./tutorial.js?v=seven-1.13.0";
+import * as Audio from "./audio.js?v=seven-1.13.0";
+import { createRng } from "./rng.js?v=seven-1.13.0";
+import { composeRoster } from "./names.js?v=seven-1.13.0";
+import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, TASK_SKILL, frontDeadfall } from "./mates.js?v=seven-1.13.0";
+import { areaOfRow, kindAt } from "./world.js?v=seven-1.13.0";
+import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_INFO, NO_SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.13.0";
 
-const BUILD = "seven-1.12.2";
+const BUILD = "seven-1.13.0";
 const esc = UI.esc;
 const store = (() => { try { return window.localStorage; } catch { return null; } })();
 const readJSON = (k, d) => { try { const v = store && store.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
@@ -25,6 +26,7 @@ const canvas = document.getElementById("game");
 const renderer = createView(canvas, { onStrike: (tool) => Audio.thunk(tool) });
 const TURN_RATE = 2.4;          // radians a second, keys / pad / touch stick
 const MOUSE_TURN = 0.0032;      // radians per device pixel of mouse travel
+let sleepFade = 0;
 let sim = null, view = null, headless = false, endShown = false, moved = false, lastSave = 0, acc = 0;
 
 const input = createInput({
@@ -60,7 +62,7 @@ function startRun(opts) {
   UI.close(); UI.setPlaying(true);
   save();
 }
-function save() { if (sim && store && sim.status === "playing") saveTo(store, sim); lastSave = performance.now(); }
+function save() { if (sim && !sim.tutorial && store && sim.status === "playing") saveTo(store, sim); lastSave = performance.now(); }
 
 // ---- panels ---------------------------------------------------------------------
 function titlePanel() {
@@ -72,14 +74,39 @@ function titlePanel() {
     <h1>SEVEN</h1>
     <p class="lede">Seven of you set out to walk the trail through the woods, and come out the other side.</p>
     ${saved && saved.status === "playing" ? `<button data-do="cont" autofocus>Continue — day ${saved.day}</button>` : ""}
+    ${trained() ? "" : `<button data-do="train" ${saved && saved.status === "playing" ? "" : "autofocus"}>Training camp</button>`}
     <button data-do="new">New run</button>
+    ${trained() ? `<button data-do="train">Training camp</button>` : ""}
     <button data-do="how">How to play</button>
     ${r.length ? `<p class="small">${r.length} run${r.length > 1 ? "s" : ""} walked · ${home} brought home${bank() ? ` · ${bank()} points banked` : ""}</p>` : ""}
     <p class="small dim">${BUILD}</p>`);
   UI.bind({
     cont: () => { sim = saved; endShown = false; acc = 0; UI.close(); UI.setPlaying(true); },
     new: () => recruitPanel(Date.now() % 1e9),
+    train: startTraining,
     how: () => howPanel(titlePanel),
+  });
+}
+
+// ---- the training camp -------------------------------------------------------------
+const trained = () => !!readJSON("seven:settings", {}).trained;
+function startTraining() {
+  startRun({ seed: 0, tutorial: true, team: TRAINEES.map((t) => ({ ...t, skills: { ...t.skills } })) });
+  sim.lead.yaw = -Math.PI / 2;
+}
+const fill = (text) => text.replace(/\{(\w+)\}/g, (_, k) => (k === "look" ? (input.device === "pad" ? "the right stick" : input.device === "touch" ? "your right thumb" : "the mouse or ← →") : label(k)));
+let endedTraining = false;
+function trainingPanel() {
+  endedTraining = true;
+  writeJSON("seven:settings", { ...readJSON("seven:settings", {}), trained: true });
+  UI.open(`
+    <h2>Training</h2>
+    <p>${esc(fill(STEPS[STEPS.length - 1].text))}</p>
+    <button data-do="go" autofocus>Start the walk</button>
+    <button data-do="again">Stay a while</button>`, { onBack: UI.close });
+  UI.bind({
+    go: () => { sim = null; endedTraining = false; recruitPanel(Date.now() % 1e9); },
+    again: () => { UI.close(); },
   });
 }
 
@@ -245,9 +272,15 @@ function twinPanel() {
       <div class="account"><h3>On the right</h3>${t.right.map((l) => `<p>${esc(l)}</p>`).join("")}</div>
     </div>
     <p class="small">Only one can stay.</p>
+    <p class="small">Each of them whistles their own way. You remember how ${esc(t.name)} did.</p>
+    <button data-do="hear" data-arg="L">Hear the one on the left whistle</button>
+    <button data-do="hear" data-arg="R">Hear the one on the right whistle</button>
     <button data-do="keep" data-arg="L" autofocus>Keep the one on the left</button>
     <button data-do="keep" data-arg="R">Keep the one on the right</button>`, { wide: true });
-  UI.bind({ keep: (side) => { S.keepTwin(sim, side === "L"); UI.close(); } });
+  UI.bind({
+    hear: (side, btn) => { S.hearTwin(sim, side === "L"); },
+    keep: (side) => { S.keepTwin(sim, side === "L"); UI.close(); },
+  });
 }
 
 function homePanel() {
@@ -324,6 +357,10 @@ const label = (name) => (LABELS[input.device] || LABELS.key)[name] || name;
 
 // ---- hints: the walk-in teaches itself -------------------------------------------------
 function hintText() {
+  if (sim.tutorial) {
+    const st = tutorialStep(sim), i = sim.tut.step;
+    return i >= STEPS.length - 1 ? "" : `Training ${i + 1} of ${STEPS.length - 1} · ${fill(st.text)}`;
+  }
   const k = (key, btn) => label(key === "WASD or arrows" ? "move" : { E: "act", F: "fire", Q: "camp", R: "rest", C: "call" }[key] || key, key, btn);
   const L = sim.lead, c = sim.camp, d = frontDeadfall(sim);
   if (!moved) return `${k("WASD or arrows", "Drag on the left")} to walk. ${input.device === "pad" ? "Right stick" : input.device === "touch" ? "Drag on the right" : "Mouse or ← →"} to look around.`;
@@ -383,6 +420,7 @@ export function worldMove(yaw, v) {
 
 function afterTicks() {
   if (sim.status === "ended" && !endShown) { UI.close(); endPanel(); return; }
+  if (sim.tutorial && !endedTraining && !UI.isOpen() && tutorialStep(sim).id === "end") { trainingPanel(); return; }
   if (sim.pending && !UI.isOpen()) {
     if (sim.pending === "dawn" || sim.pending === "dusk") planPanel(sim.pending);
     else if (sim.pending === "twin") twinPanel();
@@ -409,10 +447,14 @@ function draw(dt) {
       lead: { x: L.x, y: L.y, yaw: view.lead.yaw },
       fire: view.camp && view.camp.fire > 0 ? { x: view.camp.x, y: view.camp.y, fuel: view.camp.fire } : null,
       lit: view.pylons.filter((p) => p.state === "lit"),
-      ground: kindAt(sim.world, cell.cx, cell.cy), busy: !!L.busy, panelOpen: UI.isOpen(),
+      ground: kindAt(sim.world, cell.cx, cell.cy), busy: !!L.busy, panelOpen: UI.isOpen(), asleep: !!L.asleep,
     }, dt);
   }
+  // Sleep is a scene: the view fades to dark, the hour counts on, and it lifts at dawn.
+  const asleepNow = !!(L.busy && L.busy.kind === "sleep");
+  sleepFade += Math.sign((asleepNow ? 1 : 0) - sleepFade) * Math.min(Math.abs((asleepNow ? 1 : 0) - sleepFade), dt / 1.2);
   renderer.draw(sim.world, view, {
+    fade: sleepFade, sleepText: sleepFade > 0.01 ? S.clockText(sim) : null,
     mod: S.minuteOfDay(sim), real: performance.now() / 1000,
     busyFrac: L.busy && Number.isFinite(L.busy.total) ? 1 - L.busy.left / L.busy.total : null,
   }, dt);
@@ -448,6 +490,7 @@ window.__seven = {
   get sim() { return sim; },
   get visible() { return [...renderer.visible]; },
   get seen() { return view; },
+  get sleepFade() { return sleepFade; },
   get quality() { return renderer.quality; },
   get avgMs() { return renderer.avgMs; },
   setQ(q) { renderer.setQuality(q); },

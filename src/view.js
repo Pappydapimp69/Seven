@@ -13,9 +13,9 @@
 // and scaled up; the canvas backing is CSS size × devicePixelRatio, re-read on
 // every resize and every DPR change.
 
-import { K } from "./world.js?v=seven-1.12.2";
-import { hash01 } from "./rng.js?v=seven-1.12.2";
-import { FIRE_LIGHT, DAWN, DUSK, PILE_CAP, SURPLUS_CAP } from "./config.js?v=seven-1.12.2";
+import { K } from "./world.js?v=seven-1.13.0";
+import { hash01 } from "./rng.js?v=seven-1.13.0";
+import { FIRE_LIGHT, DAWN, DUSK, PILE_CAP, SURPLUS_CAP } from "./config.js?v=seven-1.13.0";
 
 export const SLOT_COLORS = ["#e0b354", "#5fb3c9", "#d9745a", "#9fc46a", "#b98fd6", "#e88fb0"];
 export const HFOV = (72 * Math.PI) / 180;
@@ -24,6 +24,7 @@ const FLOOR = {
   [K.TRAIL]: [106, 86, 57], [K.DEADFALL]: [106, 86, 57], [K.CLEAR]: [62, 84, 50], [K.STUMP]: [62, 84, 50],
   [K.EXIT]: [146, 158, 122], [K.FOREST]: [24, 36, 27], [K.TREE]: [24, 36, 27],
 };
+const TINT_RGB = { 1: [46, 94, 124], 2: [36, 33, 31], 3: [112, 110, 104] };   // water, ash, gravel
 const hexRgb = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
 
 export function createView(canvas, opts = {}) {
@@ -146,6 +147,38 @@ export function createView(canvas, opts = {}) {
     g.fillStyle = "#4a3a26"; g.fillRect(w * 0.2, h * 0.3, w * 0.6, h * 0.7);
     g.fillStyle = "#b39466"; g.beginPath(); g.ellipse(w / 2, h * 0.3, w * 0.3, h * 0.22, 0, 0, Math.PI * 2); g.fill();
   });
+  // Landmarks, each drawn as the thing it is named for (three variants of each).
+  const decorSprite = (kind, v) => {
+    const n = Math.min(2, Math.floor(v * 3));
+    return sprite(`decor:${kind}:${n}`, 40, 96, (g, w, h) => {
+      const r = (a) => a * (0.9 + 0.1 * n);
+      if (kind === "birch") {
+        g.fillStyle = "#e8e6dc"; g.fillRect(w * 0.4, h * 0.12, w * 0.2, h * 0.88);
+        g.fillStyle = "#2a2724"; for (let i = 0; i < 7; i++) g.fillRect(w * 0.4, h * (0.2 + i * 0.11 + n * 0.01), w * (0.1 + 0.1 * ((i + n) % 2)), 3);
+        g.fillStyle = "#b9c76a"; g.beginPath(); g.ellipse(w * 0.5, h * 0.14, w * 0.42, h * 0.14, 0, 0, Math.PI * 2); g.fill();
+        g.fillStyle = "#8fa84c"; g.beginPath(); g.ellipse(w * 0.4, h * 0.18, w * 0.25, h * 0.09, 0, 0, Math.PI * 2); g.fill();
+      } else if (kind === "reeds") {
+        for (let i = 0; i < 7; i++) {
+          const x = w * (0.1 + i * 0.12), top = h * (0.55 + 0.12 * ((i * 5 + n) % 3) / 3);
+          g.strokeStyle = i % 2 ? "#5d6f3a" : "#4a5c2f"; g.lineWidth = 2; g.beginPath(); g.moveTo(x, h); g.lineTo(x + (i % 3 - 1) * 3, top); g.stroke();
+          if (i % 3 === 0) { g.fillStyle = "#5b3b22"; g.fillRect(x - 2 + (i % 3 - 1) * 3, top - 9, 4, 10); }
+        }
+      } else if (kind === "boulder") {
+        g.fillStyle = "#6e7072"; g.beginPath(); g.ellipse(w * 0.5, h * 0.84, w * r(0.48), h * r(0.15), 0, 0, Math.PI * 2); g.fill();
+        g.fillStyle = "#8a8d8f"; g.beginPath(); g.ellipse(w * 0.44, h * 0.8, w * 0.28, h * 0.08, 0, 0, Math.PI * 2); g.fill();
+        g.fillStyle = "#4f6a3c"; g.beginPath(); g.ellipse(w * 0.62, h * 0.9, w * 0.14, h * 0.04, 0, 0, Math.PI * 2); g.fill();
+      } else if (kind === "snag") {
+        g.fillStyle = "#1e1b19"; g.fillRect(w * 0.38, h * (0.22 + 0.06 * n), w * 0.24, h * (0.78 - 0.06 * n));
+        g.beginPath(); g.moveTo(w * 0.38, h * (0.22 + 0.06 * n)); g.lineTo(w * 0.5, h * 0.1); g.lineTo(w * 0.62, h * (0.22 + 0.06 * n)); g.fill();
+        g.fillStyle = "#3b332d"; g.fillRect(w * 0.44, h * 0.4, w * 0.04, h * 0.5);
+      } else {   // stone
+        g.fillStyle = "#7a7d7f"; g.beginPath(); g.moveTo(w * 0.22, h); g.lineTo(w * 0.28, h * (0.18 + 0.05 * n)); g.lineTo(w * 0.5, h * (0.1 + 0.05 * n)); g.lineTo(w * 0.74, h * (0.2 + 0.04 * n)); g.lineTo(w * 0.8, h); g.closePath(); g.fill();
+        g.fillStyle = "#5e6264"; g.fillRect(w * 0.55, h * 0.25, w * 0.1, h * 0.75);
+        g.fillStyle = "#4f6a3c"; g.fillRect(w * 0.24, h * 0.7, w * 0.5, h * 0.12);
+      }
+    });
+  };
+  const DECOR_SIZE = { birch: [0.55, 2.5], reeds: [0.7, 0.85], boulder: [1.0, 0.8], snag: [0.5, 1.9], stone: [0.75, 1.9] };
   const fireCanvas = document.createElement("canvas"); fireCanvas.width = 32; fireCanvas.height = 40;
   function paintFire(fuel, t) {
     const g = fireCanvas.getContext("2d"), w = 32, h = 40;
@@ -224,7 +257,8 @@ export function createView(canvas, opts = {}) {
       for (let x = 0; x < RW; x++, wx += sx, wy += sy) {
         const cx = Math.floor(wx), cy = Math.floor(wy);
         const k = cx < 0 || cy < 0 || cx >= world.W || cy >= world.H ? K.FOREST : world.grid[cy * world.W + cx];
-        const base = FLOOR[k];
+        const tn = world.tint ? world.tint[cy * world.W + cx] : 0;
+        const base = tn && k !== K.FOREST ? TINT_RGB[tn] : FLOOR[k];
         const v = 0.9 + 0.2 * (((cx * 7 + cy * 13) & 7) / 7);
         if ((x & 3) === 0) { const lw = light(wx, wy); fl = lw[0]; fw = lw[1]; }
         const l = fl, warm = fw;
@@ -307,6 +341,10 @@ export function createView(canvas, opts = {}) {
       add(c.x + 1.4, c.y + 1.2, pileSprite(pr), 0.62, 0.52, { key: `pile:${pr}` });
       const sr = c.surplus <= 0 ? 0 : Math.min(5, Math.ceil((c.surplus / SURPLUS_CAP) * 5));
       add(c.x + 2.6, c.y + 1.2, surplusSprite(sr), 0.62, 0.72, { key: `surplus:${sr}` });
+    }
+    for (const lm of view.landmarks || []) {
+      if (Math.abs(lm.x - px) > 24 || Math.abs(lm.y - py) > 24) continue;
+      for (const d of lm.decor) { const sz = DECOR_SIZE[d.kind]; add(d.x, d.y, decorSprite(d.kind, d.v), sz[0], sz[1], { key: `decor:${d.kind}:${Math.min(2, Math.floor(d.v * 3))}` }); }
     }
     for (const p of view.piles) {
       if (p.surplus) { const r = Math.min(5, Math.ceil((p.wood / SURPLUS_CAP) * 5)); add(p.x, p.y, surplusSprite(r), 0.62, 0.72, { key: `surplus:${r}` }); }
@@ -415,6 +453,16 @@ export function createView(canvas, opts = {}) {
         ctx.fillRect(x, y, 5, 3);
       }
       ctx.globalAlpha = 1;
+    }
+    // Sleep, as a scene: the light goes, the hour is shown as it passes, the morning comes up.
+    if (clock.fade > 0.01) {
+      ctx.fillStyle = `rgba(2,3,8,${Math.min(0.98, clock.fade)})`; ctx.fillRect(0, 0, W, H);
+      if (clock.sleepText) {
+        ctx.textAlign = "center"; ctx.fillStyle = `rgba(214,222,240,${Math.max(0, clock.fade - 0.25)})`;
+        ctx.font = `300 ${Math.round(Math.min(W, H) * 0.09)}px Georgia, serif`; ctx.fillText(clock.sleepText, W / 2, H * 0.5);
+        ctx.font = `${Math.round(Math.min(W, H) * 0.028)}px system-ui, sans-serif`; ctx.fillStyle = `rgba(160,170,190,${Math.max(0, clock.fade - 0.4)})`;
+        ctx.fillText("sleeping", W / 2, H * 0.5 + Math.min(W, H) * 0.07); ctx.textAlign = "start";
+      }
     }
     // The whistle, drawn: rings that spread out from you and thin as they go.
     for (let i = pulses.length - 1; i >= 0; i--) {

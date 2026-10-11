@@ -10,11 +10,27 @@
 // round a deadfall. All world generation draws from its own rng (seed-derived),
 // so the run's sim stream is independent of the map.
 
-import { createRng } from "./rng.js?v=seven-1.12.2";
-import { MAP_W, MAP_H, AREA_H, AREAS, TRAIL_HALF, EXIT_ROWS } from "./config.js?v=seven-1.12.2";
+import { createRng, hash01 } from "./rng.js?v=seven-1.13.0";
+import { MAP_W, MAP_H, AREA_H, AREAS, TRAIL_HALF, EXIT_ROWS } from "./config.js?v=seven-1.13.0";
 
 export const K = Object.freeze({ FOREST: 0, TRAIL: 1, CLEAR: 2, DEADFALL: 3, STUMP: 4, TREE: 5, EXIT: 6 });
 const WALKABLE = [false, true, true, false, false, false, true];
+
+// Each clearing is a distinct, named place, drawn as what it is called, so a
+// "wrong place" in someone's account is something you can check against what
+// you saw (seven 0.23: four identical cairns made place impossible to catch).
+export const LANDMARKS = Object.freeze(["creek", "birches", "rocks", "old burn", "pond", "stones"]);
+export const LANDMARK_NAME = Object.freeze({
+  creek: "the creek", birches: "the birch stand", rocks: "the rock shelf", "old burn": "the old burn", pond: "the pond", stones: "the standing stones",
+});
+export const TINT = Object.freeze({ NONE: 0, WATER: 1, ASH: 2, GRAVEL: 3 });
+
+/** The clearing nearest a point, if one is within `max` cells. */
+export function nearestLandmark(w, x, y, max = 8) {
+  let best = null, bd = max;
+  for (const p of w.pockets) { const d = Math.hypot(p.x + 0.5 - x, p.y + 0.5 - y); if (d < bd) { bd = d; best = p; } }
+  return best;
+}
 
 export const areaOfRow = (r) => Math.max(0, Math.min(AREAS - 1, Math.floor((MAP_H - 1 - r) / AREA_H)));
 export const areaTop = (a) => MAP_H - (a + 1) * AREA_H;
@@ -27,6 +43,7 @@ export function createWorld(seed) {
   const grid = new Uint8Array(W * H);          // all forest
   const at = (x, y) => y * W + x;
   const inside = (x, y) => x > 0 && y > 0 && x < W - 1 && y < H - 1;
+  const kindOf = (x, y) => (x < 0 || y < 0 || x >= W || y >= H ? K.FOREST : grid[y * W + x]);
   const set = (x, y, k) => { if (inside(x, y)) grid[at(x, y)] = k; };
 
   // The trail: a walk north that drifts, straight across every deadfall row.
@@ -73,6 +90,38 @@ export function createWorld(seed) {
     }
   }
 
+  // Landmarks: every clearing is a different one within its woods. Chosen by
+  // hash, NOT by the rng, so no map changes: a saved run regenerates the same
+  // layout it always had (tests/world.mjs holds fingerprints).
+  const tint = new Uint8Array(W * H);
+  for (let a = 0; a < AREAS; a++) {
+    const here = pockets.filter((p) => p.area === a);
+    const order = LANDMARKS.slice().sort((x, y) => hash01(`${seed}:lm:${a}:${x}`) - hash01(`${seed}:lm:${a}:${y}`));
+    here.forEach((p, i) => {
+      p.kind = order[i % order.length];
+      const py = pylons[pockets.indexOf(p)]; py.landmark = p.kind;
+      p.decor = decorate(p);
+    });
+  }
+  function decorate(p) {
+    const out = [], h = (k) => hash01(`${seed}:decor:${p.id}:${k}`), side = h("side") < 0.5 ? -1 : 1;
+    const put = (kind, n, r0, r1) => {
+      for (let i = 0; i < n; i++) {
+        const a = h(`a${kind}${i}`) * Math.PI * 2, r = r0 + (r1 - r0) * h(`r${kind}${i}`);
+        const x = p.x + 0.5 + Math.cos(a) * r, y = p.y + 0.5 + Math.sin(a) * r * 0.85;
+        if (y > EXIT_ROWS + 1 && kindOf(Math.floor(x), Math.floor(y)) === K.CLEAR) out.push({ kind, x, y, v: h(`v${kind}${i}`) });
+      }
+    };
+    const stain = (fn, k) => { for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) { const cx = p.x + dx, cy = p.y + dy; if (cy > EXIT_ROWS && kindOf(cx, cy) === K.CLEAR && fn(dx, dy)) tint[at(cx, cy)] = k; } };
+    if (p.kind === "creek") { const o = side * 1; stain((dx) => dx === o || dx === o + side * 0, TINT.WATER); put("reeds", 6, 1.0, 2.3); }
+    else if (p.kind === "pond") { stain((dx, dy) => (dx - side) ** 2 + dy * dy <= 2.6, TINT.WATER); put("reeds", 4, 1.6, 2.5); }
+    else if (p.kind === "birches") put("birch", 6, 1.3, 2.4);
+    else if (p.kind === "rocks") { stain((dx, dy) => dx * dx + dy * dy <= 5, TINT.GRAVEL); put("boulder", 4, 1.3, 2.2); }
+    else if (p.kind === "old burn") { stain((dx, dy) => dx * dx + dy * dy <= 6, TINT.ASH); put("snag", 5, 1.2, 2.4); }
+    else put("stone", 4, 1.4, 2.2);
+    return out;
+  }
+
   // The far side.
   for (let y = 1; y <= EXIT_ROWS; y++) for (let cx = 3; cx <= W - 4; cx++) set(cx, y, K.EXIT);
 
@@ -101,7 +150,7 @@ export function createWorld(seed) {
   }
 
   return {
-    seed, W, H, grid, trailX, pockets, pylons, deadfalls, trees,
+    seed, W, H, grid, tint, trailX, pockets, pylons, deadfalls, trees,
     start: { x: campX + 0.5, y: campY + 0.5 },
   };
 

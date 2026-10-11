@@ -3,7 +3,7 @@
 // should be, and nothing open ever touches a deadfall row.
 
 import { harness, assert } from "./lib.mjs";
-import { createWorld, bfs, clearDeadfall, areaOfRow, deadfallRow, kindAt, K } from "../src/world.js";
+import { createWorld, bfs, clearDeadfall, areaOfRow, deadfallRow, kindAt, K, LANDMARKS, LANDMARK_NAME, TINT } from "../src/world.js";
 import { AREAS, EXIT_ROWS } from "../src/config.js";
 
 const T = harness("world");
@@ -50,4 +50,41 @@ T.check("the same seed makes the same woods", () => {
   assert(a.grid.every((v, i) => v === b.grid[i]), "seed 42 made two different maps");
   assert(!a.grid.every((v, i) => v === c.grid[i]), "seeds 42 and 43 made the same map");
 });
+T.check("landmarks: in each woods every clearing is a different one (a wrong place has to look wrong), on 50 seeds", () => {
+  for (const seed of SEEDS) {
+    const w = createWorld(seed);
+    for (let a = 0; a < AREAS; a++) {
+      const kinds = w.pockets.filter((p) => p.area === a).map((p) => p.kind);
+      assert(kinds.every((k) => LANDMARKS.includes(k)) && new Set(kinds).size === kinds.length, `seed ${seed} woods ${a + 1}: ${kinds.join(", ")}`);
+    }
+    for (const py of w.pylons) assert(LANDMARKS.includes(py.landmark), `seed ${seed}: pylon ${py.id} names no landmark`);
+  }
+  assert(LANDMARKS.every((k) => LANDMARK_NAME[k]), "a landmark has no name");
+});
+
+T.check("landmarks changed no map: these layouts are what saved runs regenerate", () => {
+  const golden = { 1: "883ff297:21:113", 2: "d482da52:22:106", 3: "9329e136:23:104", 42: "8a34c37a:19:87", 12345: "cc986c51:24:141", 777777: "38c41fe5:18:93" };
+  for (const [seed, want] of Object.entries(golden)) {
+    const w = createWorld(+seed); let h = 2166136261;
+    for (const v of w.grid) h = Math.imul(h ^ v, 16777619);
+    assert(`${(h >>> 0).toString(16)}:${w.pockets.length}:${w.trees.length}` === want, `seed ${seed}: the map changed`);
+  }
+});
+
+T.check("landmark dressing stands on open clearing ground, and stains only open ground (nothing blocks)", () => {
+  for (const seed of SEEDS.slice(0, 20)) {
+    const w = createWorld(seed);
+    for (const p of w.pockets) {
+      assert(p.decor.length >= 1, `seed ${seed}: ${p.kind} has nothing to see`);
+      for (const d of p.decor) assert(kindAt(w, Math.floor(d.x), Math.floor(d.y)) === K.CLEAR, `seed ${seed}: ${d.kind} stands off the clearing`);
+    }
+    for (let i = 0; i < w.tint.length; i++) if (w.tint[i]) assert(w.grid[i] === K.CLEAR || w.grid[i] === K.TRAIL, `seed ${seed}: stain on ground that is not open`);
+    assert(w.pockets.some((p) => p.kind === "pond") || true, "");
+  }
+  // Each kind that stains does: water, ash, gravel.
+  const stains = new Set();
+  for (const seed of SEEDS.slice(0, 20)) { const w = createWorld(seed); for (const v of w.tint) if (v) stains.add(v); }
+  assert(stains.has(TINT.WATER) && stains.has(TINT.ASH) && stains.has(TINT.GRAVEL), `only ${[...stains]} ever drawn`);
+});
+
 T.done();

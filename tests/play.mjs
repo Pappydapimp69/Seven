@@ -236,6 +236,37 @@ const sim = (p, f) => p.evaluate(f);
   await ctx.close();
 }
 
+// ---- the training camp, and sleep as a scene ----
+{
+  const { p, ctx } = await page({ viewport: { width: 1000, height: 600 } });
+  ok(await p.evaluate(() => [...document.querySelectorAll("#modal button")][0].textContent.startsWith("Training camp")), "a first-time player is offered the training camp first");
+  await p.evaluate(() => window.__seven.click("Training camp"));
+  await p.waitForTimeout(300);
+  const t = await p.evaluate(() => ({ hint: document.getElementById("hint").textContent, mates: window.__seven.sim.mates.map((m) => m.name).join(), panel: window.__seven.panel }));
+  ok(!t.panel && t.mates === "Orla,Benet" && /^Training 1 of 9 · Walk with/.test(t.hint), `training starts with Orla and Benet and the first step (${t.hint.slice(0, 48)}…)`);
+  await p.evaluate(() => { window.__seven.sim.tut.step = 9; });
+  await p.waitForTimeout(300);
+  const e = await p.evaluate(() => ({ panel: window.__seven.panel, text: document.getElementById("modal").textContent }));
+  ok(e.panel === "Training" && /That is the training/.test(e.text) && !/who they were|Somebody|replaced|fake/i.test(e.text), "the last step ends the training without giving the woods away");
+  ok(await p.evaluate(() => !!JSON.parse(localStorage.getItem("seven:settings")).trained), "and remembers you have trained");
+  await p.evaluate(() => window.__seven.click("Start the walk"));
+  ok(await p.evaluate(() => window.__seven.panel === "Choose your team"), "Start the walk goes on to choosing a team");
+  await ctx.close();
+}
+{
+  const { p, ctx } = await page({ viewport: { width: 1000, height: 600 } });
+  await p.evaluate(() => { const M = window.__seven; M.newRun({ seed: 81, startCamp: true }); M.S.applyPlan(M.sim, "dawn", {}); M.sim.camp.fire = 12; M.sim.lead.x = M.sim.camp.x; M.sim.lead.y = M.sim.camp.y + 1; M.sim.ticks = Math.round((19 * 60) / 0.2); M.sim.duskSeen = 1; M.sim.dawnDone = 1; M.sim.duskDone = 1; });
+  await p.evaluate(() => window.__seven.action("rest"));
+  await p.waitForFunction(() => window.__seven.sleepFade >= 0.9, null, { timeout: 8000 }).catch(() => {});
+  const asleep = await p.evaluate(() => ({ fade: window.__seven.sleepFade, text: window.__seven.sim.lead.asleep }));
+  ok(asleep.fade >= 0.9 && asleep.text, `going to sleep fades the view to dark (${asleep.fade.toFixed(2)})`);
+  await p.waitForFunction(() => !window.__seven.sim.lead.asleep || window.__seven.panel, null, { timeout: 40000 }).catch(() => {});
+  await p.evaluate(() => { const M = window.__seven; if (M.sim.lead.asleep) { M.sim.lead.busy = null; M.sim.lead.asleep = false; } });
+  await p.waitForFunction(() => window.__seven.sleepFade <= 0.1, null, { timeout: 8000 }).catch(() => {});
+  ok(await p.evaluate(() => window.__seven.sleepFade <= 0.1), "and the morning comes up when you wake");
+  await ctx.close();
+}
+
 // ---- a retina screen ----
 {
   const { p, ctx } = await page({ viewport: { width: 900, height: 600 }, deviceScaleFactor: 2 });
