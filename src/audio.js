@@ -12,7 +12,7 @@
 // What the always-on layers do comes from soundscape.js, which only knows
 // public facts (the woods you are in, night, fire, pylons) — never lucidity.
 
-import { mixFor, scaleFor, placeSound, placeAngle, dirAngle, stepFor, uiSound } from "./soundscape.js?v=seven-1.15.0";
+import { mixFor, scaleFor, placeSound, placeAngle, dirAngle, stepFor, uiSound } from "./soundscape.js?v=seven-1.16.0";
 
 export const stats = { steps: 0, plays: 0, ui: 0 };
 let muffle = null;
@@ -151,7 +151,7 @@ function schedule() {
 
 function note(f, at, len, gain) {
   const o = ctx.createOscillator(), o2 = ctx.createOscillator(), g = ctx.createGain();
-  o.type = "triangle"; o2.type = "sine"; o.frequency.value = f; o2.frequency.value = f * 2.003;
+  o.type = "sine"; o2.type = "sine"; o.frequency.value = f; o2.frequency.value = f * 2.003;
   g.gain.setValueAtTime(0.0001, at);
   g.gain.exponentialRampToValueAtTime(0.22 * gain, at + 0.35);
   g.gain.exponentialRampToValueAtTime(0.0001, at + len);

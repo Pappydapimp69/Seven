@@ -9,7 +9,7 @@
 // place: deeper woods sound lower, sparser and stranger — for everyone, whether
 // or not they are well.
 
-import { DIRS8 } from "./config.js?v=seven-1.15.0";
+import { DIRS8 } from "./config.js?v=seven-1.16.0";
 
 /** World angle of a compass word. y grows south, so north is -y. */
 export function dirAngle(dir) {

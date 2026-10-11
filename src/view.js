@@ -13,15 +13,15 @@
 // and scaled up; the canvas backing is CSS size × devicePixelRatio, re-read on
 // every resize and every DPR change.
 
-import { K } from "./world.js?v=seven-1.15.0";
-import { hash01 } from "./rng.js?v=seven-1.15.0";
-import { FIRE_LIGHT, DAWN, DUSK, PILE_CAP, SURPLUS_CAP } from "./config.js?v=seven-1.15.0";
+import { K } from "./world.js?v=seven-1.16.0";
+import { hash01 } from "./rng.js?v=seven-1.16.0";
+import { FIRE_LIGHT, DAWN, DUSK, PILE_CAP, SURPLUS_CAP } from "./config.js?v=seven-1.16.0";
 
 export const SLOT_COLORS = ["#e0b354", "#5fb3c9", "#d9745a", "#9fc46a", "#b98fd6", "#e88fb0"];
 export const HFOV = (72 * Math.PI) / 180;
 const EYE = 0.72, WALL_H = 2.4, MAX_DIST = 26, FOG_DIST = 22;
 const FLOOR = {
-  [K.TRAIL]: [106, 86, 57], [K.DEADFALL]: [106, 86, 57], [K.CLEAR]: [62, 84, 50], [K.STUMP]: [62, 84, 50],
+  [K.TRAIL]: [106, 86, 57], [K.DEADFALL]: [106, 86, 57], [K.CLEAR]: [52, 80, 44], [K.STUMP]: [52, 80, 44],
   [K.EXIT]: [146, 158, 122], [K.FOREST]: [24, 36, 27], [K.TREE]: [24, 36, 27],
 };
 const TINT_RGB = { 1: [46, 94, 124], 2: [36, 33, 31], 3: [112, 110, 104] };   // water, ash, gravel
@@ -234,12 +234,12 @@ export function createView(canvas, opts = {}) {
       LW[0] = l > 1.3 ? 1.3 : l; LW[1] = warm > 1 ? 1 : warm;
       return LW;
     };
-    const fogRgb = [Math.round(18 + 70 * day), Math.round(24 + 86 * day), Math.round(26 + 80 * day)];
+    const fogRgb = [Math.round(10 + 130 * day), Math.round(14 + 150 * day), Math.round(18 + 150 * day)];
 
     const T0 = performance.now();
     // ---- sky and ground, per pixel ----
     const data = img.data, hz = RH / 2;
-    const sky0 = [Math.round(10 + 120 * day), Math.round(13 + 150 * day), Math.round(26 + 160 * day)];
+    const sky0 = [Math.round(5 + 151 * day), Math.round(7 + 188 * day), Math.round(13 + 209 * day)];
     for (let y = 0; y < RH; y++) {
       const row = y * RW * 4;
       if (y < hz) {

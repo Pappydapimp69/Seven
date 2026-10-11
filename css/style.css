@@ -1,10 +1,10 @@
 :root {
-  --ink: #efe6d2; --dim: #a99f8a; --panel: rgba(18, 22, 18, 0.94); --edge: #4b5a40; --accent: #e0b354; --bg: #0d130e;
+  --ink: #ece6d6; --dim: #a59f8e; --panel: rgba(16, 20, 16, 0.92); --edge: #3c4a3a; --accent: #c9d6a0; --bg: #0b0f0b;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--ink);
-  font: 16px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-user-select: none; user-select: none; touch-action: none; }
+  font: 16px/1.45 Georgia, "Iowan Old Style", serif; -webkit-user-select: none; user-select: none; touch-action: none; }
 #game { position: fixed; inset: 0; display: block; }
 
 #hud { position: fixed; top: max(10px, env(safe-area-inset-top)); left: 12px; display: none; pointer-events: none;

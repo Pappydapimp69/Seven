@@ -2,21 +2,21 @@
 // this file reads sim.pending and opens the matching panel, and the panel
 // answers through the sim's exported actions.
 
-import * as S from "./sim.js?v=seven-1.15.0";
-import { perceive } from "./percept.js?v=seven-1.15.0";
-import { createView, SLOT_COLORS } from "./view.js?v=seven-1.15.0";
-import { createInput } from "./input.js?v=seven-1.15.0";
-import * as UI from "./ui.js?v=seven-1.15.0";
-import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.15.0";
-import { STEPS, TRAINEES, tutorialStep } from "./tutorial.js?v=seven-1.15.0";
-import * as Audio from "./audio.js?v=seven-1.15.0";
-import { createRng } from "./rng.js?v=seven-1.15.0";
-import { composeRoster } from "./names.js?v=seven-1.15.0";
-import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, TASK_SKILL, frontDeadfall } from "./mates.js?v=seven-1.15.0";
-import { areaOfRow, kindAt } from "./world.js?v=seven-1.15.0";
-import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_INFO, NO_SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.15.0";
+import * as S from "./sim.js?v=seven-1.16.0";
+import { perceive } from "./percept.js?v=seven-1.16.0";
+import { createView, SLOT_COLORS } from "./view.js?v=seven-1.16.0";
+import { createInput } from "./input.js?v=seven-1.16.0";
+import * as UI from "./ui.js?v=seven-1.16.0";
+import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.16.0";
+import { STEPS, TRAINEES, tutorialStep } from "./tutorial.js?v=seven-1.16.0";
+import * as Audio from "./audio.js?v=seven-1.16.0";
+import { createRng } from "./rng.js?v=seven-1.16.0";
+import { composeRoster } from "./names.js?v=seven-1.16.0";
+import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, TASK_SKILL, frontDeadfall } from "./mates.js?v=seven-1.16.0";
+import { areaOfRow, kindAt } from "./world.js?v=seven-1.16.0";
+import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_INFO, NO_SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.16.0";
 
-const BUILD = "seven-1.15.0";
+const BUILD = "seven-1.16.0";
 const esc = UI.esc;
 const store = (() => { try { return window.localStorage; } catch { return null; } })();
 const readJSON = (k, d) => { try { const v = store && store.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
