@@ -20,7 +20,7 @@ import {
   startKeystoneMorning, advanceKeystoneMorning,
 } from "./expedition.js?v=seven-0.37.0";
 import { DEFAULT_TEAM, applyTeamLoadout, teamSkill, finalDecision, finalCount, nearbyIds, campIds, FIRE_DAYLIGHT, restCheck, raiseSkill, SKILL_MAX, createCamp, depositWood, dismantleCamp, makeCamp,
-  dawnCalls, loudWord, missingSpot, checkFound, stepFound } from "./seven.js?v=seven-0.37.0";
+  dawnCalls, loudWord, missingSpot, checkFound, stepFound, startHomeward, lightHomePylon, homewardOver, finishHomeward } from "./seven.js?v=seven-0.37.0";
 import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.37.0";
 import { createRenderer } from "./render.js?v=seven-0.37.0";
 import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.37.0";
@@ -1410,25 +1410,67 @@ function openFinalDecision(sim = run?.sim) {
   const layer = el("finalLayer");
   if (!layer) return;
   finalUi = true;
-  const open = sim.expedition.missing.filter((m) => !m.recovered && !m.abandoned).length;
-  const abandoned = sim.expedition.missing.filter((m) => m.abandoned).length;
-  const count = finalCount(sim.expedition, sim.party?.length || 6);
-  el("finalHead").textContent = "The edge of the woods";
-  el("finalBody").textContent = open || abandoned
-    ? `There is open air ahead. ${count.pylons} pylons stand for ${count.bodies} bodies.`
-    : `There is open air ahead. ${count.pylons} pylons stand for ${count.bodies} bodies. One is extra.`;
-  el("finalState").textContent = open
-    ? `${open} still out there behind you. The count says ${count.real} real. It does not say which.`
-    : abandoned
-      ? `${abandoned} left beyond the route. The count says ${count.real} real. It does not say which.`
-      : `The count says ${count.real} real. It does not say which.`;
+  // Recount if nothing has been tried yet: you may have turned back and brought someone home.
+  if (!sim.homeward || sim.homeward.tried.length === 0) startHomeward(sim);
+  paintHomeward(sim, "");
   layer.classList.remove("hidden");
   screens("finalLayer");
+}
+
+/** The edge: one button per teammate not yet tried, and what the last light did. */
+function paintHomeward(sim, said) {
+  const h = sim.homeward;
+  el("finalHead").textContent = "The edge of the woods";
+  el("finalBody").textContent = `${h.pylons} pylon${h.pylons === 1 ? "" : "s"} still stand${h.pylons === 1 ? "s" : ""} at the edge. Each takes two pairs of hands: yours, and one of theirs. What is not real cannot light one.`;
+  el("finalState").textContent = said;
+  const box = el("finalPylons");
+  box.textContent = "";
+  let row = 0;
+  for (const c of sim.companions) {
+    if (h.tried.includes(c.id)) continue;
+    const b = Object.assign(document.createElement("button"), { className: "big-btn", textContent: `Light one with ${c.name}` });
+    b.dataset.row = String(row++); b.dataset.col = "0";
+    b.addEventListener("click", () => lightWith(c.id));
+    box.appendChild(b);
+  }
+  el("finalReturn").dataset.row = String(row);
+  setupMenuFocus("finalLayer");
+}
+function lightWith(id) {
+  const sim = run?.sim;
+  if (!sim || sim.status !== "decision") return;
+  const r = lightHomePylon(sim, id);
+  if (!r) return;
+  const name = nameOfSeven(sim, id);
+  const said = r.real
+    ? `${name} steps into the light, and is gone. Home.`
+    : `The light takes nothing. The pylon goes dark, and ${name} is not there any more.`;
+  audio.play(r.real ? "recover" : "reveal");
+  if (homewardOver(sim)) {
+    finishHomeward(sim);
+    finalUi = null;
+    el("finalLayer")?.classList.add("hidden");
+    hudSay(said);
+    finish();
+    return;
+  }
+  paintHomeward(sim, said);
 }
 
 function chooseFinal(choice) {
   const sim = run?.sim;
   if (!sim || sim.status !== "decision") return;
+  if (choice === "return") {
+    // Not yet: someone may still be out there. Step back into the trees and play on.
+    sim.status = "playing";
+    sim.ending = null;
+    sim.player.z += sim.world.cell * 3;
+    finalUi = null;
+    el("finalLayer")?.classList.add("hidden");
+    screens("hudLayer");
+    if (input.activeScheme !== "gamepad") input.requestLock();
+    return;
+  }
   finalDecision(sim, choice);
   finalUi = null;
   el("finalLayer")?.classList.add("hidden");

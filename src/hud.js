@@ -608,6 +608,8 @@ export function renderDebrief(container, report) {
     dissolved: "THE PARTY DISSOLVED",
     discredited: "THE RECORD IS REJECTED",
     darkness: "DARK",
+    home: "HOME",
+    alone: "ALONE AT THE EDGE",
   };
   const verdict = VERDICTS[report.ending] || (report.status === "won" ? "SURVEY COMPLETE" : "DARK");
   // The one ending you can still do something about next time, so it says how.
@@ -628,8 +630,11 @@ export function renderDebrief(container, report) {
   const expeditionLine = report.expedition
     ? `Day ${report.expedition.day} · area ${report.expedition.area}/7 · team ${report.sevenTeam || "trail"} · missing ${report.expedition.missing} · recovered ${report.expedition.recovered} · left ${report.expedition.abandoned}`
     : `Basin ${report.level} of ${report.campaignLength} · ${report.logged} of ${report.total} markers really surveyed`;
-  const decisionNote = report.finalDecision
-    ? `<p class="debrief-warn">Final choice: ${report.finalDecision.choice}. Missing ${report.finalDecision.missing}, recovered ${report.finalDecision.recovered}, left behind ${report.finalDecision.abandoned}.</p>`
+  const fd = report.finalDecision;
+  const decisionNote = fd
+    ? fd.choice === "home"
+      ? `<p class="debrief-warn">${fd.saved} went home with you. ${fd.gone} of the ones you tried were never there. ${fd.leftBehind ? `${fd.leftBehind} real ${fd.leftBehind === 1 ? "one" : "ones"} stayed behind.` : "Nobody real was left at the edge."}</p>`
+      : `<p class="debrief-warn">Final choice: ${fd.choice}. Missing ${fd.missing}, recovered ${fd.recovered}, left behind ${fd.abandoned}.</p>`
     : "";
   container.innerHTML = `
     <div class="debrief-card">

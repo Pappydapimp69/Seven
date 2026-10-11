@@ -277,3 +277,36 @@ export function stepFound(sim, dt) {
   f.facing = Math.atan2(next.x - f.x, next.z - f.z);
   f.x = next.x; f.z = next.z;
 }
+
+// ---- the edge of the woods: going home (IDEAS "The ending", owner 2026-10-11)
+// The pylons home number the REAL members plus one. Each takes two pairs of
+// hands, the lead's and one of theirs, and what is not real cannot light one:
+// trying it with a fake spends the pylon and the fake is gone. So there is
+// exactly one mistake to make. The lead goes home with the last real member;
+// with none left, the lead stands at the edge alone.
+export const realCompanions = (sim) => sim.companions.filter((c) => c.replacedDay == null);
+export function startHomeward(sim) {
+  sim.homeward = { pylons: realCompanions(sim).length + 1, saved: [], gone: [], tried: [] };
+  return sim.homeward;
+}
+export function lightHomePylon(sim, id) {
+  const h = sim.homeward;
+  if (!h || h.pylons <= 0 || h.tried.includes(id)) return null;
+  const c = sim.companions.find((x) => x.id === id);
+  if (!c) return null;
+  h.pylons -= 1;
+  h.tried.push(id);
+  const real = c.replacedDay == null;
+  (real ? h.saved : h.gone).push(id);
+  return { real, pylonsLeft: h.pylons };
+}
+export const homewardOver = (sim) => !sim.homeward || sim.homeward.pylons <= 0 || sim.homeward.tried.length >= sim.companions.length;
+export function finishHomeward(sim) {
+  const h = sim.homeward;
+  const home = h.saved.length > 0;
+  sim.status = home ? "won" : "lost";
+  sim.ending = home ? "home" : "alone";
+  const leftBehind = realCompanions(sim).filter((c) => !h.saved.includes(c.id)).length;
+  sim.finalDecision = { choice: "home", saved: h.saved.length, gone: h.gone.length, leftBehind, pylonsLeft: h.pylons };
+  return sim.finalDecision;
+}

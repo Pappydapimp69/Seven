@@ -79,6 +79,10 @@ echo "== practice (skills grow with work; a fake grows faster) =="
 node tests/practice.mjs
 echo
 
+echo "== homeward (the edge: real + 1 pylons, one mistake) =="
+node tests/homeward.mjs
+echo
+
 echo "== seven (team loadouts and final choices) =="
 node tests/seven.mjs
 echo
