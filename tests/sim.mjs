@@ -194,14 +194,29 @@ T.check("a whistle: the near come back sooner than the far, and nobody out of ea
   const s = fresh(30);
   setClock(s, 2, 10 * 60); s.dawnDone = 99;
   const [near, far, gone] = s.mates;
-  s.mates.forEach((m) => { m.task = { kind: "camp", chunk: 0, carry: 0 }; m.following = false; });
+  s.mates.forEach((m) => { m.task = { kind: "free", chunk: 0, carry: 0 }; m.following = false; });
   near.x = s.lead.x + 3; near.y = s.lead.y; far.x = s.lead.x + 15; far.y = s.lead.y; gone.x = s.lead.x + 40; gone.y = s.lead.y;
   S.callOut(s);
-  assert(!near.following && !far.following, "someone came the instant the whistle sounded");
+  assert(!near.summon && !far.summon, "someone came the instant the whistle sounded");
   let tn = -1, tf = -1;
-  for (let i = 0; i < 2 * HOUR && (tn < 0 || tf < 0); i++) { S.tick(s, {}); if (tn < 0 && near.following) tn = i; if (tf < 0 && far.following) tf = i; }
+  for (let i = 0; i < 2 * HOUR && (tn < 0 || tf < 0); i++) { S.tick(s, {}); if (tn < 0 && near.summon > 0) tn = i; if (tf < 0 && far.summon > 0) tf = i; }
   assert(tn >= 0 && tf >= 0 && tn < tf, `near started back at tick ${tn}, far at ${tf}`);
-  assert(!gone.following && !gone.heard, "someone forty cells off heard the whistle");
+  assert(!gone.summon && !gone.heard, "someone forty cells off heard the whistle");
+});
+
+T.check("a whistle: the busy answer but keep working; the idle come for 30 minutes, then go back", () => {
+  const s = fresh(30);
+  setClock(s, 2, 9 * 60); s.dawnDone = 99;
+  const [busy, idle] = s.mates;
+  busy.task = { kind: "gather", chunk: 0, carry: 0 }; idle.task = { kind: "free", chunk: 0, carry: 0 };
+  busy.following = idle.following = false;
+  busy.x = idle.x = s.lead.x + 4; busy.y = idle.y = s.lead.y;
+  S.callOut(s);
+  assert(busy.heard && idle.heard && idle.heard.wait > busy.heard.wait - 1 || busy.heard.wait !== idle.heard.wait, "answers were not staggered");
+  for (let i = 0; i < 140; i++) S.tick(s, {});
+  assert(idle.summon > 0 && !busy.summon && busy.task.kind === "gather" && !busy.following, `idle ${idle.summon} busy ${busy.summon}/${busy.task.kind}`);
+  for (let i = 0; i < 400; i++) S.tick(s, {});
+  assert(!(idle.summon > 0), "the summons never ended");
 });
 
 T.check("a whistle sounds the same whether anyone hears", () => {

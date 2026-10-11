@@ -5,18 +5,18 @@
 // hears finishes the chunk in their hands, then follows. Work comes in chunks
 // (one chop, one tree); a day chunk is only started if it ends before dusk.
 
-import { K, bfs, kindAt, areaOfRow, fellTree, clearDeadfall } from "./world.js?v=seven-1.17.0";
-import { dist, cellOf, walkTo, nearestWalkable } from "./body.js?v=seven-1.17.0";
-import { record } from "./chronicle.js?v=seven-1.17.0";
-import { makeCampAt, takeCampDown, stackWood, takeWood, campWood, lightWoodFor } from "./camp.js?v=seven-1.17.0";
-import { pathTo, areaOfRow as rowArea, nearestLandmark, LANDMARK_NAME } from "./world.js?v=seven-1.17.0";
+import { K, bfs, kindAt, areaOfRow, fellTree, clearDeadfall } from "./world.js?v=seven-1.18.0";
+import { dist, cellOf, walkTo, nearestWalkable } from "./body.js?v=seven-1.18.0";
+import { record } from "./chronicle.js?v=seven-1.18.0";
+import { makeCampAt, takeCampDown, stackWood, takeWood, campWood, lightWoodFor } from "./camp.js?v=seven-1.18.0";
+import { pathTo, areaOfRow as rowArea, nearestLandmark, LANDMARK_NAME } from "./world.js?v=seven-1.18.0";
 import {
-  MATE_SPEED, TICK_MIN, DUSK, CHOP_MIN, CHOP_PROGRESS, CHOP_SKILL, FELL_MIN, HAUL_LOAD,
+  MATE_SPEED, TICK_MIN, SUMMON_MIN, DUSK, CHOP_MIN, CHOP_PROGRESS, CHOP_SKILL, FELL_MIN, HAUL_LOAD,
   CAMP_RADIUS, WATCH_FEED_BELOW, DEADFALL_THICKER, TEAM, TEND_SKILL, MAKE_CAMP_MIN, DISMANTLE_MIN, BUILD_SKILL,
   SCOUT_SPOT, TRACK_REACH, GATHER_MIN, GATHER_PIECE, GATHER_CAP, TREE_PIECES, FIRE_LIGHT_HOURS, DIRS8, FIRE_FEED_HOURS, FIRE_MAX_HOURS, PRACTICE_CHUNKS, FAKE_LEARNS, SKILL_MAX,
-} from "./config.js?v=seven-1.17.0";
-import { hash01 } from "./rng.js?v=seven-1.17.0";
-import { whistleOf } from "./whistle.js?v=seven-1.17.0";
+} from "./config.js?v=seven-1.18.0";
+import { hash01 } from "./rng.js?v=seven-1.18.0";
+import { whistleOf } from "./whistle.js?v=seven-1.18.0";
 
 export const DAY_TASKS = Object.freeze(["free", "chop", "gather", "tend", "move", "scout", "camp"]);
 export const NIGHT_TASKS = Object.freeze(["sleep", "watch", "work", "free"]);
@@ -168,9 +168,17 @@ export function updateMate(sim, m) {
   if (m.heard) {
     m.heard.wait -= TICK_MIN;
     if (m.heard.wait <= 0) {
+      if (m.heard.come) m.summon = SUMMON_MIN;
       m.heard = null;
-      if (handsFull(m)) m.callPending = true; else m.following = true;
       if (sim.sfx) sim.sfx("answer", { x: m.x, y: m.y, slot: m.slot, sig: whistleOf(sim, m) });   // you hear them whistle back, the same for real and false
+    }
+  }
+  if (m.summon > 0) {
+    m.summon -= TICK_MIN;
+    if (!camp.built || t.kind !== "move") {
+      m.asleep = false;
+      if (dist(m, sim.lead) > 2.2) { const c = cellOf(sim.lead); walkTo(w, m, c.cx, c.cy, MATE_SPEED); }
+      return;
     }
   }
   if (t.kind === "move" && !m.following && updateMove(sim, m)) return;

@@ -5,16 +5,16 @@
 // exported actions. Messages for the player go through sim.say(); they never
 // mention the hidden meter.
 
-import { createRng } from "./rng.js?v=seven-1.17.0";
-import { composeRoster } from "./names.js?v=seven-1.17.0";
-import { createWorld, areaOfRow, K, kindAt, walkable, lostSpots, fellTree, nearestLandmark } from "./world.js?v=seven-1.17.0";
-import { dist, cellOf, moveBody, nearestWalkable, walkTo } from "./body.js?v=seven-1.17.0";
-import { openDay, record, recordPlan, account } from "./chronicle.js?v=seven-1.17.0";
-import { makeCampAt, takeCampDown as campDown, campWood, stackWood, takeWood, lightWoodFor, burnMultFor } from "./camp.js?v=seven-1.17.0";
-import { updateMate, setTask, chopAt, frontDeadfall, practice, moving, DAY_TASKS, NIGHT_TASKS } from "./mates.js?v=seven-1.17.0";
-import * as C from "./config.js?v=seven-1.17.0";
-import { signature, whistleOf } from "./whistle.js?v=seven-1.17.0";
-import { startTutorial } from "./tutorial.js?v=seven-1.17.0";
+import { createRng } from "./rng.js?v=seven-1.18.0";
+import { composeRoster } from "./names.js?v=seven-1.18.0";
+import { createWorld, areaOfRow, K, kindAt, walkable, lostSpots, fellTree, nearestLandmark } from "./world.js?v=seven-1.18.0";
+import { dist, cellOf, moveBody, nearestWalkable, walkTo } from "./body.js?v=seven-1.18.0";
+import { openDay, record, recordPlan, account } from "./chronicle.js?v=seven-1.18.0";
+import { makeCampAt, takeCampDown as campDown, campWood, stackWood, takeWood, lightWoodFor, burnMultFor } from "./camp.js?v=seven-1.18.0";
+import { updateMate, setTask, chopAt, frontDeadfall, practice, moving, DAY_TASKS, NIGHT_TASKS } from "./mates.js?v=seven-1.18.0";
+import * as C from "./config.js?v=seven-1.18.0";
+import { signature, whistleOf } from "./whistle.js?v=seven-1.18.0";
+import { startTutorial } from "./tutorial.js?v=seven-1.18.0";
 
 // ---- the clock ---------------------------------------------------------------
 export const minutes = (sim) => sim.ticks * C.TICK_MIN;
@@ -248,11 +248,14 @@ export function callOut(sim) {
   sim.say("You whistle.");
   sim.stats.whistled++;
   sim.sfx("whistle", { sig: signature(sim.seed, "lead") });
-  for (const m of sim.mates) {
-    if (m.asleep || m.hidden || dist(m, sim.lead) > C.CALL_RANGE) continue;
-    if (!m.fake && m.lucidity < C.CALL_MIN_LUCIDITY) continue;
-    m.heard = { wait: Math.round(dist(m, sim.lead) * C.WHISTLE_DELAY) };
-  }
+  // Everyone in earshot answers, one at a time (nearest first), busy or not. Only the
+  // idle (free or on auto) also come to you, for SUMMON_MIN, then go back to what they were doing.
+  const hear = sim.mates.filter((m) => !m.asleep && !m.hidden && dist(m, sim.lead) <= C.CALL_RANGE && (m.fake || m.lucidity >= C.CALL_MIN_LUCIDITY))
+    .sort((a, b) => dist(a, sim.lead) - dist(b, sim.lead));
+  hear.forEach((m, i) => {
+    const idle = !m.task || m.task.kind === "free" || !!m.task.auto;
+    m.heard = { wait: Math.round(dist(m, sim.lead) * C.WHISTLE_DELAY) + i * C.ANSWER_GAP, come: idle };
+  });
 }
 export const whistle = callOut;
 
