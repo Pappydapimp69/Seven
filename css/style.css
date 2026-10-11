@@ -1055,3 +1055,15 @@ body[data-coop="2"] .item-bar.p2 { display: flex; }
 /* Training, in the pause menu of an expedition. */
 .train-name { flex: 1; text-align: center; align-self: center; font-weight: 600; letter-spacing: 0.04em; }
 .diff.dim { opacity: 0.45; }
+
+/* SEVEN'S HUD: what the woods needs and nothing else — compass (it can lie),
+   wood carried, the camp's pile, the time, the day, the area. Basin counters
+   (markers found and logged, doses, stone, seed) are hidden. Brain: always-on
+   clutter past about ten elements breaks the urgent reads. */
+.pill-pile { display: none; }
+body[data-run-kind="seven"] .pill-pile { display: flex; }
+body[data-run-kind="seven"] .pill-found,
+body[data-run-kind="seven"] .pill-log,
+body[data-run-kind="seven"] .pill-doses,
+body[data-run-kind="seven"] .pill-stone,
+body[data-run-kind="seven"] .pill-seed { display: none; }

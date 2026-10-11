@@ -1008,12 +1008,14 @@ function updateSevenObjective(sim) {
         ? ` Bring ${nameOfSeven(sim, mystery.accused)} into a pylon and spend it.`
       : ` Ask the party about day ${mystery.day} with {checkin}; ${mystery.asksLeft} question${mystery.asksLeft === 1 ? "" : "s"} left. Press {name} to name somebody.`
     : "";
+  const clock = sevenClock(sim.time);
+  const when = clock.night ? "It is dark." : `Dusk in ${Math.max(0, Math.ceil(clock.hoursToDusk))}h.`;
+  const campLine = sim.camp && !sim.camp.built ? " The camp is packed." : "";
   setObjective(
-    `Day ${e.day}  Area ${e.area}/${SEVEN_AREAS}`,
-    `Make it through the woods. Progress ${pct}%. Light left: ${e.daylight}h.` +
+    `Day ${e.day}  Area ${Math.min(SEVEN_AREAS, e.area + 1)}/${SEVEN_AREAS}`,
+    `The way out is north. ${when}${campLine}` +
       (missing ? " Someone is still out there behind you." : "") +
-      mysteryLine +
-      " Deadfalls slow the route; pylons and supplies buy enough clarity to keep going.",
+      mysteryLine,
   );
 }
 

@@ -10,7 +10,7 @@ import { perceivedYaw, rosterRead, distortion, filterReport, perceivedWorldItems
 import { canWork, beatAt, holdFraction, PHASE } from "./woods.js?v=seven-0.34.0";
 import { KEYS } from "./keys.js?v=seven-0.34.0";
 import { reachOf, LOG_RADIUS, PYLON_RADIUS, TIME_LIMIT, discoveredCount, ITEM_PICKUP_RADIUS, ITEM_INFO, gatherTarget, GATHER_HOLD_TIME, previewCraft, claimedEntryAt, pylonAt,
-  mossedAt, FIRE_FUEL_MAX, FIRE_COST, phaseOf, holdTimeFor,
+  mossedAt, FIRE_FUEL_MAX, FIRE_COST, phaseOf, holdTimeFor, sevenClock,
 } from "./state.js?v=seven-0.34.0";
 
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
@@ -44,6 +44,8 @@ export function createHud(sim, percept, opts = {}) {
     doses: document.getElementById("doseCount"),
     compass: document.getElementById("compass"),
     clock: document.getElementById("clock"),
+    clockLabel: document.getElementById("clockLabel"),
+    pile: document.getElementById("pileCount"),
     dayLabel: document.getElementById("dayLabel"),
     subtitles: document.getElementById("subtitles"),
     prompt: document.getElementById("actionPrompt"),
@@ -457,7 +459,7 @@ export function createHud(sim, percept, opts = {}) {
     if (el.level) {
       if (el.levelPillLabel) el.levelPillLabel.textContent = sim.expedition ? "Area" : "Basin";
       el.level.textContent = sim.expedition
-        ? `${sim.expedition.area ?? 0} / 7`
+        ? `${Math.min(7, (sim.expedition.area ?? 0) + 1)} / 7`
         : `${sim.level} / ${sim.campaignLength}`;
     }
 
@@ -488,9 +490,15 @@ export function createHud(sim, percept, opts = {}) {
 
     const left = Math.max(0, TIME_LIMIT - sim.time);
     if (sim.expedition) {
-      el.clock.textContent = `${sim.expedition.daylight}h`;
-      el.clock.classList.toggle("low", sim.expedition.daylight <= 2);
+      // Seven runs on a clock, so show the time — not a countdown.
+      const c = sevenClock(sim.time);
+      const hh = Math.floor(c.hour), mm = Math.floor((c.hour - hh) * 60 / 10) * 10;
+      el.clock.textContent = `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+      el.clock.classList.toggle("low", !c.night && c.hoursToDusk <= 2);
+      if (el.clockLabel) el.clockLabel.textContent = "Time";
+      if (el.pile) el.pile.textContent = sim.camp ? (sim.camp.built ? String(sim.camp.pile || 0) : "packed") : "—";
     } else {
+      if (el.clockLabel) el.clockLabel.textContent = "Light";
       el.clock.textContent = `${String(Math.floor(left / 60)).padStart(2, "0")}:${String(Math.floor(left % 60)).padStart(2, "0")}`;
       el.clock.classList.toggle("low", left < 120);
     }
@@ -500,8 +508,9 @@ export function createHud(sim, percept, opts = {}) {
     // is actually running.
     if (el.dayLabel) {
       if (sim.expedition) {
-        el.dayLabel.textContent = `DAY ${sim.expedition.day}`;
-        el.dayLabel.classList.remove("night");
+        const night = sevenClock(sim.time).night;
+        el.dayLabel.textContent = night ? `NIGHT ${sim.expedition.day}` : `DAY ${sim.expedition.day}`;
+        el.dayLabel.classList.toggle("night", night);
       } else if (sim.noDrain || sim.woods) {
         // NO CYCLE HERE, so say so rather than saying nothing. Skipping the
         // write left the element holding the PREVIOUS run's value: play a
