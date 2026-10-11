@@ -23,10 +23,15 @@ and `docs/blueprint-1.0-remake.md` first.
 - `src/percept.js` — the only liar. `src/view.js` draws from it: FIRST PERSON, a
   grid raycaster (blueprint 1.6). There is no overview, on purpose.
 - `src/camp.js` — camp up/down, the woodpile (12) and the surplus stack (30).
+- `src/audio.js` + `src/soundscape.js` — all sound is synthesised live (no files).
+  soundscape.js is PURE (what the woods sound like; panning; the music's scale by
+  woods and night). THE RULE: sound is built from the percept and public facts,
+  never lucidity — tests/soundscape.mjs checks the source for it.
 - `src/save.js`, `src/input.js`, `src/ui.js`, `src/main.js` (panels + loop).
 - Tests: `tests/run-all.sh` — world, sim, chronicle, save, triggers, a
   whole-run bot (`tests/bot.mjs`), `tests/play.mjs` and `tests/view.mjs` (drift,
-  turning, the 360° sweep) in a real browser.
+  turning, the 360° sweep) and `tests/sound.mjs` (the analyser on the master bus:
+  sound really comes out) in a real browser.
 
 ## Before you edit anything
 

@@ -2,20 +2,20 @@
 // this file reads sim.pending and opens the matching panel, and the panel
 // answers through the sim's exported actions.
 
-import * as S from "./sim.js?v=seven-1.11.0";
-import { perceive } from "./percept.js?v=seven-1.11.0";
-import { createView, SLOT_COLORS } from "./view.js?v=seven-1.11.0";
-import { createInput } from "./input.js?v=seven-1.11.0";
-import * as UI from "./ui.js?v=seven-1.11.0";
-import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.11.0";
-import * as Audio from "./audio.js?v=seven-1.11.0";
-import { createRng } from "./rng.js?v=seven-1.11.0";
-import { composeRoster } from "./names.js?v=seven-1.11.0";
-import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, TASK_SKILL, frontDeadfall } from "./mates.js?v=seven-1.11.0";
-import { areaOfRow } from "./world.js?v=seven-1.11.0";
-import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_INFO, NO_SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.11.0";
+import * as S from "./sim.js?v=seven-1.12.0";
+import { perceive } from "./percept.js?v=seven-1.12.0";
+import { createView, SLOT_COLORS } from "./view.js?v=seven-1.12.0";
+import { createInput } from "./input.js?v=seven-1.12.0";
+import * as UI from "./ui.js?v=seven-1.12.0";
+import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.12.0";
+import * as Audio from "./audio.js?v=seven-1.12.0";
+import { createRng } from "./rng.js?v=seven-1.12.0";
+import { composeRoster } from "./names.js?v=seven-1.12.0";
+import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, TASK_SKILL, frontDeadfall } from "./mates.js?v=seven-1.12.0";
+import { areaOfRow, kindAt } from "./world.js?v=seven-1.12.0";
+import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_INFO, NO_SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.12.0";
 
-const BUILD = "seven-1.11.0";
+const BUILD = "seven-1.12.0";
 const esc = UI.esc;
 const store = (() => { try { return window.localStorage; } catch { return null; } })();
 const readJSON = (k, d) => { try { const v = store && store.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
@@ -34,7 +34,7 @@ const input = createInput({
 // ---- play actions ---------------------------------------------------------------
 function onAction(a, e) {
   if (splashOn) { leaveSplash(); return; }
-  if (UI.isOpen()) { UI.navigate(a, e); return; }
+  if (UI.isOpen()) { UI.navigate(a, e); Audio.ui(a === "act" ? "select" : a === "back" || a === "pause" ? "back" : "move"); return; }
   if (!sim || sim.status !== "playing" || sim.pending) return;
   if (a === "pause") return pausePanel();
   if (S.busy(sim)) return;
@@ -266,13 +266,27 @@ function homePanel() {
   });
 }
 
-function pausePanel() {
+// Sound settings: saved, and applied the moment audio opens.
+const SOUND_KEY = "seven:settings";
+const sound = { music: true, sfx: true, ...readJSON(SOUND_KEY, {}) };
+Audio.setSettings(sound);
+function toggleSound(which) { sound[which] = !sound[which]; writeJSON(SOUND_KEY, sound); Audio.setSettings(sound); }
+
+function pausePanel(focus = null) {
   UI.open(`
     <h2>Paused</h2>
     <button data-do="resume" autofocus>Resume</button>
+    <button data-do="music">Music: ${sound.music ? "on" : "off"}</button>
+    <button data-do="sfx">Sound effects: ${sound.sfx ? "on" : "off"}</button>
     <button data-do="how">How to play</button>
     <button data-do="quit">Save and leave</button>`, { onBack: UI.close });
-  UI.bind({ resume: UI.close, how: () => howPanel(pausePanel), quit: () => { save(); sim = null; titlePanel(); } });
+  UI.refocus(focus);
+  UI.bind({
+    resume: UI.close, how: () => howPanel(pausePanel),
+    music: () => { toggleSound("music"); pausePanel('[data-do="music"]'); },
+    sfx: () => { toggleSound("sfx"); pausePanel('[data-do="sfx"]'); },
+    quit: () => { save(); sim = null; titlePanel(); },
+  });
 }
 
 function endPanel() {
@@ -357,7 +371,8 @@ function frame(now) {
     if (sim) afterTicks();
     if (sim) draw(dt);
   }
-  requestAnimationFrame(frame);
+  document.getElementById("modal").addEventListener("click", (e) => { if (e.target.closest("button")) Audio.ui("select"); });
+requestAnimationFrame(frame);
 }
 
 /** Stick to world: forward is -my along yaw, strafe is mx to its right. */
@@ -381,6 +396,22 @@ function draw(dt) {
   const L = sim.lead;
   const a = S.contextAction(sim);
   view.lead.yaw = L.yaw ?? -Math.PI / 2;
+  // Sound: what the sim announced this frame, then the always-on layers. Both
+  // come from the percept and public facts — never from lucidity (soundscape.js).
+  for (const ev of sim.sounds.splice(0)) {
+    Audio.play(ev, view.lead);
+    if (ev.name === "whistle" || ev.name === "answer") renderer.ripple(ev.name === "whistle" ? 1 : 0.5);
+  }
+  {
+    const cell = { cx: Math.floor(L.x), cy: Math.floor(L.y) };
+    Audio.update({
+      area: areaOfRow(cell.cy), night: S.isNight(sim), daylight: daylightAt(S.minuteOfDay(sim)),
+      lead: { x: L.x, y: L.y, yaw: view.lead.yaw },
+      fire: view.camp && view.camp.fire > 0 ? { x: view.camp.x, y: view.camp.y, fuel: view.camp.fire } : null,
+      lit: view.pylons.filter((p) => p.state === "lit"),
+      ground: kindAt(sim.world, cell.cx, cell.cy), busy: !!L.busy, panelOpen: UI.isOpen(),
+    }, dt);
+  }
   renderer.draw(sim.world, view, {
     mod: S.minuteOfDay(sim), real: performance.now() / 1000,
     busyFrac: L.busy && Number.isFinite(L.busy.total) ? 1 - L.busy.left / L.busy.total : null,
@@ -394,6 +425,14 @@ function draw(dt) {
     hint: sim.status === "playing" ? hintText() : "",
   });
   UI.messages(sim.msgs, dt);
+}
+/** 0 at night, 1 by day, ramping an hour either side of dawn and dusk (as the view does). */
+function daylightAt(mod) {
+  const ramp = (a, b, m) => Math.max(0, Math.min(1, (m - a) / (b - a)));
+  if (mod >= 420 && mod < 1020) return 1;
+  if (mod >= 1020 && mod < 1140) return 1 - ramp(1020, 1140, mod);
+  if (mod >= 300 && mod < 420) return ramp(300, 420, mod);
+  return 0;
 }
 const busyLabel = (k) => ({ chop: "Chopping…", fell: "Felling…", ask: "Talking…", fire_light: "Lighting the fire…", fire_feed: "Feeding the fire…",
   camp_make: "Making camp…", camp_down: "Taking camp down…", light: "Lighting the pylon…", sleep: "Sleeping…", rest: "Resting…" }[k] || "");
@@ -409,6 +448,8 @@ window.__seven = {
   get sim() { return sim; },
   get visible() { return [...renderer.visible]; },
   get seen() { return view; },
+  get pulses() { return renderer.pulses; },
+  Audio,
   worldMove,
   get panel() { return UI.isOpen() ? document.querySelector("#modal .panel h2, #modal .panel h1")?.textContent : null; },
   set headless(v) { headless = !!v; },

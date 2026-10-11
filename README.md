@@ -18,7 +18,7 @@ walks out with you.
   happened. A false one has exactly one thing wrong, derived from what happened.
 - At the far side there is one more pylon than you have real people.
 
-Controls: WASD/arrows to walk · E act · F fire · Q camp · R rest · C call ·
+Controls: WASD/arrows to walk · E act · F fire · Q camp · R rest · C whistle ·
 Esc pause. Touch and gamepad work too.
 
 Design: `docs/IDEAS.md` ("THE WOODS"). The remake: `docs/adr/0004-the-remake.md`.

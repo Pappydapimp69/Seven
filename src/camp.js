@@ -4,9 +4,9 @@
 // stays where it was, and walking camp forward past someone lost abandons
 // them with no prompt and no message.
 
-import { record } from "./chronicle.js?v=seven-1.11.0";
-import { areaOfRow } from "./world.js?v=seven-1.11.0";
-import { PILE_CAP, SURPLUS_CAP, CAMPDOWN_FALSE, DIRS8 } from "./config.js?v=seven-1.11.0";
+import { record } from "./chronicle.js?v=seven-1.12.0";
+import { areaOfRow } from "./world.js?v=seven-1.12.0";
+import { PILE_CAP, SURPLUS_CAP, CAMPDOWN_FALSE, DIRS8 } from "./config.js?v=seven-1.12.0";
 
 const areaOf = (p) => areaOfRow(Math.floor(p.y));
 
@@ -36,7 +36,7 @@ export function takeCampDown(sim, who) {
   let dir = null;
   if (behind) dir = bearingTo(c, ms);
   else if (r0 < CAMPDOWN_FALSE) dir = DIRS8[Math.floor(r1 * 8)];
-  if (dir) { record(sim, "call", [], { dir }); sim.say(`As the camp comes down, a voice calls from the ${dir}.`); }
+  if (dir) { record(sim, "call", [], { dir }); sim.say(`As the camp comes down, a voice calls from the ${dir}.`); if (sim.sfx) sim.sfx("voice", { dir }); }
 }
 
 // ---- the woodpile and the surplus stack ----------------------------------------

@@ -13,9 +13,9 @@
 // and scaled up; the canvas backing is CSS size × devicePixelRatio, re-read on
 // every resize and every DPR change.
 
-import { K } from "./world.js?v=seven-1.11.0";
-import { hash01 } from "./rng.js?v=seven-1.11.0";
-import { FIRE_LIGHT, DAWN, DUSK, PILE_CAP, SURPLUS_CAP } from "./config.js?v=seven-1.11.0";
+import { K } from "./world.js?v=seven-1.12.0";
+import { hash01 } from "./rng.js?v=seven-1.12.0";
+import { FIRE_LIGHT, DAWN, DUSK, PILE_CAP, SURPLUS_CAP } from "./config.js?v=seven-1.12.0";
 
 export const SLOT_COLORS = ["#e0b354", "#5fb3c9", "#d9745a", "#9fc46a", "#b98fd6", "#e88fb0"];
 export const HFOV = (72 * Math.PI) / 180;
@@ -380,6 +380,19 @@ export function createView(canvas, opts = {}) {
       }
       ctx.globalAlpha = 1;
     }
+    // The whistle, drawn: rings that spread out from you and thin as they go.
+    for (let i = pulses.length - 1; i >= 0; i--) {
+      const p = pulses[i], age = clock.real - p.t;
+      if (age > 1.5) { pulses.splice(i, 1); continue; }
+      for (let r = 0; r < 3; r++) {
+        const a = age - r * 0.22;
+        if (a < 0) continue;
+        const rad = Math.min(W, H) * (0.06 + 0.5 * (a / 1.2) ** 0.7 * p.size);
+        ctx.strokeStyle = `rgba(235,240,255,${Math.max(0, 0.55 * p.size * (1 - a / 1.2))})`;
+        ctx.lineWidth = 3 - r * 0.8;
+        ctx.beginPath(); ctx.arc(W / 2, H * 0.62, rad, Math.PI * 1.15, Math.PI * 1.85); ctx.stroke();
+      }
+    }
     // A small mark at the middle: E acts on what it is over.
     ctx.fillStyle = "rgba(255,255,255,0.55)"; ctx.fillRect(W / 2 - 1.5, H / 2 - 1.5, 3, 3);
     if (clock.busyFrac != null) {
@@ -388,7 +401,8 @@ export function createView(canvas, opts = {}) {
     }
   }
   let lastL = null, lastPhase = 0;
-  const strikes = [];
+  const strikes = [], pulses = [];
+  const ripple = (size = 1) => pulses.push({ t: performance.now() / 1000, size });
 
-  return { draw, resize, get visible() { return state.visible; }, get size() { return { W, H, dpr, RW, RH }; } };
+  return { draw, resize, ripple, get pulses() { return pulses.length; }, get visible() { return state.visible; }, get size() { return { W, H, dpr, RW, RH }; } };
 }

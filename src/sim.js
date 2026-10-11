@@ -5,14 +5,14 @@
 // exported actions. Messages for the player go through sim.say(); they never
 // mention the hidden meter.
 
-import { createRng } from "./rng.js?v=seven-1.11.0";
-import { composeRoster } from "./names.js?v=seven-1.11.0";
-import { createWorld, areaOfRow, K, kindAt, walkable, lostSpots, fellTree } from "./world.js?v=seven-1.11.0";
-import { dist, cellOf, moveBody, nearestWalkable, walkTo } from "./body.js?v=seven-1.11.0";
-import { openDay, record, recordPlan, account } from "./chronicle.js?v=seven-1.11.0";
-import { makeCampAt, takeCampDown as campDown, campWood, stackWood, takeWood } from "./camp.js?v=seven-1.11.0";
-import { updateMate, setTask, chopAt, frontDeadfall, practice, moving, DAY_TASKS, NIGHT_TASKS } from "./mates.js?v=seven-1.11.0";
-import * as C from "./config.js?v=seven-1.11.0";
+import { createRng } from "./rng.js?v=seven-1.12.0";
+import { composeRoster } from "./names.js?v=seven-1.12.0";
+import { createWorld, areaOfRow, K, kindAt, walkable, lostSpots, fellTree } from "./world.js?v=seven-1.12.0";
+import { dist, cellOf, moveBody, nearestWalkable, walkTo } from "./body.js?v=seven-1.12.0";
+import { openDay, record, recordPlan, account } from "./chronicle.js?v=seven-1.12.0";
+import { makeCampAt, takeCampDown as campDown, campWood, stackWood, takeWood } from "./camp.js?v=seven-1.12.0";
+import { updateMate, setTask, chopAt, frontDeadfall, practice, moving, DAY_TASKS, NIGHT_TASKS } from "./mates.js?v=seven-1.12.0";
+import * as C from "./config.js?v=seven-1.12.0";
 
 // ---- the clock ---------------------------------------------------------------
 export const minutes = (sim) => sim.ticks * C.TICK_MIN;
@@ -71,6 +71,9 @@ export function createSim(opts = {}) {
 
 /** Non-serialised helpers hung on a sim (also after a load). */
 export function attach(sim) {
+  // Sounds the sim announces for the player's ears: transient, never saved, no rng.
+  sim.sounds = [];
+  sim.sfx = (name, data = {}) => { sim.sounds.push({ name, ...data }); if (sim.sounds.length > 64) sim.sounds.shift(); };
   sim.say = (text) => { sim.msgs.push({ text, at: sim.ticks }); if (sim.msgs.length > 30) sim.msgs.shift(); };
 }
 
@@ -234,6 +237,7 @@ export function rest(sim) {
  */
 export function callOut(sim) {
   sim.say("You whistle.");
+  sim.sfx("whistle");
   for (const m of sim.mates) {
     if (m.asleep || m.hidden || dist(m, sim.lead) > C.CALL_RANGE) continue;
     if (!m.fake && m.lucidity < C.CALL_MIN_LUCIDITY) continue;
@@ -259,6 +263,7 @@ function finishBusy(sim) {
         L.carry += n;
         record(sim, "fell", ["lead"]);
         sim.say(`The tree comes down. You carry ${n} wood.`);
+        sim.sfx("treefall", { x: t.cx + 0.5, y: t.cy + 0.5 });
       }
       break;
     }
@@ -267,12 +272,13 @@ function finishBusy(sim) {
         takeWood(sim.camp, C.FIRE_LIGHT_WOOD); sim.camp.fire = C.FIRE_LIGHT_HOURS;
         record(sim, "fire", ["lead"]);
         sim.say("The fire catches.");
+        sim.sfx("fire");
       }
       break;
     case "fire_feed":
       if (takeWood(sim.camp, 1)) { sim.camp.fire = Math.min(C.FIRE_MAX_HOURS, sim.camp.fire + C.FIRE_FEED_HOURS); }
       break;
-    case "camp_make": if (!sim.camp.built) { makeCampHere(sim, b.at); practiseCrew(sim, b.crew); } break;
+    case "camp_make": if (!sim.camp.built) { makeCampHere(sim, b.at); practiseCrew(sim, b.crew); sim.sfx("camp"); } break;
     case "camp_down": if (sim.camp.built) { campDown(sim, ["lead"]); practiseCrew(sim, b.crew); } break;
     case "light": lightPylon(sim, b); break;
     default: break;
@@ -303,11 +309,13 @@ function lightPylon(sim, b) {
     p.state = "spent";
     sim.mates = sim.mates.filter((m) => m !== partner);
     sim.say(`The light goes through ${partner.name}, and there is nobody there.`);
+    sim.sfx("pylon_dead");
     return;
   }
   p.state = "lit"; p.litAt = minutes(sim);
   record(sim, "pylon", ["lead", partner.id]);
   sim.say("The pylon burns blue.");
+  sim.sfx("pylon");
 }
 
 // ---- plans --------------------------------------------------------------------
@@ -341,6 +349,7 @@ export function keepTwin(sim, keepLeft) {
   sim.twin = null;
   if (sim.pending === "twin") sim.pending = null;
   sim.say("One of them walks off into the trees.");
+  sim.sfx("found");
 }
 
 function restoreReal(sim, slot) {
@@ -419,12 +428,14 @@ export function resolveNight(sim) {
   const ms = sim.missing;
   if (ms && !ms.found) {
     const p = Math.max(C.CALL_FLOOR, 1 - C.CALL_FADE * (ms.nights - 1));
-    if (r[5] < p) { const dir = bearing(here, ms); record(sim, "call", [], { dir }); lines.push(`At first light, a voice calls from the ${dir}.`); }
+    if (r[5] < p) { const dir = bearing(here, ms); record(sim, "call", [], { dir }); lines.push(`At first light, a voice calls from the ${dir}.`); sim.sfx("voice", { dir }); }
   } else if (r[5] < C.FALSE_CALL) {
     const dir = C.DIRS8[Math.floor(r[1] * 8)];
     record(sim, "call", [], { dir });
     lines.push(`At first light, a voice calls from the ${dir}.`);
+    sim.sfx("voice", { dir });
   }
+  sim.sfx("dawn");
 
   sim.exposure = {}; sim.nightHours = 0;
   if (sim.lead.busy && sim.lead.busy.kind === "sleep") sim.lead.busy = null;
@@ -517,11 +528,13 @@ export function lightHome(sim, id) {
     h.tried.push(who.name);
     sim.mates = sim.mates.filter((m) => m !== who);
     sim.say(`The pylon stays dark. ${who.name} is not there.`);
+    sim.sfx("dark");
   } else {
     h.saved.push({ name: who.name, points: who.points });
     if (who === f) sim.missing = null;
     else sim.mates = sim.mates.filter((m) => m !== who);
     sim.say(`The pylon takes. ${who.name} is gone home.`);
+    sim.sfx("home");
   }
   if (h.pylons <= 0 || homeCandidates(sim).length === 0) finishRun(sim);
 }
@@ -578,13 +591,13 @@ export function tick(sim, input = {}) {
   if (ms && !ms.found && dist(ms, L) <= findReach(sim)) {
     const t = sim.mates.filter((m) => dist(m, L) <= 4 && !m.asleep).sort((a, b) => (b.skills.track || 0) - (a.skills.track || 0))[0];
     if (t) practice(t, "track");
-    ms.found = true; ms.path = null; sim.say(`${ms.name} is here, in the trees. They follow you.`); }
+    ms.found = true; ms.path = null; sim.say(`${ms.name} is here, in the trees. They follow you.`); sim.sfx("found"); }
   if (ms && ms.found) {
     if (dist(ms, L) > 2.2) { const c = cellOf(L); walkTo(w, ms, c.cx, c.cy, C.MATE_SPEED); }
     const twin = sim.mates.find((m) => m.id === ms.id);
     if (sim.camp.built && atCamp(sim, ms)) {
-      if (twin) { sim.twin = { id: ms.id }; sim.pending = "twin"; }
-      else { restoreReal(sim, -1); sim.say("They sit down by the fire as if they never left."); }
+      if (twin) { sim.twin = { id: ms.id }; sim.pending = "twin"; sim.sfx("twin"); }
+      else { restoreReal(sim, -1); sim.say("They sit down by the fire as if they never left."); sim.sfx("found"); }
     }
   }
 
@@ -613,6 +626,7 @@ export function tick(sim, input = {}) {
     sim.duskSeen = sim.day;
     for (const m of sim.mates) if (!m.following && m.task && DAY_TASKS.includes(m.task.kind) && !moving(m)) setTask(m, "sleep");
     sim.say("The light is going.");
+    sim.sfx("dusk");
   }
   if (Math.floor(minutes(sim) / 1440) + 1 > sim.day) resolveNight(sim);
   if (sim.camp.built && atCamp(sim, L) && !L.busy) {
