@@ -109,6 +109,14 @@ export const CALL_FLOOR = 0.5;
 export const CALL_FADE = 0.15;
 export const FALSE_CALL = 0.3;
 export const FIND_REACH = 2.5;
+// The keystone morning (IDEAS): you wake to an empty camp; they come back one
+// at a time as you walk near them, and one of them may not be who they were.
+export const KEYSTONE_DAY = 3;
+export const KEYSTONE_DRAWS = 8;             // FIXED on that dawn, whatever happens
+export const KEYSTONE_SEEN = 6;              // cells: walk this close and they are there
+// The camp-down call (Brain seven/E25, E30, E34 + the 2026-10-11 sandbox):
+// a voice as camp comes down when the move would leave someone behind.
+export const CAMPDOWN_FALSE = 0.3;
 
 // ---- the ending -------------------------------------------------------------
 export const RETURN_FRACTION = 0.5;          // of a saved member's points, to the pool

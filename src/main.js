@@ -2,20 +2,20 @@
 // this file reads sim.pending and opens the matching panel, and the panel
 // answers through the sim's exported actions.
 
-import * as S from "./sim.js?v=seven-1.10.0";
-import { perceive } from "./percept.js?v=seven-1.10.0";
-import { createView, SLOT_COLORS } from "./view.js?v=seven-1.10.0";
-import { createInput } from "./input.js?v=seven-1.10.0";
-import * as UI from "./ui.js?v=seven-1.10.0";
-import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.10.0";
-import * as Audio from "./audio.js?v=seven-1.10.0";
-import { createRng } from "./rng.js?v=seven-1.10.0";
-import { composeRoster } from "./names.js?v=seven-1.10.0";
-import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, TASK_SKILL, frontDeadfall } from "./mates.js?v=seven-1.10.0";
-import { areaOfRow } from "./world.js?v=seven-1.10.0";
-import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_INFO, NO_SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.10.0";
+import * as S from "./sim.js?v=seven-1.11.0";
+import { perceive } from "./percept.js?v=seven-1.11.0";
+import { createView, SLOT_COLORS } from "./view.js?v=seven-1.11.0";
+import { createInput } from "./input.js?v=seven-1.11.0";
+import * as UI from "./ui.js?v=seven-1.11.0";
+import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.11.0";
+import * as Audio from "./audio.js?v=seven-1.11.0";
+import { createRng } from "./rng.js?v=seven-1.11.0";
+import { composeRoster } from "./names.js?v=seven-1.11.0";
+import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, TASK_SKILL, frontDeadfall } from "./mates.js?v=seven-1.11.0";
+import { areaOfRow } from "./world.js?v=seven-1.11.0";
+import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_INFO, NO_SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.11.0";
 
-const BUILD = "seven-1.10.0";
+const BUILD = "seven-1.11.0";
 const esc = UI.esc;
 const store = (() => { try { return window.localStorage; } catch { return null; } })();
 const readJSON = (k, d) => { try { const v = store && store.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
@@ -213,12 +213,19 @@ function askPanel(m) {
     <h2>${esc(m.name)}</h2>
     <p class="small">Ask about a day you both lived through. It takes half an hour.</p>
     ${days.map((d) => `<button data-do="ask" data-arg="${d}">${d === sim.day - 1 ? "Yesterday" : `Day ${d}`}</button>`).join("")}
+    <button data-do="all" data-arg="${days[0]}">Was everyone there ${days[0] === sim.day - 1 ? "yesterday" : `on day ${days[0]}`}?</button>
     <button data-do="close">Never mind</button>`, { onBack: UI.close });
   UI.bind({
     ask: (d) => {
       const lines = S.askAbout(sim, m.id, +d);
       UI.open(`<h2>${esc(m.name)}, about ${+d === sim.day - 1 ? "yesterday" : `day ${d}`}</h2>
         <div class="account">${lines.map((l) => `<p>${esc(l)}</p>`).join("")}</div>
+        <button data-do="close" autofocus>Done</button>`, { onBack: UI.close });
+      UI.bind({ close: UI.close });
+    },
+    all: (d) => {
+      const lines = S.everyoneThere(sim, m.id, +d);
+      UI.open(`<h2>${esc(m.name)}</h2><div class="account">${lines.map((l) => `<p>${esc(l)}</p>`).join("")}</div>
         <button data-do="close" autofocus>Done</button>`, { onBack: UI.close });
       UI.bind({ close: UI.close });
     },

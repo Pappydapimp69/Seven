@@ -4,10 +4,10 @@
 // (Brain mirage#E8: a round trip agreeing with itself is not proof); a body
 // standing in a wall is moved to the nearest open cell.
 
-import { createRng } from "./rng.js?v=seven-1.10.0";
-import { createWorld, clearDeadfall, fellTree, walkable } from "./world.js?v=seven-1.10.0";
-import { nearestWalkable } from "./body.js?v=seven-1.10.0";
-import { attach } from "./sim.js?v=seven-1.10.0";
+import { createRng } from "./rng.js?v=seven-1.11.0";
+import { createWorld, clearDeadfall, fellTree, walkable } from "./world.js?v=seven-1.11.0";
+import { nearestWalkable } from "./body.js?v=seven-1.11.0";
+import { attach } from "./sim.js?v=seven-1.11.0";
 
 export const SAVE_VERSION = 1;
 export const SAVE_KEY = "seven:run";
@@ -27,6 +27,7 @@ export function serialize(sim) {
     dawnDone: sim.dawnDone, duskDone: sim.duskDone, duskSeen: sim.duskSeen,
     exposure: clean(sim.exposure), nightHours: sim.nightHours,
     pending: sim.pending, twin: sim.twin, home: sim.home ? clean(sim.home) : null, exitLeft: sim.exitLeft,
+    keystone: sim.keystone ? clean(sim.keystone) : null,   // gates the keystone draws: save state
     world: {
       deadfalls: w.deadfalls.map((d) => ({ progress: d.progress, cleared: d.cleared })),
       felled: w.trees.filter((t) => t.felled).map((t) => t.id),
@@ -49,7 +50,7 @@ export function deserialize(data) {
     missing: data.missing, lost: data.lost, chronicle: data.chronicle,
     dawnDone: data.dawnDone, duskDone: data.duskDone, duskSeen: data.duskSeen,
     exposure: data.exposure || {}, nightHours: data.nightHours || 0,
-    pending: data.pending, twin: data.twin, home: data.home, exitLeft: data.exitLeft,
+    pending: data.pending, twin: data.twin, home: data.home, exitLeft: data.exitLeft, keystone: data.keystone || null,
     msgs: [], saveDue: false,
   };
   // A path is cells {cx, cy}; one that does not resolve to open ground is dropped (re-planned).

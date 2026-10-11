@@ -5,14 +5,14 @@
 // exported actions. Messages for the player go through sim.say(); they never
 // mention the hidden meter.
 
-import { createRng } from "./rng.js?v=seven-1.10.0";
-import { composeRoster } from "./names.js?v=seven-1.10.0";
-import { createWorld, areaOfRow, K, kindAt, walkable, lostSpots, fellTree } from "./world.js?v=seven-1.10.0";
-import { dist, cellOf, moveBody, nearestWalkable, walkTo } from "./body.js?v=seven-1.10.0";
-import { openDay, record, recordPlan, account } from "./chronicle.js?v=seven-1.10.0";
-import { makeCampAt, takeCampDown as campDown, campWood, stackWood, takeWood } from "./camp.js?v=seven-1.10.0";
-import { updateMate, setTask, chopAt, frontDeadfall, practice, moving, DAY_TASKS, NIGHT_TASKS } from "./mates.js?v=seven-1.10.0";
-import * as C from "./config.js?v=seven-1.10.0";
+import { createRng } from "./rng.js?v=seven-1.11.0";
+import { composeRoster } from "./names.js?v=seven-1.11.0";
+import { createWorld, areaOfRow, K, kindAt, walkable, lostSpots, fellTree } from "./world.js?v=seven-1.11.0";
+import { dist, cellOf, moveBody, nearestWalkable, walkTo } from "./body.js?v=seven-1.11.0";
+import { openDay, record, recordPlan, account } from "./chronicle.js?v=seven-1.11.0";
+import { makeCampAt, takeCampDown as campDown, campWood, stackWood, takeWood } from "./camp.js?v=seven-1.11.0";
+import { updateMate, setTask, chopAt, frontDeadfall, practice, moving, DAY_TASKS, NIGHT_TASKS } from "./mates.js?v=seven-1.11.0";
+import * as C from "./config.js?v=seven-1.11.0";
 
 // ---- the clock ---------------------------------------------------------------
 export const minutes = (sim) => sim.ticks * C.TICK_MIN;
@@ -84,7 +84,7 @@ export const realCount = (sim) => sim.mates.filter((m) => !m.fake).length + (fou
 export const busy = (sim) => !!sim.lead.busy;
 
 function nearPeople(sim, p, r) {
-  const out = sim.mates.filter((m) => dist(m, p) <= r);
+  const out = sim.mates.filter((m) => !m.hidden && dist(m, p) <= r);
   const f = found(sim);
   if (f && dist(f, p) <= r) out.push(f);
   return out.sort((a, b) => dist(a, p) - dist(b, p));
@@ -188,7 +188,7 @@ export function fireAction(sim) {
 }
 
 function helpers(sim) {
-  return sim.mates.filter((m) => dist(m, sim.lead) <= 4 && !m.asleep && !(m.task && m.task.chunk > 0));
+  return sim.mates.filter((m) => !m.hidden && dist(m, sim.lead) <= 4 && !m.asleep && !(m.task && m.task.chunk > 0));
 }
 /** Camp work speed: more hands, and builders' hands count for more. */
 export function campSpeed(sim) {
@@ -235,7 +235,7 @@ export function rest(sim) {
 export function callOut(sim) {
   sim.say("You whistle.");
   for (const m of sim.mates) {
-    if (m.asleep || dist(m, sim.lead) > C.CALL_RANGE) continue;
+    if (m.asleep || m.hidden || dist(m, sim.lead) > C.CALL_RANGE) continue;
     if (!m.fake && m.lucidity < C.CALL_MIN_LUCIDITY) continue;
     m.heard = { wait: Math.round(dist(m, sim.lead) * C.WHISTLE_DELAY) };
   }
@@ -411,6 +411,8 @@ export function resolveNight(sim) {
 
   sim.day = night + 1;
   openDay(sim, sim.day, C.WEATHER[Math.floor(r[4] * C.WEATHER.length)]);
+  const emptyCamp = keystone(sim, here, night);
+  if (emptyCamp) lines[0] = "You wake. The camp is empty.";
 
   // The call at first light: a direction, never a name. False calls too, so a
   // call alone never says that someone is missing; a bearing that holds does.
@@ -430,6 +432,73 @@ export function resolveNight(sim) {
   for (const m of sim.mates) { m.asleep = false; m.following = false; m.callPending = false; if (m.task && !moving(m)) { m.task.kind = "free"; m.task.chunk = 0; m.task.stage = null; } }
   for (const l of lines) sim.say(l);
   sim.saveDue = true;
+}
+
+/**
+ * The keystone morning. Everyone has gone into the trees; each comes back as
+ * the lead walks near where they stand, in no particular order. If nobody is
+ * out there already, one who comes back is not who they were — the real one
+ * is lost like any other night. Draws KEYSTONE_DRAWS values on that dawn,
+ * always. Returns true if it happened.
+ */
+function keystone(sim, here, night) {
+  if (sim.day !== C.KEYSTONE_DAY || sim.keystone) return false;
+  const k = [];
+  for (let i = 0; i < C.KEYSTONE_DRAWS; i++) k.push(sim.rng.next());
+  const area = areaOf(here);
+  let spots = lostSpots(sim.world, area);
+  if (spots.length < sim.mates.length) {
+    spots = spots.concat(lostSpots(sim.world, Math.max(0, area - 1)));
+  }
+  if (!spots.length) return false;
+  if (!sim.missing) {
+    const eligible = sim.mates.filter((m) => !m.fake);
+    if (eligible.length) {
+      const m = eligible[Math.floor(k[0] * eligible.length)];
+      const far = lostSpots(sim.world, Math.min(C.AREAS - 1, area + (k[1] < 0.5 ? 0 : 1)));
+      const s = far.length ? far[Math.floor(k[1] * 2 % 1 * far.length)] : spots[0];
+      sim.missing = {
+        id: m.id, name: m.name, role: m.role || null, slot: m.slot, skills: { ...m.skills }, points: m.points, practice: { ...m.practice },
+        lucidity: m.lucidity, x: s.cx + 0.5, y: s.cy + 0.5, area: areaOfRow(s.cy), lastDay: night, nights: 1, found: false,
+      };
+      m.fake = true; m.since = night + 1; m.practice = {};
+    }
+  }
+  const used = new Set();
+  sim.mates.forEach((m, i) => {
+    let j = Math.floor(k[2 + (i % 6)] * spots.length);
+    for (let n = 0; n < spots.length && used.has(j); n++) j = (j + 1) % spots.length;
+    used.add(j);
+    const s = spots[j];
+    m.x = s.cx + 0.5; m.y = s.cy + 0.5; m.hidden = true; m.path = null; m.goal = null;
+  });
+  sim.keystone = { day: sim.day, back: [] };
+  sim.dawnDone = sim.day;                     // no plan this morning: there is nobody to give it to
+  record(sim, "keystone", []);
+  return true;
+}
+
+/** Someone come back from the keystone morning: there, between the trees. */
+function keystoneTick(sim) {
+  for (const m of sim.mates) {
+    if (!m.hidden) continue;
+    const back = dist(m, sim.lead) <= C.KEYSTONE_SEEN || isNight(sim);
+    if (!back) continue;
+    m.hidden = false; m.following = true;
+    if (sim.keystone) sim.keystone.back.push(m.id);
+    sim.say(`${m.name} is there, between the trees.`);
+  }
+}
+
+/** "Was everyone there?" — everyone says yes. Nobody finds it strange. */
+export function everyoneThere(sim, id, day) {
+  const f = found(sim);
+  const who = sim.mates.find((m) => m.id === id) || (f && f.id === id ? f : null);
+  if (!who) return [];
+  startBusy(sim, "ask", C.ASK_MIN);
+  if ((who.away || []).includes(day)) return ["I wasn't with you that day. I don't know."];
+  if (sim.keystone && sim.keystone.day === day) return ["We were all here. You were the one who went off into the trees."];
+  return ["Everyone was there. All seven of us."];
 }
 
 // ---- the far side ---------------------------------------------------------------
@@ -500,7 +569,8 @@ export function tick(sim, input = {}) {
   sim.piles = sim.piles.filter((p) => p.wood > 0);
 
   // The companions.
-  for (const m of sim.mates) updateMate(sim, m);
+  keystoneTick(sim);
+  for (const m of sim.mates) if (!m.hidden) updateMate(sim, m);
   separate(sim);
 
   // Someone found follows you home; at camp, two stand at the fire.
@@ -565,7 +635,7 @@ export function tick(sim, input = {}) {
 
 /** Bodies do not stand inside each other: overlapping companions step apart. */
 function separate(sim) {
-  const bodies = sim.mates.filter((m) => !m.asleep);
+  const bodies = sim.mates.filter((m) => !m.asleep && !m.hidden);
   const f = found(sim);
   if (f) bodies.push(f);
   for (let i = 0; i < bodies.length; i++) {

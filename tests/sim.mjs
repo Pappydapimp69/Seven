@@ -5,6 +5,8 @@ import { createRng } from "../src/rng.js";
 import * as C from "../src/config.js";
 import { clearDeadfall } from "../src/world.js";
 import * as MATES from "../src/mates.js";
+import * as PERCEPT from "../src/percept.js";
+import * as CAMP from "../src/camp.js";
 
 const T = harness("sim");
 const HOUR = 60 / C.TICK_MIN;
@@ -352,6 +354,65 @@ T.check("Scout ahead: a scout who passes near someone lost comes back with a dir
   const said = s.msgs.find((x) => x.text.includes("back from scouting"));
   assert(said && /(north|south|east|west)/.test(said.text), `no report: ${s.msgs.slice(-3).map((x) => x.text).join(" | ")}`);
   assert(s.missing && !s.missing.found, "the scout brought them back: only the lead can");
+});
+
+T.check("the keystone morning: an empty camp; they come back as you walk near; one may not be who they were", () => {
+  for (const seed of [33, 34, 35]) {
+    const s = fresh(seed);
+    s.day = C.KEYSTONE_DAY - 1;
+    const probe = createRng(0); probe.state = s.rng.state;
+    for (let i = 0; i < C.NIGHT_DRAWS + C.KEYSTONE_DRAWS; i++) probe.next();
+    S.resolveNight(s);
+    assert(s.rng.state === probe.state, `seed ${seed}: the keystone dawn drew a different number of values`);
+    assert(s.day === C.KEYSTONE_DAY && s.mates.every((m) => m.hidden), "not everyone is gone");
+    assert(s.msgs.some((m) => m.text === "You wake. The camp is empty."), "the morning did not say the camp is empty");
+    assert(s.missing && s.mates.some((m) => m.fake && m.since === C.KEYSTONE_DAY), "nobody came back as someone else, with nobody already lost");
+    const { perceive } = PERCEPT;
+    assert(perceive(s).people.length === 0, "the eye still sees people at an empty camp");
+    const m = s.mates[2];
+    s.lead.x = m.x + 1; s.lead.y = m.y;
+    S.tick(s, {});
+    assert(!m.hidden && m.following, "walking up to them did not bring them back");
+    assert(s.mates.filter((x) => x.hidden).length === s.mates.length - 1 || s.mates.filter((x) => !x.hidden).length >= 1, "everyone came back at once");
+    S.resolveNight(s);
+    assert(!s.msgs.slice(-3).some((x) => x.text.includes("empty")), "the keystone happened twice");
+  }
+});
+
+T.check("the camp-down call: a voice from the lost one's side when the move would leave them; only false calls otherwise", () => {
+  const draws = (s) => { const p = createRng(0); p.state = s.rng.state; p.next(); p.next(); return p.state; };
+  let real = 0, wrong = 0, falseCalls = 0;
+  for (let seed = 1; seed <= 60; seed++) {
+    const s = fresh(seed), c = { x: s.camp.x, y: s.camp.y };
+    s.lead.x = c.x; s.lead.y = c.y + 1;
+    const behind = seed % 2 === 0;
+    if (behind) s.missing = { id: "m4", name: "X", slot: 4, skills: {}, points: 0, practice: {}, lucidity: 90, x: c.x - 8, y: c.y, area: 0, lastDay: 1, nights: 1, found: false };
+    const n = s.msgs.length;
+    S.campAction(s);
+    while (s.lead.busy) S.tick(s, {});
+    const said = s.msgs.slice(n).find((m) => m.text.startsWith("As the camp comes down"));
+    if (behind) { if (said && said.text.includes("from the west")) real++; else wrong++; }
+    else if (said) falseCalls++;
+  }
+  assert(real === 30 && wrong === 0, `lost in this stretch: right bearing ${real}/30, wrong or silent ${wrong}`);
+  assert(falseCalls > 3 && falseCalls < 18, `nobody lost: ${falseCalls}/30 false calls (expected about 9)`);
+  for (const lost of [false, true]) {
+    const t = fresh(7);
+    if (lost) t.missing = { id: "m4", name: "X", slot: 4, skills: {}, points: 0, practice: {}, lucidity: 90, x: t.camp.x - 8, y: t.camp.y, area: 0, lastDay: 1, nights: 1, found: false };
+    const want = draws(t);
+    CAMP.takeCampDown(t, ["lead"]);
+    assert(t.rng.state === want, `taking camp down drew a different number of values (someone lost: ${lost})`);
+  }
+});
+
+T.check("was everyone there? everyone says yes — the real ones and the one that is not", () => {
+  const s = fresh(36);
+  s.day = 3; s.mates[1].fake = true; s.mates[1].since = 3;
+  const a = S.everyoneThere(s, "m0", 2); s.lead.busy = null;
+  const b = S.everyoneThere(s, "m1", 2); s.lead.busy = null;
+  assert(a.join() === b.join() && /Everyone was there/.test(a[0]), `real: ${a} / not: ${b}`);
+  s.keystone = { day: 2, back: [] };
+  assert(/You were the one/.test(S.everyoneThere(s, "m0", 2)[0]), "the keystone day is not remembered as yours");
 });
 
 void chopSpot;

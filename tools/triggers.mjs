@@ -46,7 +46,7 @@ export const TRIGGERS = [
     from: "seven: a default lives twice (FOV 90->78 left the pause ladder and main.js behind)",
   },
   {
-    when: ["adding a field", "new sim state", "new flag", "storing state"],
+    when: ["adding a field", "new sim state", "new flag", "storing state", "rng draws", "rng draw", "happens once", "once only", "one-off event"],
     ask: "Does this field gate an rng draw, or decide WHICH TICK something happens on?",
     then: "Then it is save state. A missing timer restores as undefined, arithmetic gives NaN, comparisons are false, and a resumed run silently takes a different branch minutes later.",
     from: "mirage: rng-gating-is-save-state; the cohesion deadlines that broke the divergence test",

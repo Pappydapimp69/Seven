@@ -4,6 +4,7 @@
 import { harness, assert, S } from "./lib.mjs";
 import { serialize, deserialize } from "../src/save.js";
 import { walkable } from "../src/world.js";
+import { createRng } from "../src/rng.js";
 
 const T = harness("save");
 const plan = (s) => {
@@ -41,6 +42,18 @@ T.check("restored bodies stand on open ground; a corrupt save is refused", () =>
   assert(walkable(back.world, Math.floor(back.mates[0].x), Math.floor(back.mates[0].y)), "a body was restored inside a wall");
   data.lead.x = null;
   assert(deserialize(JSON.parse(JSON.stringify(data))) === null, "a save with no position for the lead loaded");
+});
+
+T.check("the keystone morning happens once, across a save", () => {
+  const s = S.createSim({ seed: 41, startCamp: true });
+  s.day = 2; S.resolveNight(s);
+  assert(s.keystone, "no keystone on day 3");
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  assert(back.keystone && back.mates.every((m) => m.hidden), "the keystone or the hidden were lost in the save");
+  const before = back.rng.state;
+  back.day = 2; S.resolveNight(back);
+  const fresh = createRng(0); fresh.state = before; for (let i = 0; i < 6; i++) fresh.next();
+  assert(back.rng.state === fresh.state, "a resumed run drew the keystone again");
 });
 
 T.check("a sleeping lead survives the save (Infinity is not JSON)", () => {
