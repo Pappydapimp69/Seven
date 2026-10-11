@@ -120,8 +120,14 @@ fakes come from.
   the missing one is inside the spatial window (this area or the next); when it
   stops, they are gone. (Replaces an earlier "only the waking hear it" draft —
   the owner found it messy.)
-- **Searching is a dawn task:** assign someone (or go yourself) toward the call
-  for a shift. It competes with the deadfall and the woodpile.
+- **Only the lead can bring someone back.** Search cannot be delegated; others
+  may come WITH you. (Delegating it made rescue a chore.)
+- **Finding them is chance** (IDEAS): you always find a pylon; finding THEM is
+  weighted by nights out, depth, and how soon you went.
+- **Searching takes the lead off everything else:** no field nudges, no hands
+  on the deadfall; a companion brought along is off their task too.
+- **Getting back is part of it:** finding them is not the end; you walk them
+  home before dark.
 
 ## Open
 
