@@ -6,34 +6,34 @@ import {
   possess, release, possessableCompanions, activatePylon, pylonAt,
   callCompanion, clearMoss, mossedAt, feedFire, buildFire, FIRE_COST,
   PARTY_SIZE, DIFFICULTY, reachOf, LOG_RADIUS, CORROBORATE_RADIUS, GAME_HOUR, sevenClock, SEVEN_CAMP_RADIUS, woodForFire, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=seven-0.36.0";
-import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.36.0";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.36.0";
-import { generateWorld, worldToCell } from "./world.js?v=seven-0.36.0";
+} from "./state.js?v=seven-0.37.0";
+import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.37.0";
+import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.37.0";
+import { generateWorld, worldToCell } from "./world.js?v=seven-0.37.0";
 import {
   attachSites, startDay, beatAt, briefFor, canWork, workBeat, fallNight, ask, accuse,
   updateWorkHold, dawnLine, BEATS, PHASE, ASKS_ALLOWED,
-} from "./woods.js?v=seven-0.36.0";
+} from "./woods.js?v=seven-0.37.0";
 import {
   createExpedition, spendDaylight, recordFact, sleep, resolveNight, advanceArea, placeMissing, twinAccounts, resolveTwin,
   recoverMissing, activeMystery, askMystery, accuseMystery, proveMystery, MYSTERY_ASKS_ALLOWED,
   startKeystoneMorning, advanceKeystoneMorning,
-} from "./expedition.js?v=seven-0.36.0";
+} from "./expedition.js?v=seven-0.37.0";
 import { DEFAULT_TEAM, applyTeamLoadout, teamSkill, finalDecision, finalCount, nearbyIds, campIds, FIRE_DAYLIGHT, restCheck, raiseSkill, SKILL_MAX, createCamp, depositWood, dismantleCamp, makeCamp,
-  dawnCalls, loudWord, missingSpot, checkFound, stepFound } from "./seven.js?v=seven-0.36.0";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.36.0";
-import { createRenderer } from "./render.js?v=seven-0.36.0";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.36.0";
-import { keyed } from "./keys.js?v=seven-0.36.0";
-import { createInput, ACTIONS } from "./input.js?v=seven-0.36.0";
-import { createAudio } from "./audio.js?v=seven-0.36.0";
-import { createDiag } from "./diag.js?v=seven-0.36.0";
-import { generateTrail, areaOfRow } from "./trail.js?v=seven-0.36.0";
-import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, setTask, effectiveKind } from "./tasks.js?v=seven-0.36.0";
-import { hashSeed, makeRng } from "./rng.js?v=seven-0.36.0";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.36.0";
+  dawnCalls, loudWord, missingSpot, checkFound, stepFound } from "./seven.js?v=seven-0.37.0";
+import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.37.0";
+import { createRenderer } from "./render.js?v=seven-0.37.0";
+import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.37.0";
+import { keyed } from "./keys.js?v=seven-0.37.0";
+import { createInput, ACTIONS } from "./input.js?v=seven-0.37.0";
+import { createAudio } from "./audio.js?v=seven-0.37.0";
+import { createDiag } from "./diag.js?v=seven-0.37.0";
+import { generateTrail, areaOfRow } from "./trail.js?v=seven-0.37.0";
+import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, setTask, effectiveKind } from "./tasks.js?v=seven-0.37.0";
+import { hashSeed, makeRng } from "./rng.js?v=seven-0.37.0";
+import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.37.0";
 
-const BUILD = "seven-0.36.0";
+const BUILD = "seven-0.37.0";
 
 const el = (id) => document.getElementById(id);
 const canvas = el("gl");
