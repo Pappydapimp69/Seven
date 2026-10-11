@@ -376,7 +376,7 @@ export function createHud(sim, percept, opts = {}) {
       // THE TARGET'S OWN TIME. Against the flat GATHER_HOLD_TIME a deadfall's
       // bar filled in 1.2 seconds and then sat full for twenty more, which is a
       // progress bar that lies about progress.
-      const pct = hold && hold.targetId === gatherable.id ? (hold.progress / holdTimeFor(gatherable)) * 100 : 0;
+      const pct = hold && hold.targetId === gatherable.id ? (hold.progress / holdTimeFor(gatherable, sim)) * 100 : 0;
       els.fill.style.width = `${Math.min(100, Math.max(0, pct))}%`;
     } else if (near && sim.status === "playing") {
       els.text.textContent = `Survey ${near.name}`;

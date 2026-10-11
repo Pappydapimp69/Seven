@@ -55,6 +55,10 @@ echo "== trail (the woods: big, zoned, gated by time) =="
 node tests/trail.mjs
 echo
 
+echo "== chop (a deadfall comes down chop by chop) =="
+node tests/chop.mjs
+echo
+
 echo "== seven (team loadouts and final choices) =="
 node tests/seven.mjs
 echo

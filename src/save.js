@@ -315,6 +315,8 @@ export function serializeRun(sim) {
     // Ids only. The cells come back from the regenerated world; what cannot be
     // regenerated is the fact that somebody cut through them.
     deadfallsCleared: (sim.deadfalls || []).filter((d) => d.cleared).map((d) => d.id),
+    // Seven: how far each standing deadfall has been chopped. Kept between days.
+    deadfallProgress: Object.fromEntries((sim.deadfalls || []).filter((d) => !d.cleared && d.progress > 0).map((d) => [d.id, d.progress])),
     monoliths: packFlags(sim.monoliths, ["logged", "discovered", "foundBy"]),
     items: packFlags(sim.items, ["discovered", "taken"]),
     trees: packFlags(sim.trees, ["discovered", "chopped"]),
@@ -435,7 +437,9 @@ export function deserializeRun(data) {
   {
     const downed = new Set(data.deadfallsCleared || []);
     const grid = sim.world.grid;
+    const chopped = data.deadfallProgress || {};
     for (const d of sim.deadfalls || []) {
+      if (chopped[d.id] > 0) d.progress = chopped[d.id];
       if (!downed.has(d.id)) continue;
       d.cleared = true;
       for (const c of d.cells) sim.world.blocked[c.cz * grid + c.cx] = 0;

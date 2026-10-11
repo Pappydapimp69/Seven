@@ -1901,7 +1901,40 @@ export function release(sim, slot) {
 }
 
 /** How long the hold at this target takes. A deadfall is the expensive one. */
-export const holdTimeFor = (target) => (target && target.gatherKind === "deadfall" ? DEADFALL_HOLD_TIME : GATHER_HOLD_TIME);
+// SEVEN'S WORK IS PRICED IN CLOCK TIME (blueprint 0.35). A chop is half an
+// hour; a load of wood is an hour. main.js runs the simulation faster while the
+// lead holds the verb, so these are sim seconds that the clock really spends.
+export const CHOP_HOLD = GAME_HOUR / 2;
+export const SEVEN_GATHER_HOLD = GAME_HOUR;
+/** Share of a deadfall one chop by an unskilled pair of hands takes off. 16 chops = 8 hours alone. */
+export const CHOP_PROGRESS = 1 / 16;
+/** Each level of cut skill adds this much to a chop. A percentage, never a flat amount, so it cannot floor to nothing. */
+export const CHOP_SKILL = 0.15;
+/** Lucid companions this close to the deadfall chop alongside the lead. */
+export const HELP_RADIUS = 6;
+export const holdTimeFor = (target, sim = null) => {
+  const fall = target && target.gatherKind === "deadfall";
+  if (sim && sim.expedition) return fall ? CHOP_HOLD : SEVEN_GATHER_HOLD;
+  return fall ? DEADFALL_HOLD_TIME : GATHER_HOLD_TIME;
+};
+
+/**
+ * One chop at the deadfall in reach. Everyone lucid standing at it swings too,
+ * so more hands finish it sooner IN CLOCK TIME — the cost of putting the whole
+ * party on it is everything else left undone, not night arriving faster.
+ * Progress stays on the deadfall between days. No rng.
+ */
+export function chopDeadfall(sim, actor = sim.player) {
+  const d = deadfallAt(sim, actor);
+  if (!d) return { ok: false, reason: "nothing-here" };
+  const hands = [actor, ...sim.companions.filter((c) => c !== actor && !c.hallucinating && dist2D(c, d) <= HELP_RADIUS)];
+  const gain = hands.reduce((sum, c) => sum + CHOP_PROGRESS * (1 + CHOP_SKILL * ((c.skills && c.skills.cut) || 0)), 0);
+  d.progress = Math.min(1, (d.progress || 0) + gain);
+  if (d.progress >= 1) return { ...clearDeadfall(sim, actor), hands: hands.map((c) => c.id) };
+  const words = d.progress < 0.25 ? "It has barely given." : d.progress < 0.5 ? "A quarter of the way through." : d.progress < 0.75 ? "Halfway through." : "Nearly through.";
+  emit(sim, "chop", `${hands.length > 1 ? `${hands.length} of you at the deadfall. ` : ""}${words}`, { who: actor.id, x: d.x, z: d.z });
+  return { ok: true, progress: d.progress, hands: hands.map((c) => c.id) };
+}
 
 /** The uncleared deadfall in reach, if any. Blocked cells, so reach is generous. */
 export function deadfallAt(sim, actor = sim.player) {
@@ -2008,8 +2041,8 @@ function updateGatherHold(sim, dt, interacting, actor = sim.player, hold = sim.g
     hold.progress = 0;
   }
   hold.progress += dt;
-  if (hold.progress >= holdTimeFor(target)) {
-    if (target.gatherKind === "deadfall") clearDeadfall(sim, actor);
+  if (hold.progress >= holdTimeFor(target, sim)) {
+    if (target.gatherKind === "deadfall") (sim.expedition ? chopDeadfall : clearDeadfall)(sim, actor);
     else gatherResource(sim, actor);
     hold.targetId = null;
     hold.progress = 0;
