@@ -53,3 +53,4 @@ A(home.time>=24*30-0.5, `the next dawn came at ${home.time}s, before 24 hours ha
 A(errs.length===0, "page errors: "+errs.join("|"));
 if(fails.length){console.log("SEVEN PLAY FAILED:\n  ✗ "+fails.join("\n  ✗ ")); await b.close(); s.close(); process.exit(1);}
 console.log("seven play: OK — fire and sleep take the clock's time, sleep reaches dawn");
+await b.close(); s.close(); process.exit(0);
