@@ -5,14 +5,14 @@
 // exported actions. Messages for the player go through sim.say(); they never
 // mention the hidden meter.
 
-import { createRng } from "./rng.js?v=seven-1.3.0";
-import { composeRoster } from "./names.js?v=seven-1.3.0";
-import { createWorld, areaOfRow, K, kindAt, walkable, lostSpots, fellTree } from "./world.js?v=seven-1.3.0";
-import { dist, cellOf, moveBody, nearestWalkable, walkTo } from "./body.js?v=seven-1.3.0";
-import { openDay, record, recordPlan, account } from "./chronicle.js?v=seven-1.3.0";
-import { makeCampAt, takeCampDown as campDown } from "./camp.js?v=seven-1.3.0";
-import { updateMate, setTask, chopAt, frontDeadfall, practice, moving, DAY_TASKS, NIGHT_TASKS } from "./mates.js?v=seven-1.3.0";
-import * as C from "./config.js?v=seven-1.3.0";
+import { createRng } from "./rng.js?v=seven-1.4.0";
+import { composeRoster } from "./names.js?v=seven-1.4.0";
+import { createWorld, areaOfRow, K, kindAt, walkable, lostSpots, fellTree } from "./world.js?v=seven-1.4.0";
+import { dist, cellOf, moveBody, nearestWalkable, walkTo } from "./body.js?v=seven-1.4.0";
+import { openDay, record, recordPlan, account } from "./chronicle.js?v=seven-1.4.0";
+import { makeCampAt, takeCampDown as campDown } from "./camp.js?v=seven-1.4.0";
+import { updateMate, setTask, chopAt, frontDeadfall, practice, moving, DAY_TASKS, NIGHT_TASKS } from "./mates.js?v=seven-1.4.0";
+import * as C from "./config.js?v=seven-1.4.0";
 
 // ---- the clock ---------------------------------------------------------------
 export const minutes = (sim) => sim.ticks * C.TICK_MIN;
@@ -494,7 +494,15 @@ export function tick(sim, input = {}) {
   }
 
   // Fire and pylons burn.
-  if (sim.camp.built && sim.camp.fire > 0) sim.camp.fire = Math.max(0, sim.camp.fire - h);
+  if (sim.camp.built && sim.camp.fire > 0) {
+    sim.camp.fire = Math.max(0, sim.camp.fire - h);
+    // A fire dying in the night wakes the lead sleeping beside it: cold, dark, and time to choose.
+    const mod = minuteOfDay(sim);
+    if (sim.camp.fire === 0 && L.asleep && atCamp(sim, L) && (mod >= C.DUSK || mod < C.DAWN - 60)) {
+      L.busy = null; L.asleep = false;
+      sim.say("The fire is out. You wake in the cold and the dark.");
+    }
+  }
   for (const p of w.pylons) if (p.state === "lit" && minutes(sim) - p.litAt >= C.PYLON_BURN) p.state = "spent";
 
   // The hidden meter. Day one is deliberately quiet.

@@ -4,8 +4,8 @@
 // stays where it was, and walking camp forward past someone lost abandons
 // them with no prompt and no message.
 
-import { record } from "./chronicle.js?v=seven-1.3.0";
-import { areaOfRow } from "./world.js?v=seven-1.3.0";
+import { record } from "./chronicle.js?v=seven-1.4.0";
+import { areaOfRow } from "./world.js?v=seven-1.4.0";
 
 const areaOf = (p) => areaOfRow(Math.floor(p.y));
 

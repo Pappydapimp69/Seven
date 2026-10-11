@@ -5,16 +5,16 @@
 // hears finishes the chunk in their hands, then follows. Work comes in chunks
 // (one chop, one tree); a day chunk is only started if it ends before dusk.
 
-import { K, bfs, kindAt, areaOfRow, fellTree, clearDeadfall } from "./world.js?v=seven-1.3.0";
-import { dist, cellOf, walkTo, nearestWalkable } from "./body.js?v=seven-1.3.0";
-import { record } from "./chronicle.js?v=seven-1.3.0";
-import { makeCampAt, takeCampDown } from "./camp.js?v=seven-1.3.0";
-import { pathTo, areaOfRow as rowArea } from "./world.js?v=seven-1.3.0";
+import { K, bfs, kindAt, areaOfRow, fellTree, clearDeadfall } from "./world.js?v=seven-1.4.0";
+import { dist, cellOf, walkTo, nearestWalkable } from "./body.js?v=seven-1.4.0";
+import { record } from "./chronicle.js?v=seven-1.4.0";
+import { makeCampAt, takeCampDown } from "./camp.js?v=seven-1.4.0";
+import { pathTo, areaOfRow as rowArea } from "./world.js?v=seven-1.4.0";
 import {
   MATE_SPEED, TICK_MIN, DUSK, CHOP_MIN, CHOP_PROGRESS, CHOP_SKILL, FELL_MIN, FELL_YIELD, HAUL_LOAD,
   CAMP_RADIUS, WATCH_FEED_BELOW, DEADFALL_THICKER, TEAM, TEND_SKILL, MAKE_CAMP_MIN, DISMANTLE_MIN, BUILD_SKILL, FIRE_FEED_HOURS, FIRE_MAX_HOURS, PRACTICE_CHUNKS, FAKE_LEARNS, SKILL_MAX,
-} from "./config.js?v=seven-1.3.0";
-import { hash01 } from "./rng.js?v=seven-1.3.0";
+} from "./config.js?v=seven-1.4.0";
+import { hash01 } from "./rng.js?v=seven-1.4.0";
 
 export const DAY_TASKS = Object.freeze(["free", "chop", "gather", "camp", "move"]);
 export const NIGHT_TASKS = Object.freeze(["sleep", "watch", "work", "free"]);

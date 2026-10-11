@@ -103,6 +103,16 @@ const sim = (p, f) => p.evaluate(f);
   ok(await p.evaluate(() => window.__seven.panel === "Dusk"), "the dusk panel opens at camp at nightfall");
   await p.evaluate(() => window.__seven.click("Set the night"));
 
+  // A gamepad: prompts name pad buttons once the pad is used.
+  const padLabel = await p.evaluate(async () => {
+    const btn = (on) => ({ pressed: on, value: on ? 1 : 0 });
+    let pressed = false;
+    navigator.getGamepads = () => [{ connected: true, axes: [0, 0, 0, 0], buttons: Array.from({ length: 17 }, (_, i) => btn(i === 6 && pressed)) }];
+    pressed = true; await new Promise((r) => setTimeout(r, 120)); pressed = false; await new Promise((r) => setTimeout(r, 120));
+    return document.getElementById("hint").textContent + " | " + document.getElementById("prompt").textContent;
+  });
+  ok(!/\b(WASD|E|F|R|Q) /.test(padLabel.split("|")[0]) && /\b(A|B|X|Y|LB)\b/.test(padLabel), `pad in hand: prompts name pad buttons (${padLabel.trim()})`);
+
   // Canvas is the device's pixels.
   const cv = await p.evaluate(() => ({ w: document.getElementById("game").width, iw: innerWidth, dpr: devicePixelRatio }));
   ok(cv.w === Math.round(cv.iw * cv.dpr), `canvas backing ${cv.w}px for ${cv.iw}css × ${cv.dpr}`);

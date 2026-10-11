@@ -7,9 +7,9 @@
 // Each frame blits the visible part, then draws people and things, then the
 // dark. Sized from devicePixelRatio re-read on every resize (Brain mirage#E10).
 
-import { K } from "./world.js?v=seven-1.3.0";
-import { hash01 } from "./rng.js?v=seven-1.3.0";
-import { CAMP_RADIUS, FIRE_LIGHT, DAWN, DUSK, FIRE_MAX_HOURS } from "./config.js?v=seven-1.3.0";
+import { K } from "./world.js?v=seven-1.4.0";
+import { hash01 } from "./rng.js?v=seven-1.4.0";
+import { CAMP_RADIUS, FIRE_LIGHT, DAWN, DUSK, FIRE_MAX_HOURS } from "./config.js?v=seven-1.4.0";
 
 const MAP_PX = 20;
 export const SLOT_COLORS = ["#e0b354", "#5fb3c9", "#d9745a", "#9fc46a", "#b98fd6", "#e88fb0"];

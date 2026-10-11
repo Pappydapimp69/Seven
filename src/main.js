@@ -2,19 +2,19 @@
 // this file reads sim.pending and opens the matching panel, and the panel
 // answers through the sim's exported actions.
 
-import * as S from "./sim.js?v=seven-1.3.0";
-import { perceive } from "./percept.js?v=seven-1.3.0";
-import { createRenderer, SLOT_COLORS } from "./render.js?v=seven-1.3.0";
-import { createInput } from "./input.js?v=seven-1.3.0";
-import * as UI from "./ui.js?v=seven-1.3.0";
-import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.3.0";
-import { createRng } from "./rng.js?v=seven-1.3.0";
-import { composeRoster } from "./names.js?v=seven-1.3.0";
-import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, frontDeadfall } from "./mates.js?v=seven-1.3.0";
-import { areaOfRow } from "./world.js?v=seven-1.3.0";
-import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_INFO, NO_SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.3.0";
+import * as S from "./sim.js?v=seven-1.4.0";
+import { perceive } from "./percept.js?v=seven-1.4.0";
+import { createRenderer, SLOT_COLORS } from "./render.js?v=seven-1.4.0";
+import { createInput } from "./input.js?v=seven-1.4.0";
+import * as UI from "./ui.js?v=seven-1.4.0";
+import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.4.0";
+import { createRng } from "./rng.js?v=seven-1.4.0";
+import { composeRoster } from "./names.js?v=seven-1.4.0";
+import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, frontDeadfall } from "./mates.js?v=seven-1.4.0";
+import { areaOfRow } from "./world.js?v=seven-1.4.0";
+import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_INFO, NO_SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.4.0";
 
-const BUILD = "seven-1.3.0";
+const BUILD = "seven-1.4.0";
 const esc = UI.esc;
 const store = (() => { try { return window.localStorage; } catch { return null; } })();
 const readJSON = (k, d) => { try { const v = store && store.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
@@ -81,14 +81,15 @@ function howPanel(back) {
   UI.open(`
     <h2>How to play</h2>
     <ul class="how">
-      <li><b>Walk</b> — WASD / arrows · left side of the screen on touch · stick on a pad. North is up.</li>
-      <li><b>E</b> (Act / pad A) — chop the deadfall, fell a marked tree, talk to someone, light a pylon with someone beside you.</li>
-      <li><b>F</b> (Fire / X) — at camp, light or feed the fire from the woodpile.</li>
-      <li><b>Q</b> (Camp / bumpers) — make camp here, or take it down. The woodpile stays where it is.</li>
-      <li><b>R</b> (Rest / B) — sleep after dark; by day, rest an hour.</li>
-      <li><b>C</b> (Call / Y) — call out. Whoever hears comes, once their hands are free.</li>
+      <li><b>${label("move")}</b> — walk. North is up.</li>
+      <li><b>${label("act")}</b> — chop the deadfall, fell a marked tree, talk to someone, light a pylon with someone beside you.</li>
+      <li><b>${label("fire")}</b> — at camp, light or feed the fire from the woodpile.</li>
+      <li><b>${label("camp")}</b> — make camp here, or take it down. The woodpile stays where it is.</li>
+      <li><b>${label("rest")}</b> — sleep after dark (or from the dusk panel); by day, rest an hour.</li>
+      <li><b>${label("call")}</b> — call out. Whoever hears comes, once their hands are free.</li>
+      <li><b>${label("pause")}</b> — pause.</li>
       <li>At camp, at <b>dawn</b> and <b>dusk</b>, you set everyone's work. Nowhere else.</li>
-      <li>The fire keeps the camp safe at night. The camp only. Its light reaches further than its warmth.</li>
+      <li>The fire keeps the camp safe at night — the camp only — and dies in the night unless it is stocked or someone keeps watch. Its light reaches further than its warmth.</li>
       <li>A pylon takes two pairs of hands, and keeps the deep woods off this stretch for a day and a half.</li>
     </ul>
     <button data-do="back" autofocus>Back</button>`, { onBack: back, wide: true });
@@ -180,18 +181,20 @@ function planPanel(kind) {
       <h2>${kind === "dawn" ? `Dawn, day ${sim.day}` : "Dusk"}</h2>
       <p class="small">${kind === "dawn"
         ? `Set the day's work. It holds until dusk. ${d ? `The deadfall ahead is ${Math.round(d.progress * 100)}% cut.` : "The way north is open."}`
-        : "Who sleeps, who keeps the fire, who works on in the dark."} Pile: ${sim.camp.pile}.</p>
+        : `Who sleeps, who keeps the fire, who works on in the dark. Unfed, the fire dies in the night. You sleep with ${label("rest")}.`} Pile: ${sim.camp.pile}.</p>
       <div class="plan">${sim.mates.map((m) => `
         <button data-do="cycle" data-arg="${m.id}" class="row"><span class="dot" style="background:${SLOT_COLORS[m.slot]}"></span>
           <span class="nm">${esc(m.name)}<span class="sub">${m.role ? esc(m.role) + " · " : ""}${skillText(m.skills)}</span></span><span class="task">${esc(TASK_LABEL[choice[m.id]])}</span></button>`).join("")}
       </div>
-      <button data-do="done" autofocus>${kind === "dawn" ? "Start the day" : "Set the night"}</button>`, { onBack: null });
+      <button data-do="done" autofocus>${kind === "dawn" ? "Start the day" : "Set the night"}</button>
+      ${kind === "dusk" ? '<button data-do="sleep">Set the night and sleep</button>' : ""}`, { onBack: null });
     UI.bind({
       cycle: (id, btn) => {
         choice[id] = tasks[(tasks.indexOf(choice[id]) + 1) % tasks.length];
         btn.querySelector(".task").textContent = TASK_LABEL[choice[id]];
       },
       done: () => { S.applyPlan(sim, kind, choice); UI.close(); },
+      sleep: () => { S.applyPlan(sim, kind, choice); UI.close(); S.rest(sim); },
     });
   };
   render();
@@ -283,17 +286,25 @@ function endPanel() {
   UI.bind({ again: () => { sim = null; titlePanel(); } });
 }
 
+// ---- what each control is called on the device in the player's hands ----------------
+const LABELS = {
+  key: { act: "E", fire: "F", camp: "Q", rest: "R", call: "C", pause: "Esc", move: "WASD or arrows" },
+  pad: { act: "A", fire: "X", camp: "LB", rest: "B", call: "Y", pause: "Start", move: "The left stick" },
+  touch: { act: "Act", fire: "Fire", camp: "Camp", rest: "Rest", call: "Call", pause: "☰", move: "Drag on the left" },
+};
+const label = (name) => (LABELS[input.device] || LABELS.key)[name] || name;
+
 // ---- hints: the walk-in teaches itself -------------------------------------------------
 function hintText() {
-  const t = input.touch;
-  const k = (key, btn) => (t ? btn : key);
+  const k = (key, btn) => label(key === "WASD or arrows" ? "move" : { E: "act", F: "fire", Q: "camp", R: "rest", C: "call" }[key] || key, key, btn);
   const L = sim.lead, c = sim.camp, d = frontDeadfall(sim);
   if (!moved) return `${k("WASD or arrows", "Drag on the left")} to walk. North is up.`;
   if (L.busy && L.busy.kind === "sleep") return "";
   if (L.carry > 0 && c.built && !S.atCamp(sim, L)) return "Carry the wood back to camp. It counts once it is on the pile.";
   if (S.isNight(sim)) {
     if (c.built && S.atCamp(sim, L) && c.fire <= 0 && c.pile >= 2) return `${k("F", "Fire")} lights the fire. It keeps the camp safe tonight — the camp only.`;
-    if (c.built && S.atCamp(sim, L) && c.fire > 0) return `${k("R", "Rest")} to sleep. At dawn you set the day's work.`;
+    if (c.built && S.atCamp(sim, L) && c.fire > 0) return `${k("R", "Rest")} to sleep. ${k("F", "Fire")} first to stock the fire — it has to last till dawn, or someone has to keep watch.`;
+    if (c.built && S.atCamp(sim, L)) return `${k("R", "Rest")} to sleep. With no fire, the camp is not safe tonight.`;
     if (c.built && !S.atCamp(sim, L)) return "It is dark. Get back to the fire.";
     if (!c.built) return `No camp. ${k("Q", "Camp")} makes one here, or sleep in the open (${k("R", "Rest")}).`;
     return "";
@@ -345,7 +356,7 @@ function draw(dt) {
     mod: S.minuteOfDay(sim), real: performance.now() / 1000,
     busyFrac: L.busy && Number.isFinite(L.busy.total) ? 1 - L.busy.left / L.busy.total : null,
   }, dt);
-  const k = input.touch ? "" : "E · ";
+  const k = label("act") + " · ";
   UI.hud({
     count: view.count, day: sim.day, clock: S.clockText(sim), night: S.isNight(sim),
     area: areaOfRow(Math.floor(L.y)) + 1, carry: L.carry,

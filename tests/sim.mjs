@@ -258,5 +258,21 @@ T.check("move camp waits when the trunk is not cut, and when the day is too shor
   assert(t.camp.built && S.areaOf(t.camp) === 0, "started moving camp two hours before dark");
 });
 
+T.check("a fire dying in the night wakes the lead sleeping by it", () => {
+  const s = fresh(26);
+  setClock(s, 3, 22 * 60); s.dawnDone = s.duskDone = 99;
+  s.lead.x = s.camp.x; s.lead.y = s.camp.y + 1;
+  s.camp.fire = 0.5; s.camp.pile = 0;
+  S.rest(s);
+  assert(s.lead.asleep, "did not fall asleep");
+  run(s, HOUR);
+  assert(!s.lead.asleep && !s.lead.busy && s.msgs.at(-1).text.includes("fire is out"), `still asleep: ${s.lead.asleep}, last: ${s.msgs.at(-1).text}`);
+  const t = fresh(26);
+  setClock(t, 3, 22 * 60); t.dawnDone = t.duskDone = 99;
+  t.lead.x = t.camp.x; t.lead.y = t.camp.y + 1; t.camp.fire = 10;
+  S.rest(t); run(t, HOUR);
+  assert(t.lead.asleep, "woke with the fire still burning");
+});
+
 void chopSpot;
 T.done();

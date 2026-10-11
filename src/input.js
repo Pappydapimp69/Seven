@@ -15,10 +15,11 @@ export function createInput({ onAction, stickEl, stickKnob }) {
   const stick = { id: null, ox: 0, oy: 0, mx: 0, my: 0 };
   let pad = { buttons: [], up: false, down: false };
   let usedTouch = false;
+  let device = "key";                     // the last thing the player touched: key | pad | touch
 
   window.addEventListener("keydown", (e) => {
     if (e.repeat) { if (e.code.startsWith("Arrow")) e.preventDefault(); return; }
-    keys.add(e.code);
+    keys.add(e.code); device = "key";
     if (e.code.startsWith("Arrow") || e.code === "Space") e.preventDefault();
     if (e.code === "ArrowUp" || e.code === "KeyW") onAction("up", e);
     if (e.code === "ArrowDown" || e.code === "KeyS") onAction("down", e);
@@ -33,7 +34,7 @@ export function createInput({ onAction, stickEl, stickKnob }) {
   const zone = document.getElementById("game");
   zone.addEventListener("pointerdown", (e) => {
     if (e.pointerType === "mouse" || stick.id !== null || e.clientX > window.innerWidth * 0.55) return;
-    usedTouch = true; document.body.classList.add("touch");
+    usedTouch = true; device = "touch"; document.body.classList.add("touch");
     stick.id = e.pointerId; stick.ox = e.clientX; stick.oy = e.clientY; stick.mx = stick.my = 0;
     stickEl.style.left = e.clientX + "px"; stickEl.style.top = e.clientY + "px"; stickEl.classList.add("on");
     zone.setPointerCapture(e.pointerId);
@@ -52,7 +53,7 @@ export function createInput({ onAction, stickEl, stickKnob }) {
     stick.id = null; stick.mx = stick.my = 0; stickEl.classList.remove("on"); stickKnob.style.transform = "";
   };
   zone.addEventListener("pointerup", end); zone.addEventListener("pointercancel", end);
-  window.addEventListener("touchstart", () => { usedTouch = true; document.body.classList.add("touch"); }, { once: true, passive: true });
+  window.addEventListener("touchstart", () => { usedTouch = true; device = "touch"; document.body.classList.add("touch"); }, { passive: true });
 
   for (const b of document.querySelectorAll("[data-act]")) {
     b.addEventListener("pointerdown", (e) => { e.preventDefault(); onAction(b.dataset.act, e); });
@@ -68,13 +69,14 @@ export function createInput({ onAction, stickEl, stickKnob }) {
     const gp = navigator.getGamepads ? [...navigator.getGamepads()].find((g) => g && g.connected) : null;
     if (gp) {
       const ax = gp.axes[0] || 0, ay = gp.axes[1] || 0;
-      if (Math.hypot(ax, ay) > 0.2) { mx += ax; my += ay; }
+      if (Math.hypot(ax, ay) > 0.2) { mx += ax; my += ay; device = "pad"; }
       const b = (i) => !!(gp.buttons[i] && gp.buttons[i].pressed);
       if (b(14)) mx -= 1; if (b(15)) mx += 1; if (b(12)) my -= 1; if (b(13)) my += 1;
       const map = { 0: "act", 2: "fire", 3: "call", 4: "camp", 5: "camp", 1: "rest", 9: "pause", 8: "pause" };
       gp.buttons.forEach((btn, i) => {
         const was = pad.buttons[i];
         if (btn.pressed && !was) {
+          device = "pad";
           if (i === 1) onAction("back");
           if (map[i]) onAction(map[i]);
         }
@@ -89,5 +91,5 @@ export function createInput({ onAction, stickEl, stickKnob }) {
     return vec;
   }
 
-  return { poll, get touch() { return usedTouch; }, clear() { keys.clear(); } };
+  return { poll, get touch() { return usedTouch; }, get device() { return device; }, clear() { keys.clear(); } };
 }
