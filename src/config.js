@@ -88,13 +88,15 @@ export const SURPLUS_CAP = 30;               // the surplus stack beside it; pas
 
 // ---- the hidden meter -------------------------------------------------------
 export const DRAIN = 0.9;                    // lucidity per game hour at depth 1, by day
-export const DEPTH = Object.freeze([1, 1.3, 1.6, 2.0, 2.4, 2.8, 3.2]);
+export const DEPTH = Object.freeze([1, 1.4, 1.9, 2.5, 3.1, 3.7, 4.4]);   // deeper woods wear the mind down faster
 export const NIGHT_MULT = 2.2;               // outside a lit camp after dark
 export const SLEEP_MULT = 0.5;
 export const REST_GAIN = 1.0;                // per hour asleep in a lit camp at night
 export const KEEN_SKILL = 0.07;
-export const LIE_BELOW = 40;                 // the lead's percept starts lying
-export const FIRE_LIE_BELOW = 25;
+export const LIE_BELOW = 60;                 // the lead's percept starts lying
+export const FIRE_LIE_BELOW = 35;
+export const GHOST_BELOW = 50;               // a voice that is not there, now and then at night
+export const NAME_BELOW = 35;                // one companion's name is somebody else's
 
 // ---- pylons -----------------------------------------------------------------
 export const PYLON_BURN = 36 * 60;

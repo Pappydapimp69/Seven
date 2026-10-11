@@ -2,21 +2,21 @@
 // this file reads sim.pending and opens the matching panel, and the panel
 // answers through the sim's exported actions.
 
-import * as S from "./sim.js?v=seven-1.13.0";
-import { perceive } from "./percept.js?v=seven-1.13.0";
-import { createView, SLOT_COLORS } from "./view.js?v=seven-1.13.0";
-import { createInput } from "./input.js?v=seven-1.13.0";
-import * as UI from "./ui.js?v=seven-1.13.0";
-import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.13.0";
-import { STEPS, TRAINEES, tutorialStep } from "./tutorial.js?v=seven-1.13.0";
-import * as Audio from "./audio.js?v=seven-1.13.0";
-import { createRng } from "./rng.js?v=seven-1.13.0";
-import { composeRoster } from "./names.js?v=seven-1.13.0";
-import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, TASK_SKILL, frontDeadfall } from "./mates.js?v=seven-1.13.0";
-import { areaOfRow, kindAt } from "./world.js?v=seven-1.13.0";
-import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_INFO, NO_SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.13.0";
+import * as S from "./sim.js?v=seven-1.14.0";
+import { perceive } from "./percept.js?v=seven-1.14.0";
+import { createView, SLOT_COLORS } from "./view.js?v=seven-1.14.0";
+import { createInput } from "./input.js?v=seven-1.14.0";
+import * as UI from "./ui.js?v=seven-1.14.0";
+import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.14.0";
+import { STEPS, TRAINEES, tutorialStep } from "./tutorial.js?v=seven-1.14.0";
+import * as Audio from "./audio.js?v=seven-1.14.0";
+import { createRng } from "./rng.js?v=seven-1.14.0";
+import { composeRoster } from "./names.js?v=seven-1.14.0";
+import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, TASK_SKILL, frontDeadfall } from "./mates.js?v=seven-1.14.0";
+import { areaOfRow, kindAt } from "./world.js?v=seven-1.14.0";
+import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_INFO, NO_SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.14.0";
 
-const BUILD = "seven-1.13.0";
+const BUILD = "seven-1.14.0";
 const esc = UI.esc;
 const store = (() => { try { return window.localStorage; } catch { return null; } })();
 const readJSON = (k, d) => { try { const v = store && store.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
@@ -26,7 +26,7 @@ const canvas = document.getElementById("game");
 const renderer = createView(canvas, { onStrike: (tool) => Audio.thunk(tool) });
 const TURN_RATE = 2.4;          // radians a second, keys / pad / touch stick
 const MOUSE_TURN = 0.0032;      // radians per device pixel of mouse travel
-let sleepFade = 0;
+let sleepFade = 0, lastGhost = -1;
 let sim = null, view = null, headless = false, endShown = false, moved = false, lastSave = 0, acc = 0;
 
 const input = createInput({
@@ -436,6 +436,7 @@ function draw(dt) {
   view.lead.yaw = L.yaw ?? -Math.PI / 2;
   // Sound: what the sim announced this frame, then the always-on layers. Both
   // come from the percept and public facts — never from lucidity (soundscape.js).
+  if (view.ghost && view.ghost.hour !== lastGhost) { lastGhost = view.ghost.hour; Audio.play({ name: "voice", dir: view.ghost.dir }, view.lead); }
   for (const ev of sim.sounds.splice(0)) {
     Audio.play(ev, view.lead);
     if (ev.name === "whistle" || ev.name === "answer") renderer.ripple(ev.name === "whistle" ? 1 : 0.5);

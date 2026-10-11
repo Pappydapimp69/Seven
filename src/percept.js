@@ -7,11 +7,11 @@
 // stands at the edge of the light who is not there. The count always says
 // "Seven of you" — that one is not the percept lying, it is the game.
 
-import { hash01 } from "./rng.js?v=seven-1.13.0";
-import { walkable } from "./world.js?v=seven-1.13.0";
-import { isNight, minutes, found } from "./sim.js?v=seven-1.13.0";
-import { working } from "./mates.js?v=seven-1.13.0";
-import { LIE_BELOW, FIRE_LIE_BELOW, PYLON_BURN } from "./config.js?v=seven-1.13.0";
+import { hash01 } from "./rng.js?v=seven-1.14.0";
+import { walkable } from "./world.js?v=seven-1.14.0";
+import { isNight, minutes, found } from "./sim.js?v=seven-1.14.0";
+import { working } from "./mates.js?v=seven-1.14.0";
+import { LIE_BELOW, FIRE_LIE_BELOW, GHOST_BELOW, NAME_BELOW, PYLON_BURN, DIRS8 } from "./config.js?v=seven-1.14.0";
 
 export function perceive(sim) {
   const L = sim.lead, luc = L.lucidity, now = minutes(sim);
@@ -20,6 +20,16 @@ export function perceive(sim) {
   const f = found(sim);
   if (f) people.push({ id: f.id + "f", name: f.name, slot: f.slot, x: f.x, y: f.y, asleep: false });
 
+  // More of what is not there, each a pure function of (seed, the hour): never a draw.
+  // A voice at night from a bearing; and, lower still, one companion wearing
+  // another's name. Only the percept lies — sound and the view read these.
+  const hr = Math.floor(now / 60);
+  let ghost = null;
+  if (luc < GHOST_BELOW && isNight(sim) && hash01(`${sim.seed}:${hr}:gv`) < 0.5) ghost = { hour: hr, dir: DIRS8[Math.floor(hash01(`${sim.seed}:${hr}:gd`) * 8)] };
+  if (luc < NAME_BELOW && people.length > 1) {
+    const i = Math.floor(hash01(`${sim.seed}:${hr}:ni`) * people.length), j = (i + 1 + Math.floor(hash01(`${sim.seed}:${hr}:nj`) * (people.length - 1))) % people.length;
+    people[i] = { ...people[i], name: people[j].name };
+  }
   if (lying && isNight(sim)) {
     const hour = Math.floor(now / 60);
     const ang = hash01(`${sim.seed}:${hour}:a`) * Math.PI * 2;
@@ -61,6 +71,6 @@ export function perceive(sim) {
     landmarks: sim.world.pockets.map((p) => ({ id: p.id, kind: p.kind, x: p.x + 0.5, y: p.y + 0.5, decor: p.decor })),
     camp: c.built ? { x: c.x, y: c.y, pile: c.pile, surplus: c.surplus || 0, fire } : null,
     piles: sim.piles.map((p) => ({ id: p.id, x: p.x, y: p.y, wood: p.wood, surplus: !!p.surplus })),
-    count: "Seven of you",
+    count: "Seven of you", ghost,
   };
 }
