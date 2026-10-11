@@ -5,7 +5,7 @@ import {
   createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem, dropItem, craftItem, gatherTarget, offerItem,
   possess, release, possessableCompanions, activatePylon, pylonAt,
   callCompanion, clearMoss, mossedAt, feedFire, buildFire, FIRE_COST,
-  PARTY_SIZE, DIFFICULTY, reachOf, LOG_RADIUS, CORROBORATE_RADIUS, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
+  PARTY_SIZE, DIFFICULTY, reachOf, LOG_RADIUS, CORROBORATE_RADIUS, GAME_HOUR, sevenClock, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
 } from "./state.js?v=seven-0.34.0";
 import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.34.0";
 import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.34.0";
@@ -923,38 +923,40 @@ function sevenRoute(sim) {
   return { exitZ, startZ, progress, area: Math.min(SEVEN_AREAS, Math.floor(progress * SEVEN_AREAS)) };
 }
 
+// TIME, NOT A WALLET. An action that "takes an hour" asks for an hour of the
+// simulation to run, fast, starting now: everyone keeps moving, minds keep
+// draining, and dusk comes when the clock says. `e.lapse` is the sim-seconds
+// still owed, and it is save state — it decides how many ticks run.
+const LAPSE_REPS = 20;   // ticks per frame while an action's hours pass
+const WORK_LAPSE = 8;    // ticks per frame while the lead holds a work target
+const SLEEP_LAPSE = 60;  // ticks per frame while the camp sleeps to dawn
 function spendSevenDaylight(sim, amount, reason) {
   const e = sim.expedition;
-  if (!e || amount <= 0) return false;
-  if (spendDaylight(e, amount, reason)) return true;
-  if (e.daylight < amount) {
-    e.daylight = 0;
-    e.lastSpend = { day: e.day, amount, reason };
-    return true;
-  }
-  return false;
+  if (!e || !(amount > 0)) return false;
+  e.lapse = (e.lapse || 0) + amount * GAME_HOUR;
+  e.lastSpend = { day: e.day, amount, reason };
+  return true;
 }
 
-/** Rest until morning: the lead's choice to end the day, at camp. Forfeits what is left. */
+/** Rest until morning: sleep where you are and let the night pass, fast. */
 function restUntilMorning() {
   if (!run) return;
   const sim = run.sim;
   const chk = restCheck(sim, CAMP_RADIUS);
-  if (!chk.ok) {
-    if (chk.reason === "away") run.hud.say("You can only rest at camp.", "warn");
-    return;
-  }
-  const e = sim.expedition;
-  e.lastSpend = { day: e.day, amount: e.daylight, reason: "rest" };
-  e.daylight = 0;
-  resolveSevenNight(sim);
+  if (!chk.ok) return;
+  sim.expedition.sleeping = true;
+  sim.expedition.lapse = 0;
   if (paused) togglePause();
 }
 
 const CAMP_RADIUS = 9; // the same reach extraction counts as being at camp
 function resolveSevenNight(sim) {
   const e = sim.expedition;
-  if (!e || e.phase !== "day" || e.daylight > 0 || sim.status !== "playing") return;
+  if (!e || e.phase !== "day" || sim.status !== "playing") return;
+  // DAWN decides, not an empty wallet: the night is resolved when the clock
+  // turns over into the next day.
+  if (sevenClock(sim.time).day <= e.day) return;
+  e.sleeping = false;
   // Who stayed at camp today, written down before the day closes.
   for (const id of campIds(sim, CAMP_RADIUS)) recordFact(e, { kind: "camp", actor: id, object: "camp", withWhom: [], t: sim.time });
   sleep(e);
@@ -1001,8 +1003,6 @@ function updateSevenProgress(sim) {
   if (route.area > e.area) {
     const gained = route.area - e.area;
     const abandoned = advanceArea(e, gained);
-    const travelCost = Math.max(0.25, gained * (1 - Math.min(0.45, teamSkill(sim, "scout") * 0.08)));
-    spendSevenDaylight(sim, Number(travelCost.toFixed(2)), "travel");
     recordFact(e, { kind: "trail", actor: "you", object: `area ${e.area}`, t: sim.time });
     if (abandoned.length) emitToHud(sim, "expedition", "The old trail closes behind you.");
     else emitToHud(sim, "expedition", `The party pushes into area ${e.area}.`);
@@ -1033,9 +1033,6 @@ function recordSevenEvents(sim, events) {
         withWhom: near(ev.who),
         t: sim.time,
       });
-      const base = deadfall ? 2.5 : 0.5;
-      const skill = deadfall ? teamSkill(sim, "cut") : teamSkill(sim, "carry");
-      spendSevenDaylight(sim, Math.max(0.25, Number((base - skill * 0.2).toFixed(2))), deadfall ? "deadfall" : "gather");
     } else if (ev.kind === "draw") {
       recordFact(e, { kind: "pylon", actor: ev.who || "you", object: ev.id, withWhom: near(ev.who), t: sim.time });
       spendSevenDaylight(sim, 0.25, "pylon");
@@ -1832,7 +1829,31 @@ function step(dt, intent) {
     for (const action of raw.queue) handleAction(action, undefined, p);
   }
 
-  tick(sim, dt, { move, run: intent.run, yaw, interact: intent.interact, others });
+  // Seven runs the simulation faster while time is passing for a reason:
+  // sleeping to dawn, an action's hours, or the lead holding a work target.
+  // Each extra tick is an ordinary tick — drain, night and everyone else's
+  // movement advance with it. Events from every tick are kept, because tick()
+  // clears sim.events on entry.
+  const ex = sim.expedition;
+  let reps = 1;
+  let lapseInput = { move, run: intent.run, yaw, interact: intent.interact, others };
+  if (ex && sim.status === "playing") {
+    if (ex.sleeping) { reps = SLEEP_LAPSE; lapseInput = { move: { x: 0, z: 0 }, yaw, interact: false, others }; }
+    else if (ex.lapse > 0) { reps = LAPSE_REPS; lapseInput = { move: { x: 0, z: 0 }, yaw, interact: false, others }; }
+    else if (intent.interact && sim.gatherHold && sim.gatherHold.targetId) reps = WORK_LAPSE;
+  }
+  const tickEvents = [];
+  for (let r = 0; r < reps; r++) {
+    tick(sim, dt, lapseInput);
+    tickEvents.push(...sim.events);
+    if (ex) {
+      if (ex.lapse > 0 && !ex.sleeping) ex.lapse = Math.max(0, ex.lapse - Math.min(dt, 0.1));
+      if (sim.status !== "playing" || (r > 0 && sevenClock(sim.time).day > ex.day)) break;
+    }
+  }
+  sim.events.length = 0;
+  sim.events.push(...tickEvents);
+  if (ex) ex.daylight = Number(sevenClock(sim.time).hoursToDusk.toFixed(2));
   if (sim.expedition) updateSevenKeystone(sim);
   diag.update({ input: intent.move, move, yaw, x: sim.player.x, z: sim.player.z, camera: renderer.camera, hfov: renderer.hfov });
   // The camp's one place-based objective. Emits once, into the same merged

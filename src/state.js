@@ -132,6 +132,16 @@ export const NIGHT_SLIP_MULT = 2.2;
  * draws nothing, so the rng stream is untouched.
  */
 export const DEPTH_DRAIN = 1.5;
+/**
+ * SEVEN'S TIMESCALE. The basin is a thirteen-minute run and BASE_DRAIN empties
+ * a mind in about ninety-five seconds; a Seven day is 720 sim seconds and a run
+ * is many days. Unscaled, the whole party went under before 20:00 on day one
+ * and the run dissolved. 0.045 makes a mind at camp in daylight last about
+ * three days; night, depth and isolation still multiply on top of it.
+ * Sleeping halves it — rest is the reason to stop.
+ */
+export const SEVEN_DRAIN_SCALE = 0.045;
+export const SLEEP_DRAIN = 0.5;
 export function depthOf(sim, ch) {
   if (!sim || !sim.expedition || !sim.world || !ch) return 0;
   const exitZ = -(sim.world.grid / 2 - 2) * sim.world.cell;
@@ -140,6 +150,27 @@ export function depthOf(sim, ch) {
   return Math.max(0, Math.min(1, (startZ - ch.z) / total));
 }
 export const FIRE_WARMTH = 9; // stand this close to a burning fire and the night lets go
+
+// ---- SEVEN'S CLOCK ---------------------------------------------------------
+// Time, not a wallet (docs/blueprint-0.35). One in-game hour is GAME_HOUR sim
+// seconds; sim.time 0 is 06:00 on day one. Work and sleep do not SPEND hours —
+// main.js runs the simulation faster while they happen, so drain, nightfall
+// and everyone else's movement advance with the clock honestly. A pure
+// function of sim.time, which is already saved: nothing here is save state.
+export const GAME_HOUR = 30;
+export const DAWN_HOUR = 6;
+export const DUSK_HOUR = 18;
+export function sevenClock(t) {
+  const h = t / GAME_HOUR + DAWN_HOUR;
+  const day = Math.floor((h - DAWN_HOUR) / 24) + 1;
+  const hour = ((h % 24) + 24) % 24;
+  const night = hour >= DUSK_HOUR || hour < DAWN_HOUR;
+  return {
+    hour, day, night,
+    hoursToDusk: night ? 0 : DUSK_HOUR - hour,
+    hoursToDawn: night ? (DAWN_HOUR - hour + 24) % 24 : 0,
+  };
+}
 
 /** Which day it is, 1-based. */
 export const dayOf = (t) => Math.floor(t / CYCLE_LENGTH) + 1;
@@ -162,10 +193,20 @@ export const phaseOf = (t) => {
  */
 export function nightFactor(sim, ch = null) {
   if (sim.noDrain || sim.woods) return 0;
-  const ph = phaseOf(sim.time);
-  if (!ph.night) return 0;
-  const EDGE = 20 / NIGHT_LENGTH;
-  const ramp = Math.min(1, Math.min(ph.frac, 1 - ph.frac) / EDGE);
+  let ramp;
+  if (sim.expedition) {
+    // Seven runs its own day: dusk 18:00 to dawn 06:00, eased over half an hour.
+    const c = sevenClock(sim.time);
+    if (!c.night) return 0;
+    const len = 24 - (DUSK_HOUR - DAWN_HOUR);
+    const into = (c.hour - DUSK_HOUR + 24) % 24;
+    ramp = Math.min(1, Math.min(into, len - into) / 0.5);
+  } else {
+    const ph = phaseOf(sim.time);
+    if (!ph.night) return 0;
+    const EDGE = 20 / NIGHT_LENGTH;
+    ramp = Math.min(1, Math.min(ph.frac, 1 - ph.frac) / EDGE);
+  }
   if (ch && sim.fire && sim.fire.fuel > 0 && dist2D(sim.fire, ch) <= FIRE_WARMTH) return 0;
   return Math.max(0, ramp);
 }
@@ -876,6 +917,10 @@ export function tickLucidity(sim, ch, dt) {
   if (night > 0) mult *= 1 + (NIGHT_DRAIN_MULT - 1) * night;
   const depthMult = 1 + DEPTH_DRAIN * depthOf(sim, ch);
   mult *= depthMult;
+  if (sim.expedition) {
+    mult *= SEVEN_DRAIN_SCALE;
+    if (sim.expedition.sleeping) mult *= SLEEP_DRAIN;
+  }
 
   // Slip check, using the draw taken at the top. Gated on the same grace window
   // as the drain — the opening calm means calm, not "calm unless unlucky".

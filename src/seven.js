@@ -140,9 +140,12 @@ export const FIRE_DAYLIGHT = Object.freeze({ build: 0.75, feed: 0.25 });
 export function restCheck(sim, campRadius) {
   const e = sim.expedition;
   if (!e || e.phase !== "day" || sim.status !== "playing") return { ok: false, reason: "no-day" };
-  const camp = sim.world.camp;
-  if (Math.hypot(sim.player.x - camp.x, sim.player.z - camp.z) > campRadius) return { ok: false, reason: "away" };
-  return { ok: true, forfeits: e.daylight };
+  if (e.sleeping) return { ok: false, reason: "asleep" };
+  // Sleep anywhere (blueprint 0.35): away from camp there is no fire's shield,
+  // and the night costs what the night costs. `atCamp` is for the caller.
+  const camp = sim.camp || sim.world.camp;
+  const atCamp = Math.hypot(sim.player.x - camp.x, sim.player.z - camp.z) <= campRadius;
+  return { ok: true, atCamp };
 }
 
 /**

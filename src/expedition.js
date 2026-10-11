@@ -270,6 +270,8 @@ export function serializeExpedition(expedition) {
   if (!expedition) return null;
   return {
     skillPoints: expedition.skillPoints || 0,
+    lapse: expedition.lapse || 0,
+    sleeping: !!expedition.sleeping,
     day: expedition.day,
     phase: expedition.phase,
     area: expedition.area,
@@ -293,6 +295,8 @@ export function deserializeExpedition(data) {
   if (!data) return null;
   return {
     skillPoints: data.skillPoints ?? 0,
+    lapse: data.lapse ?? 0,
+    sleeping: !!data.sleeping,
     day: data.day,
     phase: data.phase,
     area: data.area ?? 0,

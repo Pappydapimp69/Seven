@@ -1,6 +1,6 @@
 // seven.mjs — pure tests for Seven's expedition-specific rules.
 
-import { createRun, tickLucidity, depthOf, DEPTH_DRAIN } from "../src/state.js";
+import { createRun, tickLucidity, depthOf, DEPTH_DRAIN, sevenClock, GAME_HOUR, nightFactor, phaseOf } from "../src/state.js";
 import { createExpedition, sleep, resolveNight, serializeExpedition, deserializeExpedition, SKILL_POINTS_START } from "../src/expedition.js";
 import { makeRng } from "../src/rng.js";
 import { raiseSkill, SKILL_MAX, restCheck, FIRE_DAYLIGHT, nearbyIds, campIds, applyTeamLoadout, teamSkill, finalDecision, expeditionSummary, finalCount } from "../src/seven.js";
@@ -53,23 +53,47 @@ check("who was nearby and who stayed at camp come from real positions", () => {
   assert(stayed.includes(a.id) && !stayed.includes(b.id), `camp stayers wrong: ${stayed}`);
 });
 
-check("resting is a choice made at camp, and means the same to every mind", () => {
+check("resting is allowed anywhere, says whether it is at camp, and means the same to every mind", () => {
   const sim = createRun({ seed: 92 });
   sim.expedition = createExpedition();
   const camp = sim.world.camp;
   sim.player.x = camp.x; sim.player.z = camp.z;
   const here = restCheck(sim, 9);
-  assert(here.ok && here.forfeits === sim.expedition.daylight, "could not rest at camp, or forfeit amount is wrong");
+  assert(here.ok && here.atCamp === true, "could not rest at camp");
   sim.player.x = camp.x + 40;
-  eq(restCheck(sim, 9).reason, "away", "rest allowed away from camp");
-  // the answer must not depend on how clear the lead's head is
-  sim.player.x = camp.x;
+  const away = restCheck(sim, 9);
+  assert(away.ok && away.atCamp === false, "rest away from camp was refused or misreported");
   sim.player.hallucinating = true; sim.player.lucidity = 0;
-  assert(restCheck(sim, 9).ok, "a hallucinating lead was refused rest at camp: the refusal would be a tell");
-  sim.expedition.phase = "night";
-  eq(restCheck(sim, 9).reason, "no-day", "rest allowed outside the day");
+  assert(restCheck(sim, 9).ok, "a hallucinating lead was refused rest: the refusal would be a tell");
+  sim.expedition.sleeping = true;
+  eq(restCheck(sim, 9).reason, "asleep", "rest allowed while already asleep");
   eq(restCheck(createRun({ seed: 93 }), 9).reason, "no-day", "rest allowed outside an expedition");
 });
+check("the clock: 06:00 at the start, dusk twelve hours later, a new day at the next dawn", () => {
+  let c = sevenClock(0);
+  assert(c.day === 1 && Math.abs(c.hour - 6) < 1e-9 && !c.night && c.hoursToDusk === 12, `start ${JSON.stringify(c)}`);
+  c = sevenClock(12 * GAME_HOUR);
+  assert(c.night && c.day === 1 && Math.abs(c.hoursToDawn - 12) < 1e-9, `dusk ${JSON.stringify(c)}`);
+  c = sevenClock(24 * GAME_HOUR);
+  assert(c.day === 2 && !c.night, `next dawn ${JSON.stringify(c)}`);
+});
+check("night bears on an expedition by its own clock, and a fire in reach holds it off", () => {
+  const sim = createRun({ seed: 95 });
+  sim.expedition = createExpedition();
+  sim.time = 6 * GAME_HOUR;            // noon
+  eq(nightFactor(sim), 0, "night at noon");
+  sim.time = 18 * GAME_HOUR;           // midnight
+  assert(nightFactor(sim) > 0.99, `midnight night factor ${nightFactor(sim)}`);
+  const ch = sim.player;
+  sim.fire = { x: ch.x, z: ch.z, fuel: 50 };
+  eq(nightFactor(sim, ch), 0, "a burning fire in reach did not hold the night off");
+  // and a run that is not an expedition keeps the basin's cycle exactly
+  const basin = createRun({ seed: 95 });
+  basin.time = 6 * GAME_HOUR;
+  const ph = phaseOf(basin.time);
+  assert((nightFactor(basin) > 0) === ph.night, "the basin's night changed");
+});
+
 check("lighting a fire costs more daylight than keeping one", () => {
   assert(FIRE_DAYLIGHT.build > FIRE_DAYLIGHT.feed && FIRE_DAYLIGHT.feed > 0, "fire costs are not ordered build > feed > 0");
 });
