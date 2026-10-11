@@ -83,6 +83,10 @@ echo "== homeward (the edge: real + 1 pylons, one mistake) =="
 node tests/homeward.mjs
 echo
 
+echo "== night risk (the exposed are taken first) =="
+node tests/nightrisk.mjs
+echo
+
 echo "== seven (team loadouts and final choices) =="
 node tests/seven.mjs
 echo

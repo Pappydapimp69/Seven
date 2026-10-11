@@ -133,7 +133,17 @@ export function chooseDisappearance(expedition, rng, partyIds) {
   }
   const pool = available.filter((id) => witnessed.has(id));
   const candidates = pool.length ? pool : available;
-  const id = candidates[Math.floor(rWho * candidates.length)];
+  // WHO THE NIGHT TAKES is weighted by exposure (blueprint 0.35): awake, alone
+  // and outside the camp's fire is likeliest; asleep at a lit fire least.
+  // `exposure` is set by the caller; absent, every candidate weighs 1. The same
+  // single draw (rWho) picks either way, so the stream never moves.
+  const weights = candidates.map((c) => Math.max(0, (expedition.exposure && expedition.exposure[c]) ?? 1));
+  const total = weights.reduce((a, b) => a + b, 0);
+  let id = candidates[Math.floor(rWho * candidates.length)];
+  if (total > 0) {
+    let acc = rWho * total;
+    for (let i = 0; i < candidates.length; i++) { acc -= weights[i]; if (acc < 0) { id = candidates[i]; break; } }
+  }
   const missing = {
     id,
     day: expedition.day,

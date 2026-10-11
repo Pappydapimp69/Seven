@@ -20,7 +20,7 @@ import {
   startKeystoneMorning, advanceKeystoneMorning,
 } from "./expedition.js?v=seven-0.38.0";
 import { DEFAULT_TEAM, applyTeamLoadout, teamSkill, finalDecision, finalCount, nearbyIds, campIds, FIRE_DAYLIGHT, restCheck, raiseSkill, SKILL_MAX, createCamp, depositWood, dismantleCamp, makeCamp,
-  dawnCalls, loudWord, missingSpot, checkFound, stepFound, startHomeward, lightHomePylon, homewardOver, finishHomeward } from "./seven.js?v=seven-0.38.0";
+  dawnCalls, loudWord, missingSpot, checkFound, stepFound, startHomeward, lightHomePylon, homewardOver, finishHomeward, nightExposure } from "./seven.js?v=seven-0.38.0";
 import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.38.0";
 import { createRenderer } from "./render.js?v=seven-0.38.0";
 import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.38.0";
@@ -1110,6 +1110,7 @@ function resolveSevenNight(sim) {
   const before = e.missing.length;
   // Fakes still standing in the camp: replaced, and neither exposed nor sent off.
   e.heldFakes = sim.companions.filter((c) => c.replacedDay != null && !(e.mysteries || []).some((m) => m.suspect === c.id && m.exposed)).length;
+  e.exposure = nightExposure(sim, CAMP_RADIUS);
   const gone = resolveNight(e, sim.rng, sim.companions.map((c) => c.id));
   // FOUR DRAWS EVERY DAWN, whatever the night did: where a missing one stands
   // (two), whether a false call comes, and its bearing.

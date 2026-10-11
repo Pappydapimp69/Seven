@@ -310,3 +310,24 @@ export function finishHomeward(sim) {
   sim.finalDecision = { choice: "home", saved: h.saved.length, gone: h.gone.length, leftBehind, pylonsLeft: h.pylons };
   return sim.finalDecision;
 }
+
+// ---- who the night takes ----------------------------------------------------
+// Weights for chooseDisappearance, read at dawn from where everyone ended the
+// night and what they were doing. Awake (watch, work, own business) doubles it;
+// outside the campsite triples it; a camp whose fire is out adds half again.
+export const EXPOSURE = Object.freeze({ awake: 2, away: 3, coldCamp: 1.5 });
+export function nightExposure(sim, campRadius) {
+  const out = {};
+  const camp = sim.camp && sim.camp.built ? sim.camp : null;
+  const fireLit = !!(sim.fire && sim.fire.fuel > 0);
+  for (const c of sim.companions) {
+    let w = 1;
+    const kind = c.task ? c.task.kind : "free";
+    if (kind !== "sleep") w *= EXPOSURE.awake;
+    const atCamp = camp && Math.hypot(c.x - camp.x, c.z - camp.z) <= campRadius;
+    if (!atCamp) w *= EXPOSURE.away;
+    else if (!fireLit) w *= EXPOSURE.coldCamp;
+    out[c.id] = w;
+  }
+  return out;
+}
