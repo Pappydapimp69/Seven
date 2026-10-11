@@ -158,6 +158,9 @@ if [ -d /opt/pw-browsers ] && node -e 'require("/opt/node22/lib/node_modules/pla
   echo
   echo "== rescue play (real browser: missing, found, two at the fire) =="
   node tests/rescue-play.mjs
+  echo
+  echo "== homeward play (real browser: the edge, one fake, home) =="
+  node tests/homeward-play.mjs
 else
   echo "== smoke + gamepad: SKIPPED — Playwright/Chromium not available here =="
   echo "   (the 3D layer was NOT exercised in this run)"
