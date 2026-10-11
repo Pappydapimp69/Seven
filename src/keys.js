@@ -38,9 +38,7 @@ export const KEYS = Object.freeze({
     select: "Next",
     give: "Give",
     craft: "Craft",
-    // There is no call button on touch yet (see the touch-buttons in
-    // index.html). Saying "Call" would send the player hunting for it.
-    call: "T on a keyboard — touch has no call button yet",
+    call: "Call",
     checkin: "pick them with Next, then tap Check in",
     name: "Give",
   }),

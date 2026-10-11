@@ -2428,6 +2428,8 @@ function boot() {
   el("btnUse")?.addEventListener("click", () => run && handleAction(ACTIONS.USE_ITEM));
   el("btnCraft")?.addEventListener("click", () => run && handleAction(ACTIONS.CRAFT));
   el("btnGive")?.addEventListener("click", () => run && handleAction(ACTIONS.OFFER_ITEM));
+  // The tutorial's pylon step needs a call; a touch-only player had no way to make one.
+  el("btnCall")?.addEventListener("click", () => run && handleAction(ACTIONS.CALL));
 
   // A closing tab, a backgrounded phone, an alt-tab: all of these can end the
   // session between autosaves, so flush on the way out. visibilitychange is the

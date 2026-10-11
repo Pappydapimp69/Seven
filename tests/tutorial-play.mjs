@@ -105,17 +105,23 @@ await page.waitForFunction(() => !!window.__seven, null, { timeout: 20000 });
     const ctx = c.getContext("2d");
     ctx.drawImage(img, 0, 0, c.width, c.height);
     const d = ctx.getImageData(0, 0, c.width, c.height).data;
-    let sum = 0, green = 0, n = 0;
+    let sum = 0, green = 0, dirt = 0, n = 0;
     for (let i = 0; i < d.length; i += 4) {
-      sum += (d[i] + d[i + 1] + d[i + 2]) / 3;
-      if (d[i + 1] > d[i] + 4 && d[i + 1] > d[i + 2] + 4) green++;
+      const r = d[i], g = d[i + 1], b = d[i + 2];
+      sum += (r + g + b) / 3;
+      if (g > r + 4 && g > b + 4) green++;
+      else if (r > g + 4 && g > b + 4 && r - b > 25) dirt++;   // the camp's dirt path
       n++;
     }
-    return { mean: sum / n, greenFraction: green / n };
+    return { mean: sum / n, greenFraction: green / n, groundFraction: (green + dirt) / n };
   }, png);
-  notes.push(`camp brightness ${lum.mean.toFixed(0)}/255, green ${(lum.greenFraction * 100).toFixed(0)}%`);
+  notes.push(`camp brightness ${lum.mean.toFixed(0)}/255, green ${(lum.greenFraction * 100).toFixed(0)}%, green or dirt ${(lum.groundFraction * 100).toFixed(0)}%`);
   assert(lum.mean > 40, `the camp renders almost black (mean luminance ${lum.mean.toFixed(0)}/255) — it is unlit or the daylight was overwritten`);
-  assert(lum.greenFraction > 0.15, `only ${(lum.greenFraction * 100).toFixed(0)}% of the camp is green — trees and grass are not drawing, so it is rendering as a rock field`);
+  // GROUND, not just green. The camp now opens looking down its dirt path, so
+  // green alone fell to 14% on a camp that was drawing perfectly. A rock field
+  // is grey; grass, trees and a dirt path are not.
+  assert(lum.greenFraction > 0.06, `only ${(lum.greenFraction * 100).toFixed(0)}% of the camp is green — trees and grass are not drawing`);
+  assert(lum.groundFraction > 0.3, `only ${(lum.groundFraction * 100).toFixed(0)}% of the camp is grass, trees or path — it is rendering as a rock field`);
 }
 
 // --- the camp does not wear the last run's weather --------------------------

@@ -40,12 +40,9 @@ short on purpose.
 
 ## Open — found in passing, not yet fixed
 
-- [ ] **Touch has no CALL button.** Found writing keys.js (0.26.1): the touch
-      bar is Survey, Check in, Dose, Next, Cycle item, Use item, Craft, Give.
-      The tutorial's pylon beat needs a call, so a touch-only player cannot
-      finish it. keys.js says so in the brief rather than naming a button that
-      does not exist. Not fixed: adding a button is a layout change on a phone
-      screen that was already tight (see the 720px media query).
+- [x] **Touch has no CALL button — FIXED in 0.39.** A Call button is on the
+      touch bar; keys.js names it; tests/keys.mjs now fails if any single-button
+      touch name is not a real touch button (negative-controlled).
 
 - [x] **Obstacles cannot earn their keep on the survey basin — SETTLED by
       weakening the guarantee, not by tuning.** The three experiments were

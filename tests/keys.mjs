@@ -125,6 +125,19 @@ check("the action prompt shows the scheme's key, not a hard-coded [E]", () => {
   assert(/prompt\.dataset\.key = KEYS\[scheme\]/.test(read("src/hud.js")), "setHints does not set the prompt's key");
 });
 
+// Touch names that are a single button must be a button on the touch bar. "T on
+// a keyboard" stood in for Call until there was one; this keeps that from
+// coming back as a name that points at nothing.
+const touchBar = (html) => [...(html.match(/<div class="touch-buttons">([\s\S]*?)<\/div>/) || ["", ""])[1].matchAll(/>([^<]+)<\/button>/g)].map((m) => m[1].trim());
+const touchButtonsNamed = (keys, html) => ["act", "give", "craft", "call"].filter((t) => !touchBar(html).includes(keys.touch[t])).map((t) => `touch "${t}" is "${keys.touch[t]}", which is not a button on the touch bar`);
+check("every single-button touch name is a real touch button", () => {
+  const bad = touchButtonsNamed(KEYS, read("index.html"));
+  assert(!bad.length, bad.join("; "));
+});
+check("negative control — touch buttons: a name with no button is caught", () => {
+  assert(touchButtonsNamed(KEYS, read("index.html").replace('>Call</button>', '>Shout</button>')).length > 0, "the touch-button guard passed with Call missing");
+});
+
 // ---- negative controls ----------------------------------------------------
 const broken = (k, patch, why) => check(`negative control — ${k}: ${why}`, () => {
   assert(G[k]({ ...REAL, ...patch }).length > 0, `the ${k} guard passed on a broken game — it is inert`);
