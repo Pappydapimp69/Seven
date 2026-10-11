@@ -14,7 +14,8 @@ import { areaOfRow, deadfallRow } from "../src/world.js";
 import { createRng } from "../src/rng.js";
 import { EXIT_ROWS, AREAS } from "../src/config.js";
 
-const SEEDS = Number(process.argv[2] || 10), MAX_DAYS = Number(process.argv[3] || 16);
+const NUMS = process.argv.slice(2).filter((a) => /^\d+$/.test(a)).map(Number);
+const SEEDS = NUMS[0] || 10, MAX_DAYS = NUMS[1] || 16;
 const MEMORY_ODDS = 0.65;
 
 export function playRun(seed) {

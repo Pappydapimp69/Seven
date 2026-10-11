@@ -5,24 +5,27 @@
 // hears finishes the chunk in their hands, then follows. Work comes in chunks
 // (one chop, one tree); a day chunk is only started if it ends before dusk.
 
-import { K, bfs, kindAt, areaOfRow, fellTree, clearDeadfall } from "./world.js?v=seven-1.2.0";
-import { dist, cellOf, walkTo, nearestWalkable } from "./body.js?v=seven-1.2.0";
-import { record } from "./chronicle.js?v=seven-1.2.0";
+import { K, bfs, kindAt, areaOfRow, fellTree, clearDeadfall } from "./world.js?v=seven-1.3.0";
+import { dist, cellOf, walkTo, nearestWalkable } from "./body.js?v=seven-1.3.0";
+import { record } from "./chronicle.js?v=seven-1.3.0";
+import { makeCampAt, takeCampDown } from "./camp.js?v=seven-1.3.0";
+import { pathTo, areaOfRow as rowArea } from "./world.js?v=seven-1.3.0";
 import {
   MATE_SPEED, TICK_MIN, DUSK, CHOP_MIN, CHOP_PROGRESS, CHOP_SKILL, FELL_MIN, FELL_YIELD, HAUL_LOAD,
-  CAMP_RADIUS, WATCH_FEED_BELOW, DEADFALL_THICKER, TEAM, TEND_SKILL, FIRE_FEED_HOURS, FIRE_MAX_HOURS, PRACTICE_CHUNKS, FAKE_LEARNS, SKILL_MAX,
-} from "./config.js?v=seven-1.2.0";
-import { hash01 } from "./rng.js?v=seven-1.2.0";
+  CAMP_RADIUS, WATCH_FEED_BELOW, DEADFALL_THICKER, TEAM, TEND_SKILL, MAKE_CAMP_MIN, DISMANTLE_MIN, BUILD_SKILL, FIRE_FEED_HOURS, FIRE_MAX_HOURS, PRACTICE_CHUNKS, FAKE_LEARNS, SKILL_MAX,
+} from "./config.js?v=seven-1.3.0";
+import { hash01 } from "./rng.js?v=seven-1.3.0";
 
-export const DAY_TASKS = Object.freeze(["free", "chop", "gather", "camp"]);
+export const DAY_TASKS = Object.freeze(["free", "chop", "gather", "camp", "move"]);
 export const NIGHT_TASKS = Object.freeze(["sleep", "watch", "work", "free"]);
 export const TASK_LABEL = Object.freeze({
-  free: "With you", chop: "Chop the deadfall", gather: "Gather wood", camp: "Stay at camp",
+  free: "With you", chop: "Chop the deadfall", gather: "Gather wood", camp: "Stay at camp", move: "Move camp forward",
   sleep: "Sleep", watch: "Keep watch", work: "Keep working",
 });
 
 export function setTask(m, kind, work = null) {
-  m.task = { kind, work, chunk: 0, carry: m.task ? m.task.carry : 0, tree: null };
+  if (moving(m)) return;                  // a camp half-carried is finished first
+  m.task = { kind, work, chunk: 0, carry: m.task ? m.task.carry : 0, tree: null, stage: null };
   m.following = false; m.callPending = false; m.asleep = false;
 }
 
@@ -65,10 +68,71 @@ export function chopAt(sim, d, who, cut) {
   }
 }
 
+// ---- Move camp: take it down, carry it past the cleared trunk, put it up ----
+/** A move under way runs on through dusk: a camp half-carried is no camp at all. */
+export const moving = (m) => !!(m.task && m.task.kind === "move" && (m.task.stage === "carry" || m.task.stage === "up"));
+const moveCrew = (sim) => sim.mates.filter((x) => x.task && x.task.kind === "move" && !x.following);
+/** Where camp goes next: three rows past the trunk of the area camp stands in, once it is cut. */
+export function nextCampSite(sim) {
+  const a = rowArea(Math.floor(sim.camp.y));
+  const d = sim.world.deadfalls.find((x) => x.area === a);
+  if (!d || !d.cleared) return null;
+  const row = d.row - 3;
+  return { cx: sim.world.trailX[row], cy: row };
+}
+function campWorkSpeed(sim, lead) {
+  const crew = moveCrew(sim).filter((x) => x === lead || dist(x, lead) <= 4).slice(0, 3);
+  return crew.reduce((s, x, i) => s + (i === 0 ? 1 : 0.5) * (1 + BUILD_SKILL * (x.skills.build || 0)), 0);
+}
+function updateMove(sim, m) {
+  const w = sim.world, t = m.task, crew = moveCrew(sim), boss = crew[0];
+  if (m !== boss) {                       // the rest of the crew go where the boss goes
+    if (dist(m, boss) > 2) { const c = cellOf(boss); walkTo(w, m, c.cx, c.cy, MATE_SPEED); }
+    return true;
+  }
+  const speed = campWorkSpeed(sim, m);
+  const ids = crew.filter((x) => dist(x, m) <= 4).map((x) => x.id);
+  if (!t.stage || t.stage === "done") {
+    if (t.stage === "done" || !sim.camp.built) return false;
+    const site = nextCampSite(sim);
+    if (!site) return false;
+    const here = cellOf(m), path = pathTo(w, here.cx, here.cy, site.cx, site.cy);
+    if (!path) return false;
+    const mins = (DISMANTLE_MIN + MAKE_CAMP_MIN) / speed + (path.length / MATE_SPEED) * TICK_MIN * 1.5 + 30;
+    if (!fits(sim, mins)) return false;   // not today: it would leave everyone campless at dark
+    t.stage = "down"; t.dest = site; t.chunk = 0;
+  }
+  if (t.stage === "down") {
+    if (!sim.camp.built) { t.stage = "carry"; t.chunk = 0; return true; }
+    const s = campSpot(sim, m);
+    if (t.chunk === 0 && walkTo(w, m, s.cx, s.cy, MATE_SPEED) !== "arrived") return true;
+    t.chunk += TICK_MIN;
+    if (t.chunk >= DISMANTLE_MIN / speed) { t.chunk = 0; takeCampDown(sim, ids); for (const x of crew) practice(x, "build"); t.stage = "carry"; }
+    return true;
+  }
+  if (t.stage === "carry") {
+    if (walkTo(w, m, t.dest.cx, t.dest.cy, MATE_SPEED) === "arrived") { t.stage = "up"; t.chunk = 0; }
+    return true;
+  }
+  if (t.stage === "up") {
+    if (sim.camp.built) { t.stage = "done"; return false; }   // someone else put one up
+    t.chunk += TICK_MIN;
+    if (t.chunk >= MAKE_CAMP_MIN / speed) {
+      t.chunk = 0; t.stage = "done";
+      makeCampAt(sim, t.dest.cx + 0.5, t.dest.cy + 0.5, ids);
+      for (const x of crew) practice(x, "build");
+    }
+    return true;
+  }
+  return false;
+}
+
 export function updateMate(sim, m) {
   const w = sim.world, camp = sim.camp;
   const t = m.task || (m.task = { kind: "free", chunk: 0, carry: 0 });
+  if (t.kind === "move" && !m.following && updateMove(sim, m)) return;
   let kind = t.kind === "work" ? (t.work || "free") : t.kind;
+  if (kind === "move") kind = "camp";     // nothing to move (or done): keep camp
   if (m.following || !camp.built) kind = "follow";
   if (kind === "free") kind = "follow";
   const night = isNight(sim);

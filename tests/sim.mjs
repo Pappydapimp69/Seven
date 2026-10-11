@@ -107,8 +107,10 @@ T.check("choppers on the deadfall cut it; nobody chops past a cleared trunk", ()
   const d = s.world.deadfalls[0];
   S.applyPlan(s, "dawn", { m0: "chop", m1: "chop", m2: "chop" });
   run(s, 10 * HOUR);
-  assert(d.cleared, `three choppers left the first deadfall at ${Math.round(d.progress * 100)}% by 16:00`);
-  assert(s.world.deadfalls[1].progress < 0.5, "the next deadfall was half cut the same day by three people");
+  assert(!d.cleared && d.progress > 0.5, `three choppers in one day: ${Math.round(d.progress * 100)}% — a trunk should take more than a day of three people`);
+  for (let i = 0; i < 30 * HOUR; i++) { if (s.pending) S.applyPlan(s, s.pending, s.pending === "dawn" ? { m0: "chop", m1: "chop", m2: "chop" } : {}); S.tick(s, {}); }
+  assert(d.cleared, `still standing after a second day: ${Math.round(d.progress * 100)}%`);
+  assert(!s.world.deadfalls[1].cleared, "the next, thicker deadfall fell the same days as well");
 });
 
 T.check("the fire: lit from the pile, fed, burns down, shields only the camp at night", () => {
@@ -230,6 +232,30 @@ T.check("track: a tracker with you spots the lost from further off", () => {
   s.mates[0].skills.track = 4; s.mates[0].x = s.lead.x; s.mates[0].y = s.lead.y + 0.5;
   const tracked = S.findReach(s);
   assert(base === C.FIND_REACH && tracked >= C.FIND_REACH + 2, `reach ${base} → ${tracked}`);
+});
+
+T.check("move camp: a companion takes camp down, carries it past the cut trunk, and puts it up", () => {
+  const s = fresh(24);
+  clearDeadfall(s.world, s.world.deadfalls[0]);
+  const m = s.mates[0], oldPile = s.camp.pile, old = { x: s.camp.x, y: s.camp.y };
+  S.applyPlan(s, "dawn", { [m.id]: "move", m1: "move" });
+  run(s, 6 * HOUR);
+  assert(s.camp.built && S.areaOf(s.camp) === 1, `camp is ${s.camp.built ? "up" : "down"} in area ${S.areaOf(s.camp) + 1}`);
+  assert(s.piles.some((p) => p.wood === oldPile && Math.abs(p.x - old.x) < 1e-9), "the woodpile did not stay at the old camp");
+  assert(s.chronicle[1].events.some((e) => e.kind === "camp_made" && e.who.includes(m.id)), "the chronicle does not say who made camp");
+});
+
+T.check("move camp waits when the trunk is not cut, and when the day is too short", () => {
+  const s = fresh(25);
+  S.applyPlan(s, "dawn", { m0: "move" });
+  run(s, 2 * HOUR);
+  assert(s.camp.built && S.areaOf(s.camp) === 0, "moved camp with the way north still blocked");
+  const t = fresh(25);
+  clearDeadfall(t.world, t.world.deadfalls[0]);
+  setClock(t, 1, 16 * 60);
+  S.applyPlan(t, "dawn", { m0: "move" });
+  run(t, HOUR);
+  assert(t.camp.built && S.areaOf(t.camp) === 0, "started moving camp two hours before dark");
 });
 
 void chopSpot;

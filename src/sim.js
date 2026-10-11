@@ -5,13 +5,14 @@
 // exported actions. Messages for the player go through sim.say(); they never
 // mention the hidden meter.
 
-import { createRng } from "./rng.js?v=seven-1.2.0";
-import { composeRoster } from "./names.js?v=seven-1.2.0";
-import { createWorld, areaOfRow, K, kindAt, walkable, lostSpots, fellTree } from "./world.js?v=seven-1.2.0";
-import { dist, cellOf, moveBody, nearestWalkable, walkTo } from "./body.js?v=seven-1.2.0";
-import { openDay, record, recordPlan, account } from "./chronicle.js?v=seven-1.2.0";
-import { updateMate, setTask, chopAt, frontDeadfall, practice, DAY_TASKS, NIGHT_TASKS } from "./mates.js?v=seven-1.2.0";
-import * as C from "./config.js?v=seven-1.2.0";
+import { createRng } from "./rng.js?v=seven-1.3.0";
+import { composeRoster } from "./names.js?v=seven-1.3.0";
+import { createWorld, areaOfRow, K, kindAt, walkable, lostSpots, fellTree } from "./world.js?v=seven-1.3.0";
+import { dist, cellOf, moveBody, nearestWalkable, walkTo } from "./body.js?v=seven-1.3.0";
+import { openDay, record, recordPlan, account } from "./chronicle.js?v=seven-1.3.0";
+import { makeCampAt, takeCampDown as campDown } from "./camp.js?v=seven-1.3.0";
+import { updateMate, setTask, chopAt, frontDeadfall, practice, moving, DAY_TASKS, NIGHT_TASKS } from "./mates.js?v=seven-1.3.0";
+import * as C from "./config.js?v=seven-1.3.0";
 
 // ---- the clock ---------------------------------------------------------------
 export const minutes = (sim) => sim.ticks * C.TICK_MIN;
@@ -250,8 +251,8 @@ function finishBusy(sim) {
     case "fire_feed":
       if (sim.camp.pile >= 1) { sim.camp.pile--; sim.camp.fire = Math.min(C.FIRE_MAX_HOURS, sim.camp.fire + C.FIRE_FEED_HOURS); }
       break;
-    case "camp_make": makeCampHere(sim); practiseCrew(sim, b.crew); break;
-    case "camp_down": takeCampDown(sim); practiseCrew(sim, b.crew); break;
+    case "camp_make": if (!sim.camp.built) { makeCampHere(sim); practiseCrew(sim, b.crew); } break;
+    case "camp_down": if (sim.camp.built) { campDown(sim, ["lead"]); practiseCrew(sim, b.crew); } break;
     case "light": lightPylon(sim, b); break;
     default: break;
   }
@@ -268,23 +269,7 @@ export function findReach(sim) {
 
 function makeCampHere(sim) {
   const L = sim.lead;
-  const prevArea = areaOf(sim.camp);
-  sim.camp = { x: L.x, y: L.y, built: true, pile: 0, fire: 0 };
-  const who = ["lead", ...sim.mates.filter((m) => dist(m, L) <= 4).map((m) => m.id)];
-  record(sim, "camp_made", who);
-  if (areaOf(sim.camp) > prevArea) record(sim, "area", [], { area: areaOf(sim.camp) });
-  sim.say("Camp is up. The pile starts empty.");
-  // Walking forward is how you abandon them: no prompt, no message.
-  const ms = sim.missing;
-  if (ms && !ms.found && areaOf(sim.camp) > ms.area) { sim.lost.push({ name: ms.name, how: "left" }); sim.missing = null; }
-}
-
-function takeCampDown(sim) {
-  const c = sim.camp;
-  if (c.pile > 0) sim.piles.push({ id: `pile${++sim.pileSeq}`, x: c.x, y: c.y + 1.2, wood: c.pile });
-  sim.camp = { x: c.x, y: c.y, built: false, pile: 0, fire: 0 };
-  record(sim, "camp_down", ["lead"]);
-  sim.say("Camp comes down. The woodpile stays where it is.");
+  makeCampAt(sim, L.x, L.y, ["lead", ...sim.mates.filter((m) => dist(m, L) <= 4).map((m) => m.id)]);
 }
 
 function lightPylon(sim, b) {
@@ -421,7 +406,7 @@ export function resolveNight(sim) {
   sim.exposure = {}; sim.nightHours = 0;
   if (sim.lead.busy && sim.lead.busy.kind === "sleep") sim.lead.busy = null;
   sim.lead.asleep = false;
-  for (const m of sim.mates) { m.asleep = false; m.following = false; m.callPending = false; if (m.task) { m.task.kind = "free"; m.task.chunk = 0; } }
+  for (const m of sim.mates) { m.asleep = false; m.following = false; m.callPending = false; if (m.task && !moving(m)) { m.task.kind = "free"; m.task.chunk = 0; m.task.stage = null; } }
   for (const l of lines) sim.say(l);
   sim.saveDue = true;
 }
@@ -523,7 +508,7 @@ export function tick(sim, input = {}) {
   // Dusk and dawn.
   if (!wasNight && night && sim.duskSeen < sim.day) {
     sim.duskSeen = sim.day;
-    for (const m of sim.mates) if (!m.following && m.task && DAY_TASKS.includes(m.task.kind)) setTask(m, "sleep");
+    for (const m of sim.mates) if (!m.following && m.task && DAY_TASKS.includes(m.task.kind) && !moving(m)) setTask(m, "sleep");
     sim.say("The light is going.");
   }
   if (Math.floor(minutes(sim) / 1440) + 1 > sim.day) resolveNight(sim);

@@ -59,7 +59,7 @@ export const FAKE_LEARNS = 2;                // a fake learns this many times fa
 
 // ---- work (game minutes) ----------------------------------------------------
 export const CHOP_MIN = 30;
-export const CHOP_PROGRESS = 1 / 32;         // per unskilled chop
+export const CHOP_PROGRESS = 1 / 56;         // per unskilled chop: ~28 person-hours for the first trunk
 export const CHOP_SKILL = 0.15;              // +15% per cut level
 export const DEADFALL_THICKER = 0.25;        // each area deeper, a trunk takes 25% more
 export const FELL_MIN = 60;
