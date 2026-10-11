@@ -141,10 +141,22 @@ fakes come from.
   - Size the bearing to what can be heard (8 directions).
   - Determinism: the night step draws drift, call and bearing every night for
     every slot, missing or not.
-- **Rescue ends at a pylon:** the found member is the second pair of hands;
-  lighting it together proves they are real and lights the area.
-- Still open in Brain (yellow): must the fake be exposed before the rescue, or
-  does rescue expose it? (Blueprint leans: bringing them home exposes it.)
+- **Rescue returns a DUPLICATE (Brain, doppelganger kernel — adopted,
+  replacing the earlier lean that rescue exposes the fake).** Gating rescue on
+  exposing the fake first brought the real one back only 0.27 of the time;
+  letting rescue expose the fake for free bypassed the investigation. So the
+  one you walk home stands at the fire beside the one who never left, same
+  name. One of two is real; the player decides with memory (ask both the same
+  question; comparing answers locates the bent fact, memory decides) or pays a
+  pylon to test one.
+- **A pylon test is inviolable (Brain kernel):** no scripted turn after a
+  passed test. A pylon that clears someone means they are real, full stop.
+- **Rescue and pylons:** the found member can be the second pair of hands at a
+  pylon out there; lighting it with them TESTS them (and lights the area) at
+  the cost of that pylon. Paid, not free.
+- Brain RED tension (open): how is abandonment by walking forward made a felt
+  choice with no prompt? Leaning on the fading-with-a-floor call: the dawn
+  call still comes from behind you, and stops when you leave the window.
 
 ## Open
 
