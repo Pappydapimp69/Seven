@@ -15,7 +15,7 @@ import {
   updateWorkHold, dawnLine, BEATS, PHASE, ASKS_ALLOWED,
 } from "./woods.js?v=seven-0.37.0";
 import {
-  createExpedition, spendDaylight, recordFact, sleep, resolveNight, advanceArea, placeMissing, twinAccounts, resolveTwin,
+  createExpedition, spendDaylight, recordFact, sleep, resolveNight, advanceArea, placeMissing, twinAccounts, resolveTwin, SEVEN_NIGHT_CHANCE,
   recoverMissing, activeMystery, askMystery, accuseMystery, proveMystery, MYSTERY_ASKS_ALLOWED,
   startKeystoneMorning, advanceKeystoneMorning,
 } from "./expedition.js?v=seven-0.37.0";
@@ -1108,6 +1108,8 @@ function resolveSevenNight(sim) {
   for (const id of campIds(sim, CAMP_RADIUS)) recordFact(e, { kind: "camp", actor: id, object: "camp", withWhom: [], t: sim.time });
   sleep(e);
   const before = e.missing.length;
+  // Fakes still standing in the camp: replaced, and neither exposed nor sent off.
+  e.heldFakes = sim.companions.filter((c) => c.replacedDay != null && !(e.mysteries || []).some((m) => m.suspect === c.id && m.exposed)).length;
   const gone = resolveNight(e, sim.rng, sim.companions.map((c) => c.id));
   // FOUR DRAWS EVERY DAWN, whatever the night did: where a missing one stands
   // (two), whether a false call comes, and its bearing.
@@ -1390,7 +1392,7 @@ function startSeven({ seed, difficulty, team } = {}) {
   const world = generateTrail(seedValue);
   const sim = createRun({ seed: seedValue, difficulty: difficulty || "standard", level: 1, campaignLength: 1, world });
   sim.seven = true;
-  sim.expedition = createExpedition();
+  sim.expedition = createExpedition({ replacementChance: SEVEN_NIGHT_CHANCE });
   sim.camp = createCamp(world.camp);
   applyTeamLoadout(sim, team || sevenTeamPref || DEFAULT_TEAM, { overwrite: true });
   updateSevenObjective(sim);

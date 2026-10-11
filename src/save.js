@@ -193,6 +193,7 @@ function packCharacter(c) {
     replacedDay: c.replacedDay ?? null,
     // Seven: today's task, mid-chunk progress and carried wood included.
     task: c.task ? { ...c.task } : null,
+    practice: c.practice ? { ...c.practice } : null,
   };
 }
 
@@ -263,6 +264,7 @@ function applyCharacter(c, s) {
   if (s.skills) c.skills = { ...s.skills };
   c.replacedDay = s.replacedDay ?? null;
   c.task = s.task ? { ...s.task } : null;
+  c.practice = s.practice ? { ...s.practice } : null;
 }
 
 /** Flags for world features, keyed by id — positions come back from the seed. */

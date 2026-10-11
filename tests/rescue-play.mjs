@@ -13,6 +13,7 @@ await pg.evaluate(()=>window.__seven.startSeven({seed:777}));
 const r=await pg.evaluate(()=>{const M=window.__seven,s=M.sim,e=s.expedition;const log=[];
   const closePlan=()=>{const g=document.getElementById("planGo");if(!document.getElementById("planLayer").classList.contains("hidden"))g.click();};
   closePlan(); s.player.x=s.camp.x; s.player.z=s.camp.z;
+  e.replacementChance=1; // the test needs a night that takes someone
   for(let night=0;night<2;night++){ e.sleeping=true; for(let i=0;i<3000&&e.sleeping;i++) M.advance(1/30); closePlan(); s.player.x=s.camp.x; s.player.z=s.camp.z; }
   const m=e.missing[0]; const lines=[...document.querySelectorAll(".subtitles .line, #subtitles div, .sub")].map(x=>x.textContent).slice(-8);
   if(!m) return {day:e.day, missing:0};

@@ -26,7 +26,7 @@ import {
   chopDeadfall, feedFire, sevenClock, GAME_HOUR, CHOP_HOLD, SEVEN_GATHER_HOLD, GATHER_YIELD, GATHER_RADIUS,
   SEVEN_CAMP_RADIUS, FIRE_FUEL_MAX,
 } from "./state.js?v=seven-0.37.0";
-import { effectiveKind, inChunk, CHUNK_HOURS } from "./tasks.js?v=seven-0.37.0";
+import { effectiveKind, inChunk, CHUNK_HOURS, practice } from "./tasks.js?v=seven-0.37.0";
 
 // Higher band = worse. Lets a per-companion trait move the pylon-seeking
 // trigger EARLIER than the uniform BRITTLE tell everyone else gets, without
@@ -436,6 +436,7 @@ function runTask(sim, c, dt, band) {
       const n = sim.rng.int(GATHER_YIELD.min, GATHER_YIELD.max);
       t.carry += n;
       emit(sim, "haul", `${c.name} brings a tree down.`, { who: c.id, resource: "wood", amount: n, x: tree.x, z: tree.z });
+      if (practice(c, "carry")) emit(sim, "skill", `${c.name} is getting quicker at hauling.`, { who: c.id });
     }
     return true;
   }

@@ -75,6 +75,10 @@ echo "== rescue (the missing are out there; two come home as one name) =="
 node tests/rescue.mjs
 echo
 
+echo "== practice (skills grow with work; a fake grows faster) =="
+node tests/practice.mjs
+echo
+
 echo "== seven (team loadouts and final choices) =="
 node tests/seven.mjs
 echo

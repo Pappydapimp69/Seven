@@ -17,6 +17,7 @@
 import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=seven-0.37.0";
 import { makeRng } from "./rng.js?v=seven-0.37.0";
 import { areaOfRow } from "./trail.js?v=seven-0.37.0";
+import { practice } from "./tasks.js?v=seven-0.37.0";
 import { updateCompanions, companionRemark } from "./party.js?v=seven-0.37.0";
 
 export const PARTY_SIZE = 6; // you + 5 companions — the spec's five NPCs, plus the player
@@ -1979,6 +1980,7 @@ export function chopDeadfall(sim, actor = sim.player, { helpers = true } = {}) {
   const hands = [actor, ...(helpers ? sim.companions.filter((c) => c !== actor && !c.hallucinating && !tasked(c) && dist2D(c, d) <= HELP_RADIUS) : [])];
   const gain = hands.reduce((sum, c) => sum + CHOP_PROGRESS * (1 + CHOP_SKILL * ((c.skills && c.skills.cut) || 0)), 0);
   d.progress = Math.min(1, (d.progress || 0) + gain);
+  if (sim.expedition) for (const c of hands) if (practice(c, "cut")) emit(sim, "skill", `${c.name} is getting better with the axe.`, { who: c.id });
   if (d.progress >= 1) return { ...clearDeadfall(sim, actor), hands: hands.map((c) => c.id) };
   const words = d.progress < 0.25 ? "It has barely given." : d.progress < 0.5 ? "A quarter of the way through." : d.progress < 0.75 ? "Halfway through." : "Nearly through.";
   emit(sim, "chop", `${hands.length > 1 ? `${hands.length} of you at the deadfall. ` : ""}${words}`, { who: actor.id, x: d.x, z: d.z });

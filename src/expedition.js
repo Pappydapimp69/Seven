@@ -18,6 +18,10 @@ export const MYSTERY_ASKS_ALLOWED = 3;
 
 /** Points to spend on the team before the woods starts taking people, and one more each morning. */
 export const SKILL_POINTS_START = 2;
+/** Added to the nightly chance for each fake still held in the camp. */
+export const HOLD_FAKE_BONUS = 0.25;
+/** Seven's base nightly chance of someone going missing, from day two. */
+export const SEVEN_NIGHT_CHANCE = 0.45;
 
 export function createExpedition({
   day = 1,
@@ -109,7 +113,10 @@ export function chooseDisappearance(expedition, rng, partyIds) {
 
   const rChance = rng();
   const rWho = rng();
-  if (rChance >= expedition.replacementChance) return null;
+  // Holding a fake raises the chance of losing another (IDEAS). `heldFakes` is
+  // set by the caller: fakes still standing in the camp, unexposed.
+  const chance = Math.min(0.95, expedition.replacementChance + HOLD_FAKE_BONUS * (expedition.heldFakes || 0));
+  if (rChance >= chance) return null;
 
   const already = new Set([
     ...(expedition.replacements || []).map((r) => r.id),
