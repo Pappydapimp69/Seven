@@ -4,10 +4,10 @@
 // (Brain mirage#E8: a round trip agreeing with itself is not proof); a body
 // standing in a wall is moved to the nearest open cell.
 
-import { createRng } from "./rng.js?v=seven-1.16.1";
-import { createWorld, clearDeadfall, fellTree, walkable } from "./world.js?v=seven-1.16.1";
-import { nearestWalkable } from "./body.js?v=seven-1.16.1";
-import { attach } from "./sim.js?v=seven-1.16.1";
+import { createRng } from "./rng.js?v=seven-1.17.0";
+import { createWorld, clearDeadfall, fellTree, walkable } from "./world.js?v=seven-1.17.0";
+import { nearestWalkable } from "./body.js?v=seven-1.17.0";
+import { attach } from "./sim.js?v=seven-1.17.0";
 
 export const SAVE_VERSION = 1;
 export const SAVE_KEY = "seven:run";

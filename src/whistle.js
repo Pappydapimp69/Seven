@@ -10,7 +10,7 @@
 // whose is real: the tell is only that it is not quite how they used to sound,
 // and only your memory has the way they used to sound.
 
-import { hash01 } from "./rng.js?v=seven-1.16.1";
+import { hash01 } from "./rng.js?v=seven-1.17.0";
 
 export const SHAPES = Object.freeze(["rise", "leap", "trill", "call"]);
 export const SEMITONE = 2 ** (1 / 12);

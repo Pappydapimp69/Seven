@@ -12,7 +12,7 @@
 // What the always-on layers do comes from soundscape.js, which only knows
 // public facts (the woods you are in, night, fire, pylons) — never lucidity.
 
-import { mixFor, scaleFor, placeSound, placeAngle, dirAngle, stepFor, uiSound } from "./soundscape.js?v=seven-1.16.1";
+import { mixFor, scaleFor, placeSound, placeAngle, dirAngle, stepFor, uiSound } from "./soundscape.js?v=seven-1.17.0";
 
 export const stats = { steps: 0, plays: 0, ui: 0 };
 let muffle = null;

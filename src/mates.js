@@ -5,18 +5,18 @@
 // hears finishes the chunk in their hands, then follows. Work comes in chunks
 // (one chop, one tree); a day chunk is only started if it ends before dusk.
 
-import { K, bfs, kindAt, areaOfRow, fellTree, clearDeadfall } from "./world.js?v=seven-1.16.1";
-import { dist, cellOf, walkTo, nearestWalkable } from "./body.js?v=seven-1.16.1";
-import { record } from "./chronicle.js?v=seven-1.16.1";
-import { makeCampAt, takeCampDown, stackWood, takeWood, campWood, lightWoodFor } from "./camp.js?v=seven-1.16.1";
-import { pathTo, areaOfRow as rowArea, nearestLandmark, LANDMARK_NAME } from "./world.js?v=seven-1.16.1";
+import { K, bfs, kindAt, areaOfRow, fellTree, clearDeadfall } from "./world.js?v=seven-1.17.0";
+import { dist, cellOf, walkTo, nearestWalkable } from "./body.js?v=seven-1.17.0";
+import { record } from "./chronicle.js?v=seven-1.17.0";
+import { makeCampAt, takeCampDown, stackWood, takeWood, campWood, lightWoodFor } from "./camp.js?v=seven-1.17.0";
+import { pathTo, areaOfRow as rowArea, nearestLandmark, LANDMARK_NAME } from "./world.js?v=seven-1.17.0";
 import {
   MATE_SPEED, TICK_MIN, DUSK, CHOP_MIN, CHOP_PROGRESS, CHOP_SKILL, FELL_MIN, HAUL_LOAD,
   CAMP_RADIUS, WATCH_FEED_BELOW, DEADFALL_THICKER, TEAM, TEND_SKILL, MAKE_CAMP_MIN, DISMANTLE_MIN, BUILD_SKILL,
   SCOUT_SPOT, TRACK_REACH, GATHER_MIN, GATHER_PIECE, GATHER_CAP, TREE_PIECES, FIRE_LIGHT_HOURS, DIRS8, FIRE_FEED_HOURS, FIRE_MAX_HOURS, PRACTICE_CHUNKS, FAKE_LEARNS, SKILL_MAX,
-} from "./config.js?v=seven-1.16.1";
-import { hash01 } from "./rng.js?v=seven-1.16.1";
-import { whistleOf } from "./whistle.js?v=seven-1.16.1";
+} from "./config.js?v=seven-1.17.0";
+import { hash01 } from "./rng.js?v=seven-1.17.0";
+import { whistleOf } from "./whistle.js?v=seven-1.17.0";
 
 export const DAY_TASKS = Object.freeze(["free", "chop", "gather", "tend", "move", "scout", "camp"]);
 export const NIGHT_TASKS = Object.freeze(["sleep", "watch", "work", "free"]);
@@ -152,6 +152,15 @@ function updateMove(sim, m) {
   return false;
 }
 
+/** What an idle companion does by themselves: dusk -> tend the fire; a low pile -> their better of chop/gather; else keep camp. */
+const night0 = (sim) => isNight(sim);
+function idleJob(sim, m) {
+  const camp = sim.camp;
+  if (minuteOfDay(sim) >= DUSK - 90) return "tend";
+  if (campWood(camp) < 12) return (m.skills.cut || 0) > (m.skills.carry || 0) ? "chop" : "gather";
+  return "camp";
+}
+
 export function updateMate(sim, m) {
   const w = sim.world, camp = sim.camp;
   const t = m.task || (m.task = { kind: "free", chunk: 0, carry: 0 });
@@ -168,6 +177,16 @@ export function updateMate(sim, m) {
   let kind = t.kind === "work" ? (t.work || "free") : t.kind;
   if (kind === "move") kind = "camp";     // nothing to move (or done): keep camp
   if (m.following || !camp.built) kind = "follow";
+  if (t.auto && !m.following && camp.built && !handsFull(m) && !(t.carry > 0) && !night0(sim)) {
+    const pick = idleJob(sim, m);
+    if (pick !== t.kind) { setTask(m, pick); m.task.auto = true; return; }
+  }
+  if (kind === "free" && camp.built && !m.following && !isNight(sim)) {
+    // Idle with a camp up: find work, no orders needed. Picked from public facts only.
+    const pick = idleJob(sim, m);
+    setTask(m, pick); m.task.auto = true;
+    return;
+  }
   if (kind === "free") kind = "follow";
   const night = isNight(sim);
 

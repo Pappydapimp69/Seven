@@ -6,10 +6,10 @@
 // by hash from the seed, day and teller, so no rng is drawn and nothing comes
 // from a hand-written list of tells. Exactly one sentence differs.
 
-import { hash01 } from "./rng.js?v=seven-1.16.1";
-import { nameOff } from "./names.js?v=seven-1.16.1";
-import { WEATHER, DIRS8 } from "./config.js?v=seven-1.16.1";
-import { LANDMARKS, LANDMARK_NAME } from "./world.js?v=seven-1.16.1";
+import { hash01 } from "./rng.js?v=seven-1.17.0";
+import { nameOff } from "./names.js?v=seven-1.17.0";
+import { WEATHER, DIRS8 } from "./config.js?v=seven-1.17.0";
+import { LANDMARKS, LANDMARK_NAME } from "./world.js?v=seven-1.17.0";
 
 export function openDay(sim, day, weather) {
   sim.chronicle[day] = { weather, plan: null, events: [] };

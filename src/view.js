@@ -13,9 +13,9 @@
 // and scaled up; the canvas backing is CSS size × devicePixelRatio, re-read on
 // every resize and every DPR change.
 
-import { K } from "./world.js?v=seven-1.16.1";
-import { hash01 } from "./rng.js?v=seven-1.16.1";
-import { FIRE_LIGHT, DAWN, DUSK, PILE_CAP, SURPLUS_CAP } from "./config.js?v=seven-1.16.1";
+import { K } from "./world.js?v=seven-1.17.0";
+import { hash01 } from "./rng.js?v=seven-1.17.0";
+import { FIRE_LIGHT, DAWN, DUSK, PILE_CAP, SURPLUS_CAP } from "./config.js?v=seven-1.17.0";
 
 export const SLOT_COLORS = ["#e0b354", "#5fb3c9", "#d9745a", "#9fc46a", "#b98fd6", "#e88fb0"];
 export const HFOV = (72 * Math.PI) / 180;
