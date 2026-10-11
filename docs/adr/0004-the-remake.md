@@ -35,3 +35,10 @@ derived). The old game is at commit 98af10a (seven-0.41.0).
 MIRAGE's game, the scripted alpha day, the 3D tutorial camp and the old test
 suite are gone. CLAUDE.md's MIRAGE-specific notes no longer describe the code.
 Not built in 1.0: the keystone morning, crafting, a separate tutorial map.
+
+## Amended 2026-10-11 (seven-1.6.0)
+
+The top-down view broke the design's "first person, no overview" and was
+replaced by a first-person raycaster (`docs/blueprint-1.6-first-person.md`).
+The 2D canvas stays; only the view changed. Drift and visibility are guarded
+by `tests/view.mjs`.

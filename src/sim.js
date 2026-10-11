@@ -5,14 +5,14 @@
 // exported actions. Messages for the player go through sim.say(); they never
 // mention the hidden meter.
 
-import { createRng } from "./rng.js?v=seven-1.5.0";
-import { composeRoster } from "./names.js?v=seven-1.5.0";
-import { createWorld, areaOfRow, K, kindAt, walkable, lostSpots, fellTree } from "./world.js?v=seven-1.5.0";
-import { dist, cellOf, moveBody, nearestWalkable, walkTo } from "./body.js?v=seven-1.5.0";
-import { openDay, record, recordPlan, account } from "./chronicle.js?v=seven-1.5.0";
-import { makeCampAt, takeCampDown as campDown, campWood, stackWood, takeWood } from "./camp.js?v=seven-1.5.0";
-import { updateMate, setTask, chopAt, frontDeadfall, practice, moving, DAY_TASKS, NIGHT_TASKS } from "./mates.js?v=seven-1.5.0";
-import * as C from "./config.js?v=seven-1.5.0";
+import { createRng } from "./rng.js?v=seven-1.6.0";
+import { composeRoster } from "./names.js?v=seven-1.6.0";
+import { createWorld, areaOfRow, K, kindAt, walkable, lostSpots, fellTree } from "./world.js?v=seven-1.6.0";
+import { dist, cellOf, moveBody, nearestWalkable, walkTo } from "./body.js?v=seven-1.6.0";
+import { openDay, record, recordPlan, account } from "./chronicle.js?v=seven-1.6.0";
+import { makeCampAt, takeCampDown as campDown, campWood, stackWood, takeWood } from "./camp.js?v=seven-1.6.0";
+import { updateMate, setTask, chopAt, frontDeadfall, practice, moving, DAY_TASKS, NIGHT_TASKS } from "./mates.js?v=seven-1.6.0";
+import * as C from "./config.js?v=seven-1.6.0";
 
 // ---- the clock ---------------------------------------------------------------
 export const minutes = (sim) => sim.ticks * C.TICK_MIN;
@@ -37,7 +37,7 @@ export function createSim(opts = {}) {
   const names = opts.team ? opts.team.map((t) => t.name) : composeRoster(rng, C.TEAM);
   const sim = {
     v: 1, seed, rng, world, ticks: 0, day: 1, status: "playing", ending: null,
-    lead: { x: world.start.x, y: world.start.y + 1, facing: -Math.PI / 2, lucidity: 100, carry: 0, busy: null, asleep: false },
+    lead: { x: world.start.x, y: world.start.y + 1, facing: -Math.PI / 2, yaw: -Math.PI / 2, lucidity: 100, carry: 0, busy: null, asleep: false },
     mates: [], roster: [],
     // No camp to begin with: making one is the first thing you choose to do.
     camp: { x: world.start.x, y: world.start.y, built: !!opts.startCamp, pile: opts.startCamp ? 4 : 0, surplus: 0, fire: 0 },
@@ -90,12 +90,24 @@ function nearPeople(sim, p, r) {
   return out.sort((a, b) => dist(a, p) - dist(b, p));
 }
 
+/** In first person, E acts on what you face: within FACE_ARC of the view, or right at your feet. */
+const FACE_ARC = (75 * Math.PI) / 180;
+export function facing(sim, p) {
+  const L = sim.lead;
+  if (L.yaw == null) return true;
+  const d = Math.hypot(p.x - L.x, p.y - L.y);
+  if (d < 0.8) return true;
+  let a = Math.atan2(p.y - L.y, p.x - L.x) - L.yaw;
+  a = Math.atan2(Math.sin(a), Math.cos(a));
+  return Math.abs(a) <= FACE_ARC;
+}
+
 function nearDeadfall(sim) {
   const L = sim.lead;
   for (const d of sim.world.deadfalls) {
     if (d.cleared) continue;
     const px = Math.max(d.x0, Math.min(d.x1 + 1, L.x)), py = d.row + 0.5;
-    if (Math.hypot(L.x - px, L.y - py) <= C.REACH) return d;
+    if (Math.hypot(L.x - px, L.y - py) <= C.REACH && facing(sim, { x: px, y: py })) return d;
   }
   return null;
 }
@@ -105,11 +117,11 @@ function nearTree(sim) {
   for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
     if (kindAt(sim.world, c.cx + dx, c.cy + dy) !== K.TREE) continue;
     const d = Math.hypot(c.cx + dx + 0.5 - L.x, c.cy + dy + 0.5 - L.y);
-    if (d < bd && d <= C.REACH) { bd = d; best = sim.world.trees.find((t) => t.cx === c.cx + dx && t.cy === c.cy + dy); }
+    if (d < bd && d <= C.REACH && facing(sim, { x: c.cx + dx + 0.5, y: c.cy + dy + 0.5 })) { bd = d; best = sim.world.trees.find((t) => t.cx === c.cx + dx && t.cy === c.cy + dy); }
   }
   return best;
 }
-const nearPylon = (sim) => sim.world.pylons.find((p) => dist(p, sim.lead) <= C.REACH) || null;
+const nearPylon = (sim) => sim.world.pylons.find((p) => dist(p, sim.lead) <= C.REACH && facing(sim, p)) || null;
 
 /** What E does here, right now. {kind, label, ...} or null. */
 export function contextAction(sim) {
@@ -123,7 +135,7 @@ export function contextAction(sim) {
     if (!partner) return { kind: "none", label: "A pylon takes two pairs of hands" };
     return { kind: "light", label: `Light the pylon with ${partner.name}`, p, partner };
   }
-  const m = nearPeople(sim, sim.lead, C.REACH)[0];
+  const m = nearPeople(sim, sim.lead, C.REACH).filter((x) => facing(sim, x))[0];
   if (m && !m.asleep) return { kind: "ask", label: `Talk to ${m.name}`, m };
   const t = nearTree(sim);
   if (t) return { kind: "fell", label: "Fell the tree", t };

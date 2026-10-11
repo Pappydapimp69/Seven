@@ -20,10 +20,13 @@ and `docs/blueprint-1.0-remake.md` first.
   pylons, plans, the night, rescue and the twin, the far side.
 - `src/mates.js` — companions' tasks, one state machine.
 - `src/chronicle.js` — the day's facts and the account (a fake bends ONE fact).
-- `src/percept.js` — the only liar. `src/render.js` draws from it.
+- `src/percept.js` — the only liar. `src/view.js` draws from it: FIRST PERSON, a
+  grid raycaster (blueprint 1.6). There is no overview, on purpose.
+- `src/camp.js` — camp up/down, the woodpile (12) and the surplus stack (30).
 - `src/save.js`, `src/input.js`, `src/ui.js`, `src/main.js` (panels + loop).
 - Tests: `tests/run-all.sh` — world, sim, chronicle, save, triggers, a
-  whole-run bot (`tests/bot.mjs`), and `tests/play.mjs` in a real browser.
+  whole-run bot (`tests/bot.mjs`), `tests/play.mjs` and `tests/view.mjs` (drift,
+  turning, the 360° sweep) in a real browser.
 
 ## Before you edit anything
 

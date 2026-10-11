@@ -2,26 +2,28 @@
 // this file reads sim.pending and opens the matching panel, and the panel
 // answers through the sim's exported actions.
 
-import * as S from "./sim.js?v=seven-1.5.0";
-import { perceive } from "./percept.js?v=seven-1.5.0";
-import { createRenderer, SLOT_COLORS } from "./render.js?v=seven-1.5.0";
-import { createInput } from "./input.js?v=seven-1.5.0";
-import * as UI from "./ui.js?v=seven-1.5.0";
-import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.5.0";
-import { createRng } from "./rng.js?v=seven-1.5.0";
-import { composeRoster } from "./names.js?v=seven-1.5.0";
-import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, frontDeadfall } from "./mates.js?v=seven-1.5.0";
-import { areaOfRow } from "./world.js?v=seven-1.5.0";
-import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_INFO, NO_SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.5.0";
+import * as S from "./sim.js?v=seven-1.6.0";
+import { perceive } from "./percept.js?v=seven-1.6.0";
+import { createView, SLOT_COLORS } from "./view.js?v=seven-1.6.0";
+import { createInput } from "./input.js?v=seven-1.6.0";
+import * as UI from "./ui.js?v=seven-1.6.0";
+import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.6.0";
+import { createRng } from "./rng.js?v=seven-1.6.0";
+import { composeRoster } from "./names.js?v=seven-1.6.0";
+import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, frontDeadfall } from "./mates.js?v=seven-1.6.0";
+import { areaOfRow } from "./world.js?v=seven-1.6.0";
+import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_INFO, NO_SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.6.0";
 
-const BUILD = "seven-1.5.0";
+const BUILD = "seven-1.6.0";
 const esc = UI.esc;
 const store = (() => { try { return window.localStorage; } catch { return null; } })();
 const readJSON = (k, d) => { try { const v = store && store.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
 const writeJSON = (k, v) => { try { store && store.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } };
 
 const canvas = document.getElementById("game");
-const renderer = createRenderer(canvas);
+const renderer = createView(canvas);
+const TURN_RATE = 2.4;          // radians a second, keys / pad / touch stick
+const MOUSE_TURN = 0.0032;      // radians per device pixel of mouse travel
 let sim = null, view = null, headless = false, endShown = false, moved = false, lastSave = 0, acc = 0;
 
 const input = createInput({
@@ -81,7 +83,7 @@ function howPanel(back) {
   UI.open(`
     <h2>How to play</h2>
     <ul class="how">
-      <li><b>${label("move")}</b> — walk. North is up.</li>
+      <li><b>${label("move")}</b> — walk and step sideways. ${input.device === "pad" ? "The right stick" : input.device === "touch" ? "Drag on the right" : "The mouse (click to capture it) or ← →"} turns.</li>
       <li><b>${label("act")}</b> — chop the deadfall, fell a marked tree, talk to someone, light a pylon with someone beside you.</li>
       <li><b>${label("fire")}</b> — at camp, light or feed the fire from the woodpile.</li>
       <li><b>${label("camp")}</b> — make camp here, or take it down. The woodpile stays where it is.</li>
@@ -288,8 +290,8 @@ function endPanel() {
 
 // ---- what each control is called on the device in the player's hands ----------------
 const LABELS = {
-  key: { act: "E", fire: "F", camp: "Q", rest: "R", call: "C", pause: "Esc", move: "WASD or arrows" },
-  pad: { act: "A", fire: "X", camp: "LB", rest: "B", call: "Y", pause: "Start", move: "The left stick" },
+  key: { act: "E", fire: "F", camp: "Q", rest: "R", call: "C", pause: "Esc", move: "WASD" },
+  pad: { act: "A", fire: "X", camp: "LB", rest: "B", call: "Y", pause: "Start", move: "Left stick" },
   touch: { act: "Act", fire: "Fire", camp: "Camp", rest: "Rest", call: "Call", pause: "☰", move: "Drag on the left" },
 };
 const label = (name) => (LABELS[input.device] || LABELS.key)[name] || name;
@@ -298,7 +300,7 @@ const label = (name) => (LABELS[input.device] || LABELS.key)[name] || name;
 function hintText() {
   const k = (key, btn) => label(key === "WASD or arrows" ? "move" : { E: "act", F: "fire", Q: "camp", R: "rest", C: "call" }[key] || key, key, btn);
   const L = sim.lead, c = sim.camp, d = frontDeadfall(sim);
-  if (!moved) return `${k("WASD or arrows", "Drag on the left")} to walk. North is up.`;
+  if (!moved) return `${k("WASD or arrows", "Drag on the left")} to walk. ${input.device === "pad" ? "Right stick" : input.device === "touch" ? "Drag on the right" : "Mouse or ← →"} to look around.`;
   if (L.busy && L.busy.kind === "sleep") return "";
   if (!c.built && !sim.chronicle[1].events.some((e) => e.kind === "camp_made") && sim.day === 1)
     return `No camp yet. ${k("Q", "Camp")} makes one where you stand — nothing is safe at night without it.`;
@@ -327,17 +329,30 @@ function frame(now) {
     const v = input.poll();
     if (sim && sim.status === "playing" && !UI.isOpen() && !sim.pending) {
       if (Math.hypot(v.mx, v.my) > 0.1) moved = true;
+      // First person: turn, then turn the stick into a world direction from the
+      // lead's yaw. The sim only ever sees a world vector.
+      if (!sim.lead.busy || !sim.lead.asleep) {
+        const L = sim.lead;
+        L.yaw = (L.yaw ?? -Math.PI / 2) + v.turn * TURN_RATE * dt + v.look * MOUSE_TURN;
+      }
+      const wv = worldMove(sim.lead.yaw, v);
       const speed = sim.lead.busy ? (sim.lead.asleep ? SPEED_SLEEP : SPEED_BUSY) : 1;
       acc += dt * speed;
       const step = 1 / TICKS_PER_SEC;
       let n = 0;
-      while (acc >= step && n < 4000 && !sim.pending && sim.status === "playing") { S.tick(sim, sim.lead.busy ? {} : v); acc -= step; n++; }
+      while (acc >= step && n < 4000 && !sim.pending && sim.status === "playing") { S.tick(sim, sim.lead.busy ? {} : wv); acc -= step; n++; }
       if (sim.pending || sim.status !== "playing") acc = 0;
     }
     if (sim) afterTicks();
     if (sim) draw(dt);
   }
   requestAnimationFrame(frame);
+}
+
+/** Stick to world: forward is -my along yaw, strafe is mx to its right. */
+export function worldMove(yaw, v) {
+  const f = -v.my, s = v.mx, c = Math.cos(yaw), sn = Math.sin(yaw);
+  return { mx: c * f - sn * s, my: sn * f + c * s };
 }
 
 function afterTicks() {
@@ -354,6 +369,7 @@ function draw(dt) {
   view = perceive(sim);
   const L = sim.lead;
   const a = S.contextAction(sim);
+  view.lead.yaw = L.yaw ?? -Math.PI / 2;
   renderer.draw(sim.world, view, {
     mod: S.minuteOfDay(sim), real: performance.now() / 1000,
     busyFrac: L.busy && Number.isFinite(L.busy.total) ? 1 - L.busy.left / L.busy.total : null,
@@ -378,6 +394,8 @@ window.addEventListener("pagehide", save);
 window.__seven = {
   build: BUILD,
   get sim() { return sim; },
+  get visible() { return [...renderer.visible]; },
+  worldMove,
   get panel() { return UI.isOpen() ? document.querySelector("#modal .panel h2, #modal .panel h1")?.textContent : null; },
   set headless(v) { headless = !!v; },
   S, UI,

@@ -7,7 +7,7 @@ import { clearDeadfall } from "../src/world.js";
 
 const T = harness("sim");
 const HOUR = 60 / C.TICK_MIN;
-const fresh = (seed = 11) => { const s = S.createSim({ seed, startCamp: true }); S.applyPlan(s, "dawn", {}); return s; };
+const fresh = (seed = 11) => { const s = S.createSim({ seed, startCamp: true }); S.applyPlan(s, "dawn", {}); s.lead.yaw = null; return s; };
 const run = (s, ticks, inp = {}) => { for (let i = 0; i < ticks; i++) { if (s.pending) S.applyPlan(s, s.pending, {}); S.tick(s, inp); } };
 const setClock = (s, day, hhmm) => { s.ticks = Math.round(((day - 1) * 1440 + (hhmm - 6 * 60)) / C.TICK_MIN); s.day = day; s.duskSeen = day - 1; };
 
@@ -294,6 +294,16 @@ T.check("wood stacks on the pile to 12, then the surplus stack to 30; the fire t
   assert(s.camp.pile === 0 && s.camp.surplus === C.SURPLUS_CAP - 1 && s.camp.fire > 0, `lit from pile ${s.camp.pile} / surplus ${s.camp.surplus}`);
   S.campAction(s); finish(s);
   assert(s.piles.length === 1 && s.piles[0].surplus && s.piles[0].wood === C.SURPLUS_CAP - 1, `old piles ${JSON.stringify(s.piles)}`);
+});
+
+T.check("E acts on what you face: a trunk behind you is not chopped", () => {
+  const s = fresh(29);
+  const d = s.world.deadfalls[0], sp = chopSpot(s, d);
+  s.lead.x = sp.x; s.lead.y = sp.y;
+  s.lead.yaw = -Math.PI / 2;                 // facing north, at the trunk
+  assert(S.contextAction(s)?.kind === "chop", `facing the trunk: ${S.contextAction(s)?.kind}`);
+  s.lead.yaw = Math.PI / 2;                  // facing south, back to it
+  assert(S.contextAction(s)?.kind !== "chop", "chopped a trunk behind you");
 });
 
 void chopSpot;

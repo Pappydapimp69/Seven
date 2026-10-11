@@ -1,6 +1,11 @@
 // input.js — keyboard, touch and gamepad, into one movement vector and named
 // actions. Up on the screen is north, always: no camera, no rotation.
 //
+// First person: W/S forward and back, A/D strafe, ←/→ turn, the mouse looks
+// (pointer lock; movementX is CSS px, so it is scaled by devicePixelRatio —
+// Brain mirage#E10), the pad's right stick turns, a drag on the right half of a
+// touch screen looks.
+//
 // Actions: act, fire, call, camp, rest, pause. In a panel the same devices
 // move focus (up/down), press (act) and go back (back).
 
@@ -13,6 +18,8 @@ export function createInput({ onAction, stickEl, stickKnob }) {
   const keys = new Set();
   const vec = { mx: 0, my: 0 };
   const stick = { id: null, ox: 0, oy: 0, mx: 0, my: 0 };
+  const lookTouch = { id: null, x: 0 };
+  let look = 0;                            // accumulated look, in device pixels, since the last poll
   let pad = { buttons: [], up: false, down: false };
   let usedTouch = false;
   let device = "key";                     // the last thing the player touched: key | pad | touch
@@ -33,13 +40,25 @@ export function createInput({ onAction, stickEl, stickKnob }) {
   // Touch: a floating stick anywhere on the left half of the screen.
   const zone = document.getElementById("game");
   zone.addEventListener("pointerdown", (e) => {
-    if (e.pointerType === "mouse" || stick.id !== null || e.clientX > window.innerWidth * 0.55) return;
+    if (e.pointerType === "mouse") {
+      if (document.body.classList.contains("playing") && !document.getElementById("modal").classList.contains("on") && zone.requestPointerLock) zone.requestPointerLock();
+      return;
+    }
+    if (e.clientX > window.innerWidth * 0.55) {
+      if (lookTouch.id === null) { lookTouch.id = e.pointerId; lookTouch.x = e.clientX; device = "touch"; zone.setPointerCapture(e.pointerId); }
+      return;
+    }
+    if (stick.id !== null) return;
     usedTouch = true; device = "touch"; document.body.classList.add("touch");
     stick.id = e.pointerId; stick.ox = e.clientX; stick.oy = e.clientY; stick.mx = stick.my = 0;
     stickEl.style.left = e.clientX + "px"; stickEl.style.top = e.clientY + "px"; stickEl.classList.add("on");
     zone.setPointerCapture(e.pointerId);
   });
+  document.addEventListener("mousemove", (e) => {
+    if (document.pointerLockElement === zone) { look += e.movementX * (window.devicePixelRatio || 1); device = "key"; }
+  });
   zone.addEventListener("pointermove", (e) => {
+    if (e.pointerId === lookTouch.id) { look += (e.clientX - lookTouch.x) * 2.2; lookTouch.x = e.clientX; return; }
     if (e.pointerId !== stick.id) return;
     const R = 50;
     let dx = e.clientX - stick.ox, dy = e.clientY - stick.oy;
@@ -49,6 +68,7 @@ export function createInput({ onAction, stickEl, stickKnob }) {
     stickKnob.style.transform = `translate(${dx}px, ${dy}px)`;
   });
   const end = (e) => {
+    if (e.pointerId === lookTouch.id) { lookTouch.id = null; return; }
     if (e.pointerId !== stick.id) return;
     stick.id = null; stick.mx = stick.my = 0; stickEl.classList.remove("on"); stickKnob.style.transform = "";
   };
@@ -60,9 +80,11 @@ export function createInput({ onAction, stickEl, stickKnob }) {
   }
 
   function poll() {
-    let mx = 0, my = 0;
-    if (keys.has("KeyA") || keys.has("ArrowLeft")) mx -= 1;
-    if (keys.has("KeyD") || keys.has("ArrowRight")) mx += 1;
+    let mx = 0, my = 0, turn = 0;
+    if (keys.has("KeyA")) mx -= 1;
+    if (keys.has("KeyD")) mx += 1;
+    if (keys.has("ArrowLeft")) turn -= 1;
+    if (keys.has("ArrowRight")) turn += 1;
     if (keys.has("KeyW") || keys.has("ArrowUp")) my -= 1;
     if (keys.has("KeyS") || keys.has("ArrowDown")) my += 1;
     if (stick.id !== null) { mx += stick.mx; my += stick.my; }
@@ -70,6 +92,8 @@ export function createInput({ onAction, stickEl, stickKnob }) {
     if (gp) {
       const ax = gp.axes[0] || 0, ay = gp.axes[1] || 0;
       if (Math.hypot(ax, ay) > 0.2) { mx += ax; my += ay; device = "pad"; }
+      const rx = gp.axes[2] || 0;
+      if (Math.abs(rx) > 0.2) { turn += rx; device = "pad"; }
       const b = (i) => !!(gp.buttons[i] && gp.buttons[i].pressed);
       if (b(14)) mx -= 1; if (b(15)) mx += 1; if (b(12)) my -= 1; if (b(13)) my += 1;
       const map = { 0: "act", 2: "fire", 3: "call", 4: "camp", 5: "camp", 1: "rest", 9: "pause", 8: "pause" };
@@ -88,6 +112,8 @@ export function createInput({ onAction, stickEl, stickKnob }) {
     }
     const len = Math.hypot(mx, my);
     vec.mx = len > 1 ? mx / len : mx; vec.my = len > 1 ? my / len : my;
+    vec.turn = Math.max(-1, Math.min(1, turn));
+    vec.look = look; look = 0;
     return vec;
   }
 
