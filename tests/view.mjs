@@ -27,6 +27,7 @@ const ok = (c, m) => { if (!c) fails.push(m); else console.log("  ✓ " + m); };
 const deg = (r) => (r * 180) / Math.PI;
 const angDiff = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
 
+const mouseTurns = [];
 for (const scale of [1, 1.25, 2]) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: scale });
   const p = await ctx.newPage();
@@ -54,11 +55,82 @@ for (const scale of [1, 1.25, 2]) {
   await p.keyboard.down("KeyD"); await p.waitForTimeout(300); await p.keyboard.up("KeyD");
   const s1 = await p.evaluate(() => ({ x: window.__seven.sim.lead.x, y: window.__seven.sim.lead.y }));
   ok(s1.x - s0.x > 0.4 && Math.abs(s1.y - s0.y) < 0.01, `scale ${scale}: D steps right (east, facing north)`);
+  // Mouse look: the same PHYSICAL sweep turns the same at every device scale
+  // (movementX arrives in CSS px; mirage#E10). Then W follows the new heading.
+  const mouse = await p.evaluate(async () => {
+    const s = window.__seven.sim, cv = document.getElementById("game");
+    s.lead.x = s.camp.x; s.lead.y = s.camp.y; s.lead.yaw = -Math.PI / 2;
+    Object.defineProperty(document, "pointerLockElement", { configurable: true, get: () => cv });
+    const phys = 240;                                   // device pixels of hand movement
+    document.dispatchEvent(new MouseEvent("mousemove", { movementX: phys / devicePixelRatio }));
+    await new Promise((r) => setTimeout(r, 80));
+    Object.defineProperty(document, "pointerLockElement", { configurable: true, get: () => null });
+    return s.lead.yaw - -Math.PI / 2;
+  });
+  mouseTurns.push(mouse);
+  const m0 = await p.evaluate(() => ({ x: window.__seven.sim.lead.x, y: window.__seven.sim.lead.y, yaw: window.__seven.sim.lead.yaw }));
+  await p.keyboard.down("KeyW"); await p.waitForTimeout(250); await p.keyboard.up("KeyW");
+  const m1 = await p.evaluate(() => ({ x: window.__seven.sim.lead.x, y: window.__seven.sim.lead.y }));
+  ok(mouse > 0.3 && angDiff(Math.atan2(m1.y - m0.y, m1.x - m0.x), m0.yaw) < Math.PI / 180, `scale ${scale}: mouse turns ${deg(mouse).toFixed(1)}° and W follows it`);
+  // A gamepad: left stick up walks where you look; right stick turns.
+  const pad = await p.evaluate(async () => {
+    const s = window.__seven.sim;
+    s.lead.x = s.camp.x; s.lead.y = s.camp.y; s.lead.yaw = 0.9;
+    const btns = Array.from({ length: 17 }, () => ({ pressed: false, value: 0 }));
+    let axes = [0, -1, 0, 0];
+    navigator.getGamepads = () => [{ connected: true, axes, buttons: btns }];
+    const a = { x: s.lead.x, y: s.lead.y };
+    await new Promise((r) => setTimeout(r, 300));
+    axes = [0, 0, 0, 0];
+    const b = { x: s.lead.x, y: s.lead.y }, y0 = s.lead.yaw;
+    axes = [0, 0, 1, 0];
+    await new Promise((r) => setTimeout(r, 200));
+    axes = [0, 0, 0, 0];
+    await new Promise((r) => setTimeout(r, 50));
+    navigator.getGamepads = () => [];
+    return { dir: Math.atan2(b.y - a.y, b.x - a.x), moved: Math.hypot(b.x - a.x, b.y - a.y), turned: s.lead.yaw - y0 };
+  });
+  ok(pad.moved > 0.3 && angDiff(pad.dir, 0.9) < Math.PI / 180 && pad.turned > 0.2, `scale ${scale}: pad stick walks where you look (off ${deg(angDiff(pad.dir, 0.9)).toFixed(2)}°), right stick turns`);
+
   // Turning turns and does not walk.
   const t0 = await p.evaluate(() => ({ yaw: window.__seven.sim.lead.yaw, x: window.__seven.sim.lead.x, y: window.__seven.sim.lead.y }));
   await p.keyboard.down("ArrowRight"); await p.waitForTimeout(300); await p.keyboard.up("ArrowRight");
   const t1 = await p.evaluate(() => ({ yaw: window.__seven.sim.lead.yaw, x: window.__seven.sim.lead.x, y: window.__seven.sim.lead.y }));
   ok(t1.yaw - t0.yaw > 0.3 && t1.x === t0.x && t1.y === t0.y, `scale ${scale}: → turns right (${deg(t1.yaw - t0.yaw).toFixed(0)}°) without moving`);
+  await ctx.close();
+}
+
+ok(Math.max(...mouseTurns) - Math.min(...mouseTurns) < 1e-6, `the same hand movement turns the same at every scale (${mouseTurns.map((t) => deg(t).toFixed(2)).join(", ")}°)`);
+
+// Trailing followers (mirage#E6): walk a while with everyone following, then
+// stop and turn around once — every one of them must come into view.
+{
+  const ctx = await browser.newContext({ viewport: { width: 1000, height: 640 } });
+  const p = await ctx.newPage();
+  p.on("pageerror", (e) => errs.push(String(e)));
+  await p.goto(`http://127.0.0.1:${server.address().port}/`);
+  await p.waitForFunction(() => window.__seven);
+  const from = await p.evaluate(() => { const M = window.__seven; M.newRun({ seed: 16, startCamp: true }); M.S.applyPlan(M.sim, "dawn", {}); M.sim.lead.yaw = -Math.PI / 2; return { x: M.sim.lead.x, y: M.sim.lead.y }; });
+  // Hold W and steer along the trail like a player would (it bends every few rows).
+  await p.keyboard.down("KeyW");
+  for (let i = 0; i < 35; i++) {
+    await p.evaluate(() => { const s = window.__seven.sim, row = Math.floor(s.lead.y) - 2; s.lead.yaw = Math.atan2(row + 0.5 - s.lead.y, s.world.trailX[row] + 0.5 - s.lead.x); });
+    await p.waitForTimeout(100);
+  }
+  await p.keyboard.up("KeyW");
+  const walked = await p.evaluate((f) => Math.hypot(window.__seven.sim.lead.x - f.x, window.__seven.sim.lead.y - f.y), from);
+  ok(walked >= 8, `the lead walked ${walked.toFixed(1)} cells up the trail`);
+  await p.waitForTimeout(1500);                          // let them catch up and settle
+  await p.keyboard.press("Escape");
+  const seen = new Set();
+  for (let k = 0; k < 24; k++) {
+    await p.evaluate((k) => { window.__seven.sim.lead.yaw = -Math.PI / 2 + (k / 24) * Math.PI * 2; }, k);
+    await p.waitForTimeout(60);
+    for (const id of await p.evaluate(() => window.__seven.visible)) seen.add(id);
+  }
+  const info = await p.evaluate(() => { const s = window.__seven.sim; return s.mates.map((m) => `${m.id}@${Math.hypot(m.x - s.lead.x, m.y - s.lead.y).toFixed(1)}`); });
+  const ids = info.map((x) => x.split("@")[0]);
+  ok(ids.every((id) => seen.has(id)) && info.every((x) => +x.split("@")[1] <= 4), `after walking, every follower kept up (≤4 cells) and one turn round sees them all (${info.join(" ")}; saw ${[...seen].join(",")})`);
   await ctx.close();
 }
 
