@@ -65,6 +65,46 @@ fakes come from.
 - Facts: who dismantled, who carried, who lit the new fire.
 - Tutorial: the training camp is the first one you take down.
 
+## Decided by the owner, 2026-10-11
+
+- **Two decision points: dawn and dusk.** Dawn sets the day's tasks. At dusk
+  you choose who works through the night, who keeps watch, who sleeps. No
+  other plan changes.
+- **A task is a shift** (e.g. chopping = 2.5h). A member returns to camp when
+  the shift ends, or early if a full shift no longer fits before nightfall.
+  Sending them out again after dark is a dusk choice, at night risk.
+- **Pylons shield DEPTH, per area.** Area 1 has 3 pylons; every later area
+  rolls 2–4 (from the run seed). A lit pylon affects its CURRENT AREA only,
+  slows sanity loss for a day or two, then burns out.
+- **The fire shields NIGHT, camp only.** Its effect radius is the campsite
+  itself; its LIGHT reaches further. Light is not safety.
+- The fire burns out overnight unless stocked to last until morning or
+  someone is on watch feeding it.
+
+## Self-answered (owner may veto) — Brain had no prior art on any of these
+
+- **Shift lengths (clock hours):** chop 2.5; gather a load 1; set up camp 2;
+  dismantle 1; carrying camp = the walk. Watch = the whole night.
+- **Who the night takes:** weighted by exposure. Awake, alone and outside the
+  camp radius is highest; asleep inside camp with a lit fire is lowest.
+- **When the fire dies:** it hits everyone in camp, asleep or not — the fire's
+  radius IS the camp, so a dead fire is a camp with no shield. A short
+  woodpile is a camp-wide mistake, which is what makes stocking it matter.
+- **Stacking:** none needed — the fire and a pylon act on different
+  multipliers (night vs depth). A second pylon in an area with one already lit
+  does not stack; it only resets the burn to full, so it is mostly wasted.
+- **Fire by day:** no effect. It is a night shield.
+- **What forces forward motion:** each area's pylons are finite (3, then 2–4)
+  and burn out in a day or two, and nights keep taking people. Staying put is
+  losing slowly; nothing extra is needed.
+- **Pylon burn:** 36 clock hours, blue to red. While lit it cancels the depth
+  multiplier for its area (back to camp-level pressure). It never heals.
+- **An "area"** is the existing route band (seven of them); that is what "the
+  current area zone" means.
+- **Legibility:** safety reads from the world only — pylon glow colour, fire
+  light — never the HUD. The fire's light reaching past its protection is a
+  deliberate trap, consistent with "light is not safety".
+
 ## Open
 
 - What a "chunk" is for each task, in clock time.
