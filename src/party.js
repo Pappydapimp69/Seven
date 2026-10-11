@@ -27,6 +27,7 @@ import {
   SEVEN_CAMP_RADIUS, FIRE_FUEL_MAX,
 } from "./state.js?v=seven-0.40.0";
 import { effectiveKind, inChunk, CHUNK_HOURS, practice } from "./tasks.js?v=seven-0.40.0";
+import { takeFromPile } from "./seven.js?v=seven-0.40.0";
 
 // Higher band = worse. Lets a per-companion trait move the pylon-seeking
 // trigger EARLIER than the uniform BRITTLE tell everyone else gets, without
@@ -424,6 +425,16 @@ function runTask(sim, c, dt, band) {
     return true;
   }
   if (kind === "gather") {
+    // An old woodpile left at a camp that was taken down is hauled in before
+    // any tree is felled: it is wood already cut.
+    const pile = (sim.piles || []).filter((p) => p.wood > 0).sort((a, b) => dist(a, c) - dist(b, c))[0];
+    if (pile && sim.camp && sim.camp.built) {
+      if (!chunkFits(sim, c, CHUNK_HOURS.gather)) { toCamp(sim, c, dt, band); return true; }
+      if (dist(c, pile) > 2) { stepToward(sim, c, pile, followSpeed(dist(c, pile), band), dt); return true; }
+      t.carry += takeFromPile(sim, pile);
+      emit(sim, "haul", `${c.name} loads up from the old woodpile.`, { who: c.id, resource: "wood", amount: t.carry, x: pile.x, z: pile.z });
+      return true;
+    }
     const tree = sim.trees.filter((x) => !x.chopped).sort((a, b) => dist(a, c) - dist(b, c))[0];
     if (!tree) { toCamp(sim, c, dt, band); return true; }
     if (t.chunk === 0 && !chunkFits(sim, c, CHUNK_HOURS.gather)) { toCamp(sim, c, dt, band); return true; }

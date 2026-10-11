@@ -324,6 +324,8 @@ export function serializeRun(sim) {
     // Seven: the one you found and are walking home.
     found: sim.found ? { id: sim.found.id, x: sim.found.x, z: sim.found.z } : null,
     homeward: sim.homeward ? JSON.parse(JSON.stringify(sim.homeward)) : null,
+    // Seven: woodpiles left behind at old camps.
+    piles: (sim.piles || []).map((p) => ({ ...p })), pileSeq: sim.pileSeq || 0,
     // Ids only. The cells come back from the regenerated world; what cannot be
     // regenerated is the fact that somebody cut through them.
     deadfallsCleared: (sim.deadfalls || []).filter((d) => d.cleared).map((d) => d.id),
@@ -460,6 +462,8 @@ export function deserializeRun(data) {
   sim.fire = data.fire
     ? { x: data.fire.x, z: data.fire.z, fuel: data.fire.fuel ?? 0, builtAt: data.fire.builtAt ?? 0 }
     : null;
+  sim.piles = (data.piles || []).map((p) => ({ ...p }));
+  sim.pileSeq = data.pileSeq || 0;
   if (data.homeward) sim.homeward = JSON.parse(JSON.stringify(data.homeward));
   if (data.found) sim.found = { id: data.found.id, x: data.found.x, z: data.found.z, facing: 0 };
   if (data.camp) sim.camp = { x: data.camp.x, z: data.camp.z, pile: data.camp.pile ?? 0, built: !!data.camp.built };

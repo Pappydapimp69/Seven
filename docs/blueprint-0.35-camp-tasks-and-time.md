@@ -58,6 +58,9 @@ fakes come from.
 - Both take time; helpers speed them up. The kit is carried — carry skill
   matters, and losing the carrier mid-move hurts.
 - The fire belongs to the camp: a new camp needs a new fire.
+- The WOODPILE stays where it is when camp comes down (owner, 0.41). It is
+  moved separately, or not at all: the lead takes it by walking onto it, or a
+  gatherer hauls it in (up to 6 a trip) before felling anything new.
 - Between dismantle and rebuild there is no fire, no planning and no safe
   sleep. Being caught by dark mid-move is the intended mistake.
 - Sleeping without a camp is allowed, at much higher night risk.

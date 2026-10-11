@@ -660,7 +660,7 @@ export function createRenderer(canvas, sim) {
   // ---- monoliths, pylons, figures: pooled and rebuilt from perception ------
   const monolithGeo = new THREE.BoxGeometry(1.5, 7.4, 1.1);
   const ringGeo = new THREE.TorusGeometry(PYLON_RADIUS, 0.09, 6, 40);
-  const pool = { monoliths: new Map(), pylons: new Map(), figures: new Map(), items: new Map(), trees: new Map(), stones: new Map(), sites: new Map(), fires: new Map(), falls: new Map(), marks: new Map() };
+  const pool = { monoliths: new Map(), pylons: new Map(), figures: new Map(), items: new Map(), trees: new Map(), stones: new Map(), sites: new Map(), fires: new Map(), falls: new Map(), marks: new Map(), piles: new Map() };
 
   function makeMonolith() {
     const g = new THREE.Group();
@@ -860,6 +860,24 @@ export function createRenderer(canvas, sim) {
       log.rotation.y = (i - 1) * 0.18;
       g.add(log);
     }
+    g.userData = {};
+    scene.add(g);
+    return g;
+  }
+
+  // A woodpile: short split logs, stacked. Seven draws the camp's pile and any
+  // pile left behind at a camp that was taken down — it stays where it was.
+  function makePile() {
+    const g = new THREE.Group();
+    const mat = new THREE.MeshStandardMaterial({ color: 0x6b4f33, roughness: 1, flatShading: true });
+    for (let i = 0; i < 6; i++) {
+      const log = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.18, 1.1, 5), mat);
+      log.rotation.z = Math.PI / 2;
+      log.position.set(0, 0.18 + Math.floor(i / 3) * 0.3, ((i % 3) - 1) * 0.34);
+      g.add(log);
+    }
+    g.userData = {};
+    scene.add(g);
     return g;
   }
 
@@ -1414,11 +1432,21 @@ export function createRenderer(canvas, sim) {
     // into, and percept.js lies about what things ARE, never about whether the
     // ground is solid.
     const standing = (sim.deadfalls || []).filter((d) => !d.cleared);
+    // Woodpiles: the camp's own (beside the fire) and any left at old camps.
+    const piles = [...(sim.piles || []).filter((p) => p.wood > 0)];
+    if (sim.camp && sim.camp.built && (sim.camp.pile || 0) > 0) piles.push({ id: "campPile", x: sim.camp.x + 2.2, z: sim.camp.z + 1.2 });
+    syncPool(pool.piles, piles, makePile);
+    for (const obj of pool.piles.values()) {
+      if (!obj.visible) continue;
+      const it = obj.userData.item;
+      obj.position.set(it.x, terrainHeight(it.x, it.z), it.z);
+    }
     syncPool(pool.falls, standing, makeFall);
     for (const obj of pool.falls.values()) {
-      obj.position.y = terrainHeight(obj.position.x, obj.position.z);
-      const d = standing.find((x) => Math.abs(x.x - obj.position.x) < 0.01 && Math.abs(x.z - obj.position.z) < 0.01);
-      if (d) obj.rotation.y = d.horiz ? 0 : Math.PI / 2;
+      if (!obj.visible) continue;
+      const d = obj.userData.item;
+      obj.position.set(d.x, terrainHeight(d.x, d.z), d.z);
+      obj.rotation.y = d.horiz ? 0 : Math.PI / 2;
     }
     const shownFire = percept.shownFire;
     syncPool(pool.fires, shownFire ? [{ id: "fire", x: shownFire.x, z: shownFire.z }] : [], makeFire);

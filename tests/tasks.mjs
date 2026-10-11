@@ -41,6 +41,15 @@ check("a gatherer fells a tree and carries the wood onto the pile", () => {
   assert(sim.camp.pile > 0, `pile ${sim.camp.pile}, carrying ${c.task.carry}`);
   assert(sim.wood === 0, "gathered wood went into the lead's pack");
 });
+check("a gatherer hauls an old woodpile in before felling trees", () => {
+  const sim = setup();
+  const c = sim.companions[1];
+  sim.trees.forEach((t) => { t.chopped = true; });   // nothing to fell: only the pile
+  sim.piles = [{ id: "pile1", x: sim.camp.x + 6, z: sim.camp.z + 2, wood: 4 }];
+  setTask(c, "gather", 1);
+  run(sim, 60);
+  assert(sim.camp.pile === 4 && (sim.piles || []).length === 0, `pile ${sim.camp.pile}, old piles ${JSON.stringify(sim.piles)}, carrying ${c.task.carry}`);
+});
 check("a chunk that will not fit before dusk is not started", () => {
   const sim = setup();
   sim.time = 11.8 * GAME_HOUR;         // 17:48 — less than half an hour of light

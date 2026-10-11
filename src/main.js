@@ -20,7 +20,7 @@ import {
   startKeystoneMorning, advanceKeystoneMorning,
 } from "./expedition.js?v=seven-0.40.0";
 import { DEFAULT_TEAM, applyTeamLoadout, teamSkill, finalDecision, finalCount, nearbyIds, campIds, FIRE_DAYLIGHT, restCheck, raiseSkill, SKILL_MAX, createCamp, depositWood, dismantleCamp, makeCamp,
-  dawnCalls, loudWord, missingSpot, checkFound, stepFound, startHomeward, lightHomePylon, homewardOver, finishHomeward, nightExposure } from "./seven.js?v=seven-0.40.0";
+  dawnCalls, loudWord, missingSpot, checkFound, stepFound, startHomeward, lightHomePylon, homewardOver, finishHomeward, nightExposure, pickUpPiles } from "./seven.js?v=seven-0.40.0";
 import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.40.0";
 import { createRenderer } from "./render.js?v=seven-0.40.0";
 import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.40.0";
@@ -1071,7 +1071,7 @@ function campAction() {
     if (!r.ok) { hudSay("You are not at the camp."); return; }
     recordFact(e, { kind: "breakcamp", actor: "you", object: "camp", withWhom: nearbyIds(sim, "you", CORROBORATE_RADIUS), t: sim.time });
     spendSevenDaylight(sim, 1, "camp");
-    hudSay("Camp comes down. The pile goes on your backs.");
+    hudSay("Camp comes down. The woodpile stays where it is.");
   } else {
     makeCamp(sim);
     recordFact(e, { kind: "makecamp", actor: "you", object: "camp", withWhom: nearbyIds(sim, "you", CORROBORATE_RADIUS), t: sim.time });
@@ -2081,6 +2081,8 @@ function step(dt, intent) {
   sim.events.push(...tickEvents);
   if (ex) {
     ex.daylight = Number(sevenClock(sim.time).hoursToDusk.toFixed(2));
+    const took = pickUpPiles(sim);
+    if (took > 0) hudSay(`You take ${took} wood from the old pile.`);
     const stacked = depositWood(sim, CAMP_RADIUS);
     if (stacked > 0) hudSay(`You stack ${stacked} wood on the pile.`);
     sevenPlanTriggers(sim);

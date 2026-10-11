@@ -196,11 +196,37 @@ export function dismantleCamp(sim, radius) {
   const c = sim.camp;
   if (!c || !c.built) return { ok: false, reason: "no-camp" };
   if (Math.hypot(sim.player.x - c.x, sim.player.z - c.z) > radius) return { ok: false, reason: "away" };
-  sim.wood = (sim.wood || 0) + (c.pile || 0);
+  // THE WOODPILE STAYS WHERE IT IS (owner, 2026-10-11). It has to be moved
+  // separately — the lead walks over and takes it, or a gatherer hauls it in
+  // loads — or not at all.
+  if ((c.pile || 0) > 0) {
+    sim.piles = sim.piles || [];
+    sim.piles.push({ id: `pile${(sim.pileSeq = (sim.pileSeq || 0) + 1)}`, x: c.x, z: c.z, wood: c.pile });
+  }
   c.pile = 0;
   c.built = false;
   sim.fire = null;
   return { ok: true };
+}
+
+/** A load a gatherer carries from an old pile in one trip. */
+export const HAUL_LOAD = 6;
+export const PILE_REACH = 2.5;
+/** Walking onto an old pile, the lead takes all of it. Returns how much. */
+export function pickUpPiles(sim) {
+  let n = 0;
+  for (const p of sim.piles || []) {
+    if (p.wood > 0 && Math.hypot(sim.player.x - p.x, sim.player.z - p.z) <= PILE_REACH) { n += p.wood; p.wood = 0; }
+  }
+  if (n) { sim.wood = (sim.wood || 0) + n; sim.piles = sim.piles.filter((p) => p.wood > 0); }
+  return n;
+}
+/** Up to HAUL_LOAD from one old pile, for a gatherer. */
+export function takeFromPile(sim, pile, max = HAUL_LOAD) {
+  const n = Math.min(max, pile.wood || 0);
+  pile.wood -= n;
+  if (pile.wood <= 0) sim.piles = (sim.piles || []).filter((p) => p !== pile);
+  return n;
 }
 export function makeCamp(sim) {
   const c = sim.camp;
