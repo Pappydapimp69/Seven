@@ -193,3 +193,29 @@ fakes come from.
 - Legibility: safety must read from the world (light, colour, pylon glow),
   never the HUD. Brain T1 (open): a reactive hallucination vs "stable reads as
   a place".
+
+## What was built (seven-0.35.0) — items 1–5 and 9 of the build list
+
+- **Map:** `src/trail.js` — 120 cells a side (~310 m), seven areas south to
+  north. Area 1 dense forest + one path + a deadfall; clearings off the trail
+  later; deadfalls on the trail in areas 1, 3, 5 are the only way north.
+  Renderer draws only trees within 4 cells of walkable ground (551k → 124k
+  triangles). `tests/trail.mjs`.
+- **Clock:** 1 game hour = 30 sim s; 06:00 dawn, 18:00 dusk. Work and sleep
+  run the simulation faster (8 / 60 ticks a frame); an action's hours run at
+  20. Dawn resolves the night. Seven drain scaled 0.045 (halved asleep) —
+  unscaled, the party went under before 20:00 on day one. `tests/seven.mjs`.
+- **Deadfall:** chop = 15 s hold (half an hour); 1/16 per unskilled chop; cut
+  skill +15%/level; lucid companions within 6 m chop alongside; progress saved.
+  `tests/chop.mjs`.
+- **Camp:** `sim.camp` movable, one at a time; take down 1h / make 2h (pause
+  menu). Woodpile fills when you walk in; fire lit/fed from the pile at camp;
+  lit 3h, +1.5h per wood, full = 12h; shield = campsite only. `tests/campfire.mjs`.
+- **Pylons:** lit pylon cancels depth for its area for 36h, drawn blue→red.
+  `tests/pylonzone.mjs`.
+- **HUD:** compass, wood, pile, time, day/night, area.
+
+Not built yet (items 6–8, 10): tasks and the dawn/dusk screens, the
+disappearance rework, the stronger fake with practice growth, the ending.
+Companions do not take tasks yet — they follow you and help chop when near.
+Numbers to watch in play: chop length, fire stocking, the 0.045 drain scale.
