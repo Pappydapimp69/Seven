@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="674" viewBox="0 0 760 674" font-family="system-ui, -apple-system, Segoe UI, sans-serif">
+  <rect width="760" height="674" fill="#fcfcfb"/>
+  <text x="24" y="38" font-size="21" font-weight="700" fill="#0b0b0b">Seven, played by the bot — 8 runs, after tuning</text>
+  <text x="24" y="62" font-size="14" fill="#52514e">7 of 8 reached home · 5.1 days on average · each figure is one of the five teammates</text>
+  <g opacity="1"><circle cx="33" cy="86" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="24" y="95" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><text x="50" y="104" font-size="13" fill="#0b0b0b">went home</text><g opacity="1"><circle cx="215" cy="86" r="6.5" fill="#eb6834" stroke="#eb6834" stroke-width="2"/>
+    <rect x="206" y="95" width="18" height="22" rx="7" fill="#eb6834" stroke="#eb6834" stroke-width="2"/><text x="215" y="107" text-anchor="middle" font-size="13" font-weight="700" fill="#fcfcfb">?</text></g><text x="232" y="104" font-size="13" fill="#0b0b0b">a fake in their place</text><g opacity="1"><circle cx="397" cy="86" r="6.5" fill="none" stroke="#1baf7a" stroke-width="2"/>
+    <rect x="388" y="95" width="18" height="22" rx="7" fill="none" stroke="#1baf7a" stroke-width="2"/></g><text x="414" y="104" font-size="13" fill="#0b0b0b">real, left at the edge</text><g opacity="0.55"><circle cx="579" cy="86" r="6.5" fill="#8b8a85" stroke="#8b8a85" stroke-width="2"/>
+    <rect x="570" y="95" width="18" height="22" rx="7" fill="#8b8a85" stroke="#8b8a85" stroke-width="2"/><line x1="570" y1="116" x2="588" y2="90" stroke="#fcfcfb" stroke-width="2"/></g><text x="596" y="104" font-size="13" fill="#0b0b0b">lost (party dissolved)</text>
+  <line x1="24" y1="128" x2="736" y2="128" stroke="#e4e3df" stroke-width="1"/>
+  <text x="24" y="168" font-size="13" fill="#52514e">seed 1000</text>
+    <text x="24" y="186" font-size="15" font-weight="600" fill="#0b0b0b">day 5</text><g opacity="1"><circle cx="150" cy="156" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="141" y="165" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><g opacity="1"><circle cx="184" cy="156" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="175" y="165" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><g opacity="1"><circle cx="218" cy="156" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="209" y="165" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><g opacity="1"><circle cx="252" cy="156" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="243" y="165" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><g opacity="1"><circle cx="286" cy="156" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="277" y="165" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><text x="335" y="168" font-size="15" font-weight="600" fill="#0b0b0b">5 home</text>
+    <text x="335" y="187" font-size="13" fill="#52514e">1 went missing · 1 brought back</text><text x="24" y="222" font-size="13" fill="#52514e">seed 1037</text>
+    <text x="24" y="240" font-size="15" font-weight="600" fill="#0b0b0b">day 4</text><g opacity="1"><circle cx="150" cy="210" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="141" y="219" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><g opacity="1"><circle cx="184" cy="210" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="175" y="219" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><g opacity="1"><circle cx="218" cy="210" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="209" y="219" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><g opacity="1"><circle cx="252" cy="210" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="243" y="219" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><g opacity="1"><circle cx="286" cy="210" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="277" y="219" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><text x="335" y="222" font-size="15" font-weight="600" fill="#0b0b0b">5 home</text>
+    <text x="335" y="241" font-size="13" fill="#52514e">1 went missing · 1 brought back</text><text x="24" y="276" font-size="13" fill="#52514e">seed 1074</text>
+    <text x="24" y="294" font-size="15" font-weight="600" fill="#0b0b0b">day 10</text><g opacity="0.55"><circle cx="150" cy="264" r="6.5" fill="#8b8a85" stroke="#8b8a85" stroke-width="2"/>
+    <rect x="141" y="273" width="18" height="22" rx="7" fill="#8b8a85" stroke="#8b8a85" stroke-width="2"/><line x1="141" y1="294" x2="159" y2="268" stroke="#fcfcfb" stroke-width="2"/></g><g opacity="0.55"><circle cx="184" cy="264" r="6.5" fill="#8b8a85" stroke="#8b8a85" stroke-width="2"/>
+    <rect x="175" y="273" width="18" height="22" rx="7" fill="#8b8a85" stroke="#8b8a85" stroke-width="2"/><line x1="175" y1="294" x2="193" y2="268" stroke="#fcfcfb" stroke-width="2"/></g><g opacity="0.55"><circle cx="218" cy="264" r="6.5" fill="#8b8a85" stroke="#8b8a85" stroke-width="2"/>
+    <rect x="209" y="273" width="18" height="22" rx="7" fill="#8b8a85" stroke="#8b8a85" stroke-width="2"/><line x1="209" y1="294" x2="227" y2="268" stroke="#fcfcfb" stroke-width="2"/></g><g opacity="0.55"><circle cx="252" cy="264" r="6.5" fill="#8b8a85" stroke="#8b8a85" stroke-width="2"/>
+    <rect x="243" y="273" width="18" height="22" rx="7" fill="#8b8a85" stroke="#8b8a85" stroke-width="2"/><line x1="243" y1="294" x2="261" y2="268" stroke="#fcfcfb" stroke-width="2"/></g><g opacity="0.55"><circle cx="286" cy="264" r="6.5" fill="#8b8a85" stroke="#8b8a85" stroke-width="2"/>
+    <rect x="277" y="273" width="18" height="22" rx="7" fill="#8b8a85" stroke="#8b8a85" stroke-width="2"/><line x1="277" y1="294" x2="295" y2="268" stroke="#fcfcfb" stroke-width="2"/></g><text x="335" y="276" font-size="15" font-weight="600" fill="#0b0b0b">the party dissolved</text>
+    <text x="335" y="295" font-size="13" fill="#52514e">5 went missing · 3 brought back · 2 fakes kept</text><text x="24" y="330" font-size="13" fill="#52514e">seed 1111</text>
+    <text x="24" y="348" font-size="15" font-weight="600" fill="#0b0b0b">day 5</text><g opacity="1"><circle cx="150" cy="318" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="141" y="327" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><g opacity="1"><circle cx="184" cy="318" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="175" y="327" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><g opacity="1"><circle cx="218" cy="318" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="209" y="327" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><g opacity="1"><circle cx="252" cy="318" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="243" y="327" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><g opacity="1"><circle cx="286" cy="318" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="277" y="327" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><text x="335" y="330" font-size="15" font-weight="600" fill="#0b0b0b">5 home</text>
+    <text x="335" y="349" font-size="13" fill="#52514e">nobody went missing</text><text x="24" y="384" font-size="13" fill="#52514e">seed 1148</text>
+    <text x="24" y="402" font-size="15" font-weight="600" fill="#0b0b0b">day 4</text><g opacity="1"><circle cx="150" cy="372" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="141" y="381" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><g opacity="1"><circle cx="184" cy="372" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="175" y="381" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><g opacity="1"><circle cx="218" cy="372" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="209" y="381" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><g opacity="1"><circle cx="252" cy="372" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="243" y="381" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><g opacity="1"><circle cx="286" cy="372" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="277" y="381" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><text x="335" y="384" font-size="15" font-weight="600" fill="#0b0b0b">5 home</text>
+    <text x="335" y="403" font-size="13" fill="#52514e">nobody went missing</text><text x="24" y="438" font-size="13" fill="#52514e">seed 1185</text>
+    <text x="24" y="456" font-size="15" font-weight="600" fill="#0b0b0b">day 4</text><g opacity="1"><circle cx="150" cy="426" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="141" y="435" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><g opacity="1"><circle cx="184" cy="426" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="175" y="435" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><g opacity="1"><circle cx="218" cy="426" r="6.5" fill="none" stroke="#1baf7a" stroke-width="2"/>
+    <rect x="209" y="435" width="18" height="22" rx="7" fill="none" stroke="#1baf7a" stroke-width="2"/></g><g opacity="1"><circle cx="252" cy="426" r="6.5" fill="#eb6834" stroke="#eb6834" stroke-width="2"/>
+    <rect x="243" y="435" width="18" height="22" rx="7" fill="#eb6834" stroke="#eb6834" stroke-width="2"/><text x="252" y="447" text-anchor="middle" font-size="13" font-weight="700" fill="#fcfcfb">?</text></g><g opacity="1"><circle cx="286" cy="426" r="6.5" fill="#eb6834" stroke="#eb6834" stroke-width="2"/>
+    <rect x="277" y="435" width="18" height="22" rx="7" fill="#eb6834" stroke="#eb6834" stroke-width="2"/><text x="286" y="447" text-anchor="middle" font-size="13" font-weight="700" fill="#fcfcfb">?</text></g><text x="335" y="438" font-size="15" font-weight="600" fill="#0b0b0b">2 home</text>
+    <text x="335" y="457" font-size="13" fill="#52514e">2 went missing · 2 fakes kept · 1 left at the edge</text><text x="24" y="492" font-size="13" fill="#52514e">seed 1222</text>
+    <text x="24" y="510" font-size="15" font-weight="600" fill="#0b0b0b">day 5</text><g opacity="1"><circle cx="150" cy="480" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="141" y="489" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><g opacity="1"><circle cx="184" cy="480" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="175" y="489" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><g opacity="1"><circle cx="218" cy="480" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="209" y="489" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><g opacity="1"><circle cx="252" cy="480" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="243" y="489" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><g opacity="1"><circle cx="286" cy="480" r="6.5" fill="#eb6834" stroke="#eb6834" stroke-width="2"/>
+    <rect x="277" y="489" width="18" height="22" rx="7" fill="#eb6834" stroke="#eb6834" stroke-width="2"/><text x="286" y="501" text-anchor="middle" font-size="13" font-weight="700" fill="#fcfcfb">?</text></g><text x="335" y="492" font-size="15" font-weight="600" fill="#0b0b0b">4 home</text>
+    <text x="335" y="511" font-size="13" fill="#52514e">2 went missing · 1 brought back · 1 fake kept</text><text x="24" y="546" font-size="13" fill="#52514e">seed 1259</text>
+    <text x="24" y="564" font-size="15" font-weight="600" fill="#0b0b0b">day 4</text><g opacity="1"><circle cx="150" cy="534" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="141" y="543" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><g opacity="1"><circle cx="184" cy="534" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="175" y="543" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><g opacity="1"><circle cx="218" cy="534" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="209" y="543" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><g opacity="1"><circle cx="252" cy="534" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="243" y="543" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><g opacity="1"><circle cx="286" cy="534" r="6.5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/>
+    <rect x="277" y="543" width="18" height="22" rx="7" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/></g><text x="335" y="546" font-size="15" font-weight="600" fill="#0b0b0b">5 home</text>
+    <text x="335" y="565" font-size="13" fill="#52514e">nobody went missing</text>
+  <line x1="24" y1="604" x2="736" y2="604" stroke="#e4e3df" stroke-width="1"/>
+  <text x="24" y="628" font-size="13" fill="#52514e">Before tuning: 8 of 8 home on day 2, nobody ever went missing —</text>
+  <text x="24" y="648" font-size="13" fill="#52514e">the woods were crossed before the first night could take anyone.</text>
+</svg>
