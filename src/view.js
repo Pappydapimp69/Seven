@@ -13,9 +13,9 @@
 // and scaled up; the canvas backing is CSS size × devicePixelRatio, re-read on
 // every resize and every DPR change.
 
-import { K } from "./world.js?v=seven-1.9.0";
-import { hash01 } from "./rng.js?v=seven-1.9.0";
-import { FIRE_LIGHT, DAWN, DUSK, PILE_CAP, SURPLUS_CAP } from "./config.js?v=seven-1.9.0";
+import { K } from "./world.js?v=seven-1.10.0";
+import { hash01 } from "./rng.js?v=seven-1.10.0";
+import { FIRE_LIGHT, DAWN, DUSK, PILE_CAP, SURPLUS_CAP } from "./config.js?v=seven-1.10.0";
 
 export const SLOT_COLORS = ["#e0b354", "#5fb3c9", "#d9745a", "#9fc46a", "#b98fd6", "#e88fb0"];
 export const HFOV = (72 * Math.PI) / 180;
@@ -26,7 +26,7 @@ const FLOOR = {
 };
 const hexRgb = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
 
-export function createView(canvas) {
+export function createView(canvas, opts = {}) {
   const ctx = canvas.getContext("2d");
   const off = document.createElement("canvas");
   const o = off.getContext("2d");
@@ -80,11 +80,18 @@ export function createView(canvas) {
     }
     return c;
   }
-  const personSprite = (color, asleep, carrying) => sprite(`p:${color}:${asleep}:${carrying}`, asleep ? 64 : 32, asleep ? 20 : 64, (g, w, h) => {
+  const personSprite = (color, asleep, carrying, pose = 0) => sprite(`p:${color}:${asleep}:${carrying}:${pose}`, asleep ? 64 : 40, asleep ? 20 : 64, (g, w, h) => {
     if (asleep) {
       g.fillStyle = color; g.beginPath(); g.ellipse(w * 0.45, h * 0.6, w * 0.36, h * 0.32, 0, 0, Math.PI * 2); g.fill();
       g.fillStyle = "#e9d2b5"; g.beginPath(); g.arc(w * 0.86, h * 0.55, h * 0.3, 0, Math.PI * 2); g.fill();
       return;
+    }
+    // pose 1/2: an axe raised / struck (chopping, felling, building).
+    if (pose) {
+      g.save(); g.translate(w * 0.62, h * 0.42); g.rotate(pose === 1 ? -2.2 : 0.5);
+      g.fillStyle = "#6b4a2a"; g.fillRect(-1.5, -h * 0.34, 3, h * 0.36);
+      g.fillStyle = "#9aa0a2"; g.fillRect(-1.5, -h * 0.36, 8, 6);
+      g.restore();
     }
     g.fillStyle = "#2b2420"; g.fillRect(w * 0.32, h * 0.72, w * 0.14, h * 0.28); g.fillRect(w * 0.54, h * 0.72, w * 0.14, h * 0.28);
     g.fillStyle = color; g.beginPath(); g.ellipse(w / 2, h * 0.5, w * 0.34, h * 0.26, 0, 0, Math.PI * 2); g.fill();
@@ -253,9 +260,15 @@ export function createView(canvas) {
         else if (k === K.STUMP) add(cx + 0.5, cy + 0.5, stumpSprite(), 0.45, 0.22, { key: "stump" });
       }
     }
+    if (view.building) {
+      // A camp going up: stakes first, then the tent rises with the work.
+      const b = view.building, f = Math.max(0.05, b.frac);
+      add(b.x - 1.6, b.y - 1.4, tentSprite(), 1.1 * Math.min(1, 0.4 + f), 0.76 * f, { key: "tent" });
+      add(b.x, b.y, paintFire(0, clock.real), 0.5, 0.62, { bright: true });
+    }
     if (view.camp) {
-      const c = view.camp;
-      add(c.x - 1.6, c.y - 1.4, tentSprite(), 1.1, 0.76, { key: "tent" });
+      const c = view.camp, down = view.takingDown ?? 1;
+      add(c.x - 1.6, c.y - 1.4, tentSprite(), 1.1, 0.76 * Math.max(0.05, down), { key: "tent" });
       add(c.x, c.y, paintFire(c.fire, clock.real), 0.5, 0.62, { bright: true });
       const pr = c.pile <= 0 ? 0 : Math.min(4, Math.ceil((c.pile / PILE_CAP) * 4));
       add(c.x + 1.4, c.y + 1.2, pileSprite(pr), 0.62, 0.52, { key: `pile:${pr}` });
@@ -274,8 +287,9 @@ export function createView(canvas) {
     }
     for (const p of view.people) {
       const color = SLOT_COLORS[p.slot % SLOT_COLORS.length];
-      add(p.x, p.y, personSprite(color, p.asleep, p.carrying), p.asleep ? 0.95 : 0.5, p.asleep ? 0.3 : 0.98,
-        { key: `p:${color}:${p.asleep}:${p.carrying}`, person: p });
+      const pose = p.work && !p.asleep ? 1 + (Math.floor(clock.real * 2.4 + p.slot * 0.37) % 2) : 0;
+      add(p.x, p.y, personSprite(color, p.asleep, p.carrying, pose), p.asleep ? 0.95 : 0.62, p.asleep ? 0.3 : 0.98,
+        { key: `p:${color}:${p.asleep}:${p.carrying}:${pose}`, person: p });
     }
 
     const invDet = 1 / (plx * dy - dx * ply);
@@ -329,6 +343,43 @@ export function createView(canvas) {
       ctx.fillStyle = "#f4ead6"; ctx.fillText(lb.name, x, y);
     }
     ctx.textAlign = "start";
+    // Your own hands: an axe while chopping or felling, a mallet while making
+    // or taking down camp. A strike every 0.7 s, with chips and a thunk.
+    const tool = { chop: "axe", fell: "axe", camp_make: "mallet", camp_down: "mallet" }[L.busy];
+    if (tool && !L.asleep) {
+      const period = 0.7, ph = (clock.real % period) / period;
+      const ang = ph < 0.62 ? -1.05 + 0.25 * Math.sin((ph / 0.62) * Math.PI) * 0.3 : -1.05 + ((ph - 0.62) / 0.38) ** 0.5 * 1.45;
+      if (ph < lastPhase) {                      // a new swing: the last one struck
+        strikes.push({ t: clock.real, seed: Math.random() });
+        if (opts.onStrike) opts.onStrike(tool);
+      }
+      lastPhase = ph;
+      const s = Math.min(W, H) / 520;
+      ctx.save();
+      ctx.translate(W * 0.78, H * 1.02); ctx.rotate(ang); ctx.scale(s, s);
+      ctx.fillStyle = "#5a3d22"; ctx.fillRect(-9, -330, 18, 330);
+      ctx.fillStyle = "#3d2a17"; ctx.fillRect(-9, -330, 5, 330);
+      if (tool === "axe") {
+        ctx.fillStyle = "#8f9597"; ctx.beginPath(); ctx.moveTo(-10, -320); ctx.lineTo(-95, -350); ctx.lineTo(-100, -270); ctx.lineTo(-10, -282); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = "#cfd4d6"; ctx.fillRect(-100, -350, 8, 80);
+      } else {
+        ctx.fillStyle = "#6b4a2a"; ctx.fillRect(-60, -360, 120, 56);
+        ctx.fillStyle = "#4e3520"; ctx.fillRect(-60, -360, 120, 12);
+      }
+      ctx.restore();
+    } else lastPhase = 0;
+    // Chips from the last strikes, flying out from the middle of the view.
+    for (let i = strikes.length - 1; i >= 0; i--) {
+      const st = strikes[i], age = clock.real - st.t;
+      if (age > 0.6) { strikes.splice(i, 1); continue; }
+      for (let k = 0; k < 7; k++) {
+        const a = st.seed * 6.28 + k * 0.9, v = 160 + 90 * ((k * 37) % 5) / 5;
+        const x = W / 2 + Math.cos(a) * v * age, y = H * 0.55 + Math.sin(a) * v * age * 0.6 + 380 * age * age;
+        ctx.fillStyle = k % 2 ? "#c9a26b" : "#8a6a43"; ctx.globalAlpha = 1 - age / 0.6;
+        ctx.fillRect(x, y, 5, 3);
+      }
+      ctx.globalAlpha = 1;
+    }
     // A small mark at the middle: E acts on what it is over.
     ctx.fillStyle = "rgba(255,255,255,0.55)"; ctx.fillRect(W / 2 - 1.5, H / 2 - 1.5, 3, 3);
     if (clock.busyFrac != null) {
@@ -336,7 +387,8 @@ export function createView(canvas) {
       ctx.beginPath(); ctx.arc(W / 2, H / 2, 14, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * clock.busyFrac); ctx.stroke();
     }
   }
-  let lastL = null;
+  let lastL = null, lastPhase = 0;
+  const strikes = [];
 
   return { draw, resize, get visible() { return state.visible; }, get size() { return { W, H, dpr, RW, RH }; } };
 }

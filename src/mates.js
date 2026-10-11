@@ -5,21 +5,27 @@
 // hears finishes the chunk in their hands, then follows. Work comes in chunks
 // (one chop, one tree); a day chunk is only started if it ends before dusk.
 
-import { K, bfs, kindAt, areaOfRow, fellTree, clearDeadfall } from "./world.js?v=seven-1.9.0";
-import { dist, cellOf, walkTo, nearestWalkable } from "./body.js?v=seven-1.9.0";
-import { record } from "./chronicle.js?v=seven-1.9.0";
-import { makeCampAt, takeCampDown, stackWood, takeWood, campWood } from "./camp.js?v=seven-1.9.0";
-import { pathTo, areaOfRow as rowArea } from "./world.js?v=seven-1.9.0";
+import { K, bfs, kindAt, areaOfRow, fellTree, clearDeadfall } from "./world.js?v=seven-1.10.0";
+import { dist, cellOf, walkTo, nearestWalkable } from "./body.js?v=seven-1.10.0";
+import { record } from "./chronicle.js?v=seven-1.10.0";
+import { makeCampAt, takeCampDown, stackWood, takeWood, campWood } from "./camp.js?v=seven-1.10.0";
+import { pathTo, areaOfRow as rowArea } from "./world.js?v=seven-1.10.0";
 import {
   MATE_SPEED, TICK_MIN, DUSK, CHOP_MIN, CHOP_PROGRESS, CHOP_SKILL, FELL_MIN, FELL_YIELD, HAUL_LOAD,
-  CAMP_RADIUS, WATCH_FEED_BELOW, DEADFALL_THICKER, TEAM, TEND_SKILL, MAKE_CAMP_MIN, DISMANTLE_MIN, BUILD_SKILL, FIRE_FEED_HOURS, FIRE_MAX_HOURS, PRACTICE_CHUNKS, FAKE_LEARNS, SKILL_MAX,
-} from "./config.js?v=seven-1.9.0";
-import { hash01 } from "./rng.js?v=seven-1.9.0";
+  CAMP_RADIUS, WATCH_FEED_BELOW, DEADFALL_THICKER, TEAM, TEND_SKILL, MAKE_CAMP_MIN, DISMANTLE_MIN, BUILD_SKILL,
+  SCOUT_SPOT, TRACK_REACH, FIRE_LIGHT_WOOD, FIRE_LIGHT_HOURS, DIRS8, FIRE_FEED_HOURS, FIRE_MAX_HOURS, PRACTICE_CHUNKS, FAKE_LEARNS, SKILL_MAX,
+} from "./config.js?v=seven-1.10.0";
+import { hash01 } from "./rng.js?v=seven-1.10.0";
 
-export const DAY_TASKS = Object.freeze(["free", "chop", "gather", "camp", "move"]);
+export const DAY_TASKS = Object.freeze(["free", "chop", "gather", "tend", "move", "scout", "camp"]);
 export const NIGHT_TASKS = Object.freeze(["sleep", "watch", "work", "free"]);
 export const TASK_LABEL = Object.freeze({
   free: "With you", chop: "Chop the deadfall", gather: "Gather wood", camp: "Stay at camp", move: "Move camp forward",
+  tend: "Tend the fire", scout: "Scout ahead",
+});
+/** Which skill each job leans on (keen is not a job: it helps everywhere). */
+export const TASK_SKILL = Object.freeze({
+  chop: "cut", gather: "carry", tend: "tend", move: "build", scout: "track", watch: "tend", work: null,
   sleep: "Sleep", watch: "Keep watch", work: "Keep working",
 });
 
@@ -68,6 +74,15 @@ export function chopAt(sim, d, who, cut) {
   }
 }
 
+/** What someone's hands are doing right now, for the eye: "chop" | "fell" | "build" | null. */
+export function working(m) {
+  const t = m.task;
+  if (!t || m.asleep || m.following) return null;
+  if (handsFull(m)) return (t.kind === "work" ? t.work : t.kind) === "chop" ? "chop" : "fell";
+  if (t.kind === "move" && (t.stage === "down" || t.stage === "up") && t.chunk > 0) return "build";
+  return null;
+}
+
 /** Hands on a chunk of real work (a chop, a tree) — finished before answering a whistle. */
 export function handsFull(m) {
   const t = m.task, k = t && (t.kind === "work" ? t.work : t.kind);
@@ -113,6 +128,7 @@ function updateMove(sim, m) {
     const s = campSpot(sim, m);
     if (t.chunk === 0 && walkTo(w, m, s.cx, s.cy, MATE_SPEED) !== "arrived") return true;
     t.chunk += TICK_MIN;
+    t.need = DISMANTLE_MIN / speed;
     if (t.chunk >= DISMANTLE_MIN / speed) { t.chunk = 0; takeCampDown(sim, ids); for (const x of crew) practice(x, "build"); t.stage = "carry"; }
     return true;
   }
@@ -123,6 +139,7 @@ function updateMove(sim, m) {
   if (t.stage === "up") {
     if (sim.camp.built) { t.stage = "done"; return false; }   // someone else put one up
     t.chunk += TICK_MIN;
+    t.need = MAKE_CAMP_MIN / speed;
     if (t.chunk >= MAKE_CAMP_MIN / speed) {
       t.chunk = 0; t.stage = "done";
       makeCampAt(sim, t.dest.cx + 0.5, t.dest.cy + 0.5, ids);
@@ -149,7 +166,33 @@ export function updateMate(sim, m) {
   const night = isNight(sim);
 
   // Work that has no business at night goes home (unless it is night WORK).
-  if (night && t.kind !== "work" && (kind === "chop" || kind === "gather")) kind = "camp";
+  if (night && t.kind !== "work" && (kind === "chop" || kind === "gather" || kind === "scout")) kind = "camp";
+
+  // Tend the fire (tend): keep camp by day, and as the light goes, light the
+  // fire and keep it fed so it is burning when dark comes.
+  if (kind === "tend") {
+    const s = campSpot(sim, m);
+    if (walkTo(w, m, s.cx, s.cy, MATE_SPEED) !== "arrived" && dist(m, camp) > CAMP_RADIUS - 0.5) return;
+    m.asleep = false;
+    t.chunk += TICK_MIN;
+    if (t.chunk < 20) return;
+    t.chunk = 0;
+    const mod = minuteOfDay(sim);
+    if (mod < DUSK - 90 && !night) return;
+    if (camp.fire <= 0 && campWood(camp) >= FIRE_LIGHT_WOOD) {
+      takeWood(camp, FIRE_LIGHT_WOOD); camp.fire = FIRE_LIGHT_HOURS;
+      record(sim, "fire", [m.id]);
+      practice(m, "tend");
+    } else if (camp.fire > 0 && camp.fire < WATCH_FEED_BELOW + 2 && campWood(camp) > 0) {
+      takeWood(camp, 1); camp.fire = Math.min(FIRE_MAX_HOURS, camp.fire + FIRE_FEED_HOURS * (1 + TEND_SKILL * (m.skills.tend || 0)));
+      practice(m, "tend");
+    }
+    return;
+  }
+
+  // Scout ahead (track): walk the clearings of this stretch and the next, and
+  // come back with what was heard. Nobody is brought back: only the lead can do that.
+  if (kind === "scout") return updateScout(sim, m, t);
 
   if (kind === "follow") {
     m.asleep = false;
@@ -244,6 +287,39 @@ export function updateMate(sim, m) {
     return;
   }
   goCamp(sim, m);
+}
+
+function updateScout(sim, m, t) {
+  const w = sim.world, camp = sim.camp;
+  const a = areaOfRow(Math.floor(camp.y));
+  if (!t.route) {
+    const c = cellOf(m);
+    t.route = w.pockets.filter((p) => (p.area === a || p.area === a + 1) && pathTo(w, c.cx, c.cy, p.x, p.y)).map((p) => p.id);
+    t.leg = 0;
+  }
+  const ms = sim.missing;
+  if (ms && !ms.found && !t.saw && dist(m, ms) <= SCOUT_SPOT + TRACK_REACH * (m.skills.track || 0)) {
+    const ang = Math.atan2(ms.x - camp.x, -(ms.y - camp.y));
+    t.saw = DIRS8[Math.round(((ang + Math.PI * 2) % (Math.PI * 2)) / (Math.PI / 4)) % 8];
+  }
+  const done = t.leg >= t.route.length || !fits(sim, 90);
+  if (done) {
+    const s = campSpot(sim, m);
+    if (walkTo(w, m, s.cx, s.cy, MATE_SPEED) === "arrived" || dist(m, camp) <= CAMP_RADIUS - 0.5) {
+      if (t.saw) {
+        sim.say(`${m.name} is back from scouting: there was someone out in the trees, ${t.saw} of camp.`);
+        record(sim, "scout", [m.id], { dir: t.saw });
+        t.saw = null;
+      }
+    }
+    return;
+  }
+  const p = w.pockets.find((x) => x.id === t.route[t.leg]);
+  const st = p ? walkTo(w, m, p.x, p.y, MATE_SPEED) : "stuck";
+  if (st === "arrived" || st === "stuck") {
+    t.leg++;
+    practice(m, "track");
+  }
 }
 
 function afterChunk(m) {

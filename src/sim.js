@@ -5,14 +5,14 @@
 // exported actions. Messages for the player go through sim.say(); they never
 // mention the hidden meter.
 
-import { createRng } from "./rng.js?v=seven-1.9.0";
-import { composeRoster } from "./names.js?v=seven-1.9.0";
-import { createWorld, areaOfRow, K, kindAt, walkable, lostSpots, fellTree } from "./world.js?v=seven-1.9.0";
-import { dist, cellOf, moveBody, nearestWalkable, walkTo } from "./body.js?v=seven-1.9.0";
-import { openDay, record, recordPlan, account } from "./chronicle.js?v=seven-1.9.0";
-import { makeCampAt, takeCampDown as campDown, campWood, stackWood, takeWood } from "./camp.js?v=seven-1.9.0";
-import { updateMate, setTask, chopAt, frontDeadfall, practice, moving, DAY_TASKS, NIGHT_TASKS } from "./mates.js?v=seven-1.9.0";
-import * as C from "./config.js?v=seven-1.9.0";
+import { createRng } from "./rng.js?v=seven-1.10.0";
+import { composeRoster } from "./names.js?v=seven-1.10.0";
+import { createWorld, areaOfRow, K, kindAt, walkable, lostSpots, fellTree } from "./world.js?v=seven-1.10.0";
+import { dist, cellOf, moveBody, nearestWalkable, walkTo } from "./body.js?v=seven-1.10.0";
+import { openDay, record, recordPlan, account } from "./chronicle.js?v=seven-1.10.0";
+import { makeCampAt, takeCampDown as campDown, campWood, stackWood, takeWood } from "./camp.js?v=seven-1.10.0";
+import { updateMate, setTask, chopAt, frontDeadfall, practice, moving, DAY_TASKS, NIGHT_TASKS } from "./mates.js?v=seven-1.10.0";
+import * as C from "./config.js?v=seven-1.10.0";
 
 // ---- the clock ---------------------------------------------------------------
 export const minutes = (sim) => sim.ticks * C.TICK_MIN;
@@ -207,7 +207,11 @@ export function campAction(sim) {
   }
   const k = kindAt(sim.world, Math.floor(L.x), Math.floor(L.y));
   if (k !== K.TRAIL && k !== K.CLEAR) return { ok: false, why: "No room for a camp here." };
-  startBusy(sim, "camp_make", Math.round(C.MAKE_CAMP_MIN / speed), { crew });
+  // Camp goes up a step in front of you, where you can watch it rise.
+  const yaw = L.yaw ?? -Math.PI / 2, ax = L.x + Math.cos(yaw) * 1.6, ay = L.y + Math.sin(yaw) * 1.6;
+  const ka = kindAt(sim.world, Math.floor(ax), Math.floor(ay));
+  const at = ka === K.TRAIL || ka === K.CLEAR ? { x: ax, y: ay } : { x: L.x, y: L.y };
+  startBusy(sim, "camp_make", Math.round(C.MAKE_CAMP_MIN / speed), { crew, at });
   return { ok: true };
 }
 
@@ -268,7 +272,7 @@ function finishBusy(sim) {
     case "fire_feed":
       if (takeWood(sim.camp, 1)) { sim.camp.fire = Math.min(C.FIRE_MAX_HOURS, sim.camp.fire + C.FIRE_FEED_HOURS); }
       break;
-    case "camp_make": if (!sim.camp.built) { makeCampHere(sim); practiseCrew(sim, b.crew); } break;
+    case "camp_make": if (!sim.camp.built) { makeCampHere(sim, b.at); practiseCrew(sim, b.crew); } break;
     case "camp_down": if (sim.camp.built) { campDown(sim, ["lead"]); practiseCrew(sim, b.crew); } break;
     case "light": lightPylon(sim, b); break;
     default: break;
@@ -284,9 +288,9 @@ export function findReach(sim) {
   return C.FIND_REACH + C.TRACK_REACH * best;
 }
 
-function makeCampHere(sim) {
-  const L = sim.lead;
-  makeCampAt(sim, L.x, L.y, ["lead", ...sim.mates.filter((m) => dist(m, L) <= 4).map((m) => m.id)]);
+function makeCampHere(sim, at) {
+  const L = sim.lead, p = at || { x: L.x, y: L.y };
+  makeCampAt(sim, p.x, p.y, ["lead", ...sim.mates.filter((m) => dist(m, L) <= 4).map((m) => m.id)]);
 }
 
 function lightPylon(sim, b) {

@@ -8,7 +8,7 @@
 
 export const TICKS_PER_SEC = 30;
 export const TICK_MIN = 0.2;                 // 1 game hour = 300 ticks = 10 real seconds
-export const SPEED_BUSY = 20;                // the lead's hands are on a job
+export const SPEED_BUSY = 5;                 // the lead's hands are on a job: quicker, but you see the work
 export const SPEED_SLEEP = 60;               // the lead is asleep
 
 export const DAWN = 6 * 60;                  // minute of day
@@ -40,6 +40,7 @@ export const SKILL_INFO = Object.freeze({
 export const NO_SKILLS = Object.freeze({ cut: 0, carry: 0, keen: 0, tend: 0, build: 0, track: 0 });
 export const TEND_SKILL = 0.15;              // +15% fire hours per wood fed, per level
 export const BUILD_SKILL = 0.15;             // +15% camp speed per helper's level
+export const SCOUT_SPOT = 5;                 // cells a scout notices someone lost from, plus TRACK_REACH a level
 export const TRACK_REACH = 0.6;              // cells of extra find reach per level, from whoever is with you
 export const SKILL_MAX = 8;
 // Each candidate comes with a trade, and the skills that go with it.

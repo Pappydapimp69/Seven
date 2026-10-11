@@ -131,6 +131,25 @@ const sim = (p, f) => p.evaluate(f);
   const prog1 = await sim(p, () => window.__seven.S.frontDeadfall(window.__seven.sim).progress);
   ok(prog1 > prog0, `E chopped (${(prog0 * 100).toFixed(0)}% → ${(prog1 * 100).toFixed(0)}%)`);
 
+  // Making camp takes real time and is seen going up (it used to finish in about a second).
+  const build = await p.evaluate(async () => {
+    const { S, sim } = window.__seven;
+    sim.lead.x = sim.camp.x; sim.lead.y = sim.camp.y + 1; sim.lead.yaw = -Math.PI / 2;
+    S.campAction(sim);                         // take it down first
+    while (sim.lead.busy) await new Promise((r) => setTimeout(r, 50));
+    sim.mates.forEach((m) => { m.x = sim.camp.x + 20; });   // nobody near to help: the full time
+    const t0 = performance.now();
+    const r = S.campAction(sim);
+    if (!r.ok) return { why: r.why, f1: -1, f2: -1, secs: 0, built: false };
+    await new Promise((r) => setTimeout(r, 700));
+    const f1 = window.__seven.seen.building ? window.__seven.seen.building.frac : -1;
+    await new Promise((r) => setTimeout(r, 900));
+    const f2 = window.__seven.seen.building ? window.__seven.seen.building.frac : -1;
+    while (sim.lead.busy) await new Promise((r) => setTimeout(r, 50));
+    return { f1, f2, secs: (performance.now() - t0) / 1000, built: sim.camp.built };
+  });
+  ok(build.built && build.secs > 3 && build.f1 > 0 && build.f2 > build.f1, `${build.why || ""} making camp takes ${build.secs.toFixed(1)}s and rises as you watch (${build.f1.toFixed(2)} → ${build.f2.toFixed(2)})`);
+
   // On to dusk at camp: the dusk panel opens.
   await p.evaluate(() => {
     const { sim } = window.__seven; sim.lead.x = sim.camp.x; sim.lead.y = sim.camp.y + 1;

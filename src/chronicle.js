@@ -6,9 +6,9 @@
 // by hash from the seed, day and teller, so no rng is drawn and nothing comes
 // from a hand-written list of tells. Exactly one sentence differs.
 
-import { hash01 } from "./rng.js?v=seven-1.9.0";
-import { nameOff } from "./names.js?v=seven-1.9.0";
-import { WEATHER, DIRS8 } from "./config.js?v=seven-1.9.0";
+import { hash01 } from "./rng.js?v=seven-1.10.0";
+import { nameOff } from "./names.js?v=seven-1.10.0";
+import { WEATHER, DIRS8 } from "./config.js?v=seven-1.10.0";
 
 export function openDay(sim, day, weather) {
   sim.chronicle[day] = { weather, plan: null, events: [] };
@@ -27,7 +27,7 @@ export function recordPlan(sim, choices) {
 }
 
 const TASK_PHRASE = { chop: "on the deadfall", gather: "on wood", camp: "at camp", free: "to their own business" };
-const PRIORITY = ["cleared", "camp_made", "camp_down", "pylon", "fire", "call", "fell", "chop", "area"];
+const PRIORITY = ["cleared", "camp_made", "camp_down", "pylon", "scout", "fire", "call", "fell", "chop", "area"];
 
 /** The facts of a day, in a fixed order, as plain objects. */
 export function facts(sim, day) {
@@ -118,6 +118,7 @@ export function tell(sim, list, teller) {
       case "camp_down": return `${who} took the camp down.`;
       case "pylon": return `${who} lit a pylon.`;
       case "call": return `A voice called from the ${f.dir} at first light.`;
+      case "scout": return `${who} came back from scouting and said there was someone ${f.dir} of camp.`;
       case "area": return `We walked on into deeper woods.`;
       default: return `${who} kept busy.`;
     }

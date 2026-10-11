@@ -4,6 +4,7 @@ import { harness, assert, walk, finish, chopSpot, S } from "./lib.mjs";
 import { createRng } from "../src/rng.js";
 import * as C from "../src/config.js";
 import { clearDeadfall } from "../src/world.js";
+import * as MATES from "../src/mates.js";
 
 const T = harness("sim");
 const HOUR = 60 / C.TICK_MIN;
@@ -318,6 +319,39 @@ T.check("E acts on what you face: a trunk behind you is not chopped", () => {
   assert(S.contextAction(s)?.kind === "chop", `facing the trunk: ${S.contextAction(s)?.kind}`);
   s.lead.yaw = Math.PI / 2;                  // facing south, back to it
   assert(S.contextAction(s)?.kind !== "chop", "chopped a trunk behind you");
+});
+
+T.check("every skill but keen has a job to use it", () => {
+  const { TASK_SKILL, DAY_TASKS, NIGHT_TASKS } = MATES;
+  const used = new Set([...DAY_TASKS, ...NIGHT_TASKS].map((k) => TASK_SKILL[k]).filter(Boolean));
+  for (const k of C.SKILLS) if (k !== "keen") assert(used.has(k), `no job uses ${k}`);
+});
+
+T.check("Tend the fire: the tender lights it as the light goes, and keeps it fed", () => {
+  const s = fresh(31);
+  setClock(s, 2, 15 * 60); s.dawnDone = 99; s.chronicle[2] = { weather: "clear", plan: null, events: [] };
+  s.camp.pile = 8; s.camp.fire = 0;
+  const m = s.mates[0];
+  S.applyPlan(s, "dawn", { [m.id]: "tend" });
+  s.dawnDone = 99;
+  for (let i = 0; i < 2.9 * HOUR; i++) S.tick(s, {});
+  assert(s.camp.fire > 0, `no fire at ${S.clockText(s)} (pile ${s.camp.pile})`);
+  assert(s.chronicle[2].events.some((e) => e.kind === "fire" && e.who.includes(m.id)), "the chronicle does not say who lit it");
+});
+
+T.check("Scout ahead: a scout who passes near someone lost comes back with a direction — and brings nobody", () => {
+  const s = fresh(32);
+  setClock(s, 2, 7 * 60); s.dawnDone = 99; s.chronicle[2] = { weather: "clear", plan: null, events: [] };
+  const pk = s.world.pockets.find((p) => p.area === 0);
+  const m = s.mates[0];
+  s.missing = { id: "m4", name: s.mates[4].name, slot: 4, skills: {}, points: 0, practice: {}, lucidity: 90, x: pk.x + 1.5, y: pk.y + 0.5, area: 0, lastDay: 1, nights: 1, found: false };
+  s.mates[4].fake = true; s.mates[4].since = 2;
+  S.applyPlan(s, "dawn", { [m.id]: "scout" });
+  s.dawnDone = 99;
+  for (let i = 0; i < 9 * HOUR && !s.msgs.some((x) => x.text.includes("back from scouting")); i++) S.tick(s, {});
+  const said = s.msgs.find((x) => x.text.includes("back from scouting"));
+  assert(said && /(north|south|east|west)/.test(said.text), `no report: ${s.msgs.slice(-3).map((x) => x.text).join(" | ")}`);
+  assert(s.missing && !s.missing.found, "the scout brought them back: only the lead can");
 });
 
 void chopSpot;

@@ -2,27 +2,27 @@
 // this file reads sim.pending and opens the matching panel, and the panel
 // answers through the sim's exported actions.
 
-import * as S from "./sim.js?v=seven-1.9.0";
-import { perceive } from "./percept.js?v=seven-1.9.0";
-import { createView, SLOT_COLORS } from "./view.js?v=seven-1.9.0";
-import { createInput } from "./input.js?v=seven-1.9.0";
-import * as UI from "./ui.js?v=seven-1.9.0";
-import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.9.0";
-import * as Audio from "./audio.js?v=seven-1.9.0";
-import { createRng } from "./rng.js?v=seven-1.9.0";
-import { composeRoster } from "./names.js?v=seven-1.9.0";
-import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, frontDeadfall } from "./mates.js?v=seven-1.9.0";
-import { areaOfRow } from "./world.js?v=seven-1.9.0";
-import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_INFO, NO_SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.9.0";
+import * as S from "./sim.js?v=seven-1.10.0";
+import { perceive } from "./percept.js?v=seven-1.10.0";
+import { createView, SLOT_COLORS } from "./view.js?v=seven-1.10.0";
+import { createInput } from "./input.js?v=seven-1.10.0";
+import * as UI from "./ui.js?v=seven-1.10.0";
+import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.10.0";
+import * as Audio from "./audio.js?v=seven-1.10.0";
+import { createRng } from "./rng.js?v=seven-1.10.0";
+import { composeRoster } from "./names.js?v=seven-1.10.0";
+import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, TASK_SKILL, frontDeadfall } from "./mates.js?v=seven-1.10.0";
+import { areaOfRow } from "./world.js?v=seven-1.10.0";
+import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_INFO, NO_SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.10.0";
 
-const BUILD = "seven-1.9.0";
+const BUILD = "seven-1.10.0";
 const esc = UI.esc;
 const store = (() => { try { return window.localStorage; } catch { return null; } })();
 const readJSON = (k, d) => { try { const v = store && store.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
 const writeJSON = (k, v) => { try { store && store.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } };
 
 const canvas = document.getElementById("game");
-const renderer = createView(canvas);
+const renderer = createView(canvas, { onStrike: (tool) => Audio.thunk(tool) });
 const TURN_RATE = 2.4;          // radians a second, keys / pad / touch stick
 const MOUSE_TURN = 0.0032;      // radians per device pixel of mouse travel
 let sim = null, view = null, headless = false, endShown = false, moved = false, lastSave = 0, acc = 0;
@@ -170,6 +170,8 @@ function spendPanel(seed, team) {
   render(null);
 }
 
+const taskText = (k) => `${esc(TASK_LABEL[k])}${TASK_SKILL[k] ? ` <span class="sk">${TASK_SKILL[k]}</span>` : ""}`;
+
 function planPanel(kind) {
   const tasks = kind === "dawn" ? DAY_TASKS : NIGHT_TASKS;
   const choice = {};
@@ -188,14 +190,14 @@ function planPanel(kind) {
         : `Who sleeps, who keeps the fire, who works on in the dark. Unfed, the fire dies in the night. You sleep with ${label("rest")}.`} Wood stacked: ${S.campWood(sim.camp)}.</p>
       <div class="plan">${sim.mates.map((m) => `
         <button data-do="cycle" data-arg="${m.id}" class="row"><span class="dot" style="background:${SLOT_COLORS[m.slot]}"></span>
-          <span class="nm">${esc(m.name)}<span class="sub">${m.role ? esc(m.role) + " · " : ""}${skillText(m.skills)}</span></span><span class="task">${esc(TASK_LABEL[choice[m.id]])}</span></button>`).join("")}
+          <span class="nm">${esc(m.name)}<span class="sub">${m.role ? esc(m.role) + " · " : ""}${skillText(m.skills)}</span></span><span class="task">${taskText(choice[m.id])}</span></button>`).join("")}
       </div>
       <button data-do="done" autofocus>${kind === "dawn" ? "Start the day" : "Set the night"}</button>
       ${kind === "dusk" ? '<button data-do="sleep">Set the night and sleep</button>' : ""}`, { onBack: null });
     UI.bind({
       cycle: (id, btn) => {
         choice[id] = tasks[(tasks.indexOf(choice[id]) + 1) % tasks.length];
-        btn.querySelector(".task").textContent = TASK_LABEL[choice[id]];
+        btn.querySelector(".task").innerHTML = taskText(choice[id]);
       },
       done: () => { S.applyPlan(sim, kind, choice); UI.close(); },
       sleep: () => { S.applyPlan(sim, kind, choice); UI.close(); S.rest(sim); },
@@ -399,6 +401,7 @@ window.__seven = {
   get audio() { return Audio.state(); },
   get sim() { return sim; },
   get visible() { return [...renderer.visible]; },
+  get seen() { return view; },
   worldMove,
   get panel() { return UI.isOpen() ? document.querySelector("#modal .panel h2, #modal .panel h1")?.textContent : null; },
   set headless(v) { headless = !!v; },
