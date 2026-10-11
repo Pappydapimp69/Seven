@@ -129,6 +129,23 @@ fakes come from.
 - **Getting back is part of it:** finding them is not the end; you walk them
   home before dark.
 
+- **From Brain's disappearance training (2026-10-11), adopted:**
+  - The dawn call must NOT only happen when someone is missing, or it
+    announces the disappearance (posterior 1.0). Add false calls that depend
+    on nobody; the learnable tell is a bearing that stays consistent across
+    dawns.
+  - Find-chance comes from the missing one's hidden position plus the call
+    bearing, not dice (dice leave no skill gap).
+  - The call fades with nights missing but has a floor, or it becomes a hidden
+    time window on top of the spatial one.
+  - Size the bearing to what can be heard (8 directions).
+  - Determinism: the night step draws drift, call and bearing every night for
+    every slot, missing or not.
+- **Rescue ends at a pylon:** the found member is the second pair of hands;
+  lighting it together proves they are real and lights the area.
+- Still open in Brain (yellow): must the fake be exposed before the rescue, or
+  does rescue expose it? (Blueprint leans: bringing them home exposes it.)
+
 ## Open
 
 - What a "chunk" is for each task, in clock time.
