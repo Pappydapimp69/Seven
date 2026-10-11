@@ -158,6 +158,21 @@ fakes come from.
   choice with no prompt? Leaning on the fading-with-a-floor call: the dawn
   call still comes from behind you, and stops when you leave the window.
 
+- **Lost means stuck in an area.** Moving camp into a new area is moving
+  forward; that is how someone is abandoned (owner, 2026-10-11).
+- **The fake is better, and keeping it costs.** IDEAS says both "SAME SKILLS"
+  (line ~199) and "the fake logger is BETTER" (line ~241) — a contradiction.
+  Owner's call: better. Holding a fake upgrades the team AND raises the chance
+  of the next abduction (IDEAS: "holding a fake raises the chance of losing
+  another"). Guard against the stopwatch: skills grow a little with practice
+  for EVERYONE, with noise, so a fake's larger step hides inside ordinary
+  growth — suspicious, never certain. (Self-answered; Brain had no prior art.)
+- **The ending (IDEAS, confirmed by owner):** at the far side, the pylons home
+  number real members + 1. A pylon needs a second pair of hands and a
+  hallucination cannot light one, so the run must end with at least one real
+  member. Every attempt spends the pylon. Certainty only comes from rescuing
+  everyone, which is impractical by design.
+
 ## Open
 
 - What a "chunk" is for each task, in clock time.
