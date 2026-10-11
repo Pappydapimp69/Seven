@@ -8,7 +8,7 @@
 // who lags, who starts narrating things that aren't there. Each rule below exists
 // to make an internal number legible from the outside without printing it.
 
-import { findPath, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, gridOf } from "./world.js?v=seven-0.40.0";
+import { findPath, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, gridOf } from "./world.js?v=seven-0.41.0";
 import {
   BAND,
   bandOf,
@@ -25,9 +25,9 @@ import {
   PRIME_WINDOW,
   chopDeadfall, feedFire, sevenClock, GAME_HOUR, CHOP_HOLD, SEVEN_GATHER_HOLD, GATHER_YIELD, GATHER_RADIUS,
   SEVEN_CAMP_RADIUS, FIRE_FUEL_MAX,
-} from "./state.js?v=seven-0.40.0";
-import { effectiveKind, inChunk, CHUNK_HOURS, practice } from "./tasks.js?v=seven-0.40.0";
-import { takeFromPile } from "./seven.js?v=seven-0.40.0";
+} from "./state.js?v=seven-0.41.0";
+import { effectiveKind, inChunk, CHUNK_HOURS, practice } from "./tasks.js?v=seven-0.41.0";
+import { takeFromPile } from "./seven.js?v=seven-0.41.0";
 
 // Higher band = worse. Lets a per-companion trait move the pylon-seeking
 // trigger EARLIER than the uniform BRITTLE tell everyone else gets, without
