@@ -23,7 +23,8 @@ export const TRAIL_HALF = 1;                 // trail is 3 cells wide
 export const EXIT_ROWS = 5;                  // the far side: rows 1..EXIT_ROWS
 
 // ---- people -----------------------------------------------------------------
-export const TEAM = 6;                       // companions; with the lead, seven
+export const TEAM = 5;                       // companions. With the lead that is six; the HUD still says seven.
+export const CANDIDATES = 8;                 // the player picks TEAM of these
 export const LEAD_SPEED = 0.13;              // cells per tick
 export const MATE_SPEED = 0.12;
 export const BODY_R = 0.3;
@@ -32,7 +33,16 @@ export const CALL_RANGE = 14;
 export const CALL_MIN_LUCIDITY = 25;
 export const SKILLS = Object.freeze(["cut", "carry", "keen"]);
 export const SKILL_MAX = 8;
-export const BASE_POINTS = 12;
+// Each candidate comes with a trade, and the skills that go with it.
+export const ROLES = Object.freeze([
+  { role: "Logger", skills: { cut: 2, carry: 0, keen: 0 } },
+  { role: "Hauler", skills: { cut: 0, carry: 2, keen: 0 } },
+  { role: "Scout", skills: { cut: 0, carry: 0, keen: 2 } },
+  { role: "Woodcutter", skills: { cut: 1, carry: 1, keen: 0 } },
+  { role: "Tracker", skills: { cut: 0, carry: 1, keen: 1 } },
+  { role: "Forester", skills: { cut: 1, carry: 0, keen: 1 } },
+]);
+export const BASE_POINTS = 6;                // spent on top of what each role brings
 export const PRACTICE_CHUNKS = 6;            // finished chunks of a kind per level
 export const FAKE_LEARNS = 2;                // a fake learns this many times faster
 

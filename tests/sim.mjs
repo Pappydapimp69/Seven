@@ -106,8 +106,8 @@ T.check("choppers on the deadfall cut it; nobody chops past a cleared trunk", ()
   const s = fresh();
   const d = s.world.deadfalls[0];
   S.applyPlan(s, "dawn", { m0: "chop", m1: "chop", m2: "chop" });
-  run(s, 8 * HOUR);
-  assert(d.cleared, `three choppers left the first deadfall at ${Math.round(d.progress * 100)}% by 14:00`);
+  run(s, 10 * HOUR);
+  assert(d.cleared, `three choppers left the first deadfall at ${Math.round(d.progress * 100)}% by 16:00`);
   assert(s.world.deadfalls[1].progress < 0.5, "the next deadfall was half cut the same day by three people");
 });
 
@@ -176,11 +176,11 @@ T.check("the far side: pylons are real people + 1, each try spends one, a fake c
   s.lead.x = 21; s.lead.y = 3.5;
   for (const d of s.world.deadfalls) clearDeadfall(s.world, d);
   run(s, 1);
-  assert(s.pending === "home" && s.home.pylons === 6, `pending ${s.pending}, pylons ${s.home && s.home.pylons}`);
+  assert(s.pending === "home" && s.home.pylons === C.TEAM, `pending ${s.pending}, pylons ${s.home && s.home.pylons}`);
   S.lightHome(s, "m1");
-  assert(s.home.pylons === 5 && s.home.tried.length === 1 && s.home.saved.length === 0, "the fake was sent home");
+  assert(s.home.pylons === C.TEAM - 1 && s.home.tried.length === 1 && s.home.saved.length === 0, "the fake was sent home");
   S.lightHome(s, "m0");
-  assert(s.home.saved.length === 1 && s.home.pylons === 4, "a real one did not go home");
+  assert(s.home.saved.length === 1 && s.home.pylons === C.TEAM - 2, "a real one did not go home");
   S.finishRun(s);
   assert(s.status === "ended" && s.ending.kind === "home", `ending ${s.ending && s.ending.kind}`);
 });

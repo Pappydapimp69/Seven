@@ -5,14 +5,14 @@
 // hears finishes the chunk in their hands, then follows. Work comes in chunks
 // (one chop, one tree); a day chunk is only started if it ends before dusk.
 
-import { K, bfs, kindAt, areaOfRow, fellTree, clearDeadfall } from "./world.js?v=seven-1.0.0";
-import { dist, cellOf, walkTo, nearestWalkable } from "./body.js?v=seven-1.0.0";
-import { record } from "./chronicle.js?v=seven-1.0.0";
+import { K, bfs, kindAt, areaOfRow, fellTree, clearDeadfall } from "./world.js?v=seven-1.1.0";
+import { dist, cellOf, walkTo, nearestWalkable } from "./body.js?v=seven-1.1.0";
+import { record } from "./chronicle.js?v=seven-1.1.0";
 import {
   MATE_SPEED, TICK_MIN, DUSK, CHOP_MIN, CHOP_PROGRESS, CHOP_SKILL, FELL_MIN, FELL_YIELD, HAUL_LOAD,
-  CAMP_RADIUS, WATCH_FEED_BELOW, DEADFALL_THICKER, FIRE_FEED_HOURS, FIRE_MAX_HOURS, PRACTICE_CHUNKS, FAKE_LEARNS, SKILL_MAX,
-} from "./config.js?v=seven-1.0.0";
-import { hash01 } from "./rng.js?v=seven-1.0.0";
+  CAMP_RADIUS, WATCH_FEED_BELOW, DEADFALL_THICKER, TEAM, FIRE_FEED_HOURS, FIRE_MAX_HOURS, PRACTICE_CHUNKS, FAKE_LEARNS, SKILL_MAX,
+} from "./config.js?v=seven-1.1.0";
+import { hash01 } from "./rng.js?v=seven-1.1.0";
 
 export const DAY_TASKS = Object.freeze(["free", "chop", "gather", "camp"]);
 export const NIGHT_TASKS = Object.freeze(["sleep", "watch", "work", "free"]);
@@ -44,7 +44,7 @@ const fits = (sim, minutes) => !isNight(sim) && minuteOfDay(sim) + minutes <= DU
 
 /** Where this companion stands at camp: a slot round the fire. */
 export function campSpot(sim, m) {
-  const a = (m.slot / 6) * Math.PI * 2;
+  const a = (m.slot / TEAM) * Math.PI * 2;
   return nearestWalkable(sim.world, sim.camp.x + Math.cos(a) * 2, sim.camp.y + Math.sin(a) * 2);
 }
 

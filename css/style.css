@@ -76,3 +76,5 @@ td.sk span { display: inline-block; width: 22px; text-align: center; }
 .account p { margin: 6px 0; }
 .twins { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 @media (max-width: 520px) { .twins { grid-template-columns: 1fr; } }
+.plan .row.on { border-color: var(--accent); }
+.plan .tick { width: 22px; color: var(--accent); }

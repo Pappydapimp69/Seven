@@ -5,13 +5,13 @@
 // exported actions. Messages for the player go through sim.say(); they never
 // mention the hidden meter.
 
-import { createRng } from "./rng.js?v=seven-1.0.0";
-import { composeRoster } from "./names.js?v=seven-1.0.0";
-import { createWorld, areaOfRow, K, kindAt, walkable, lostSpots, fellTree } from "./world.js?v=seven-1.0.0";
-import { dist, cellOf, moveBody, nearestWalkable, walkTo } from "./body.js?v=seven-1.0.0";
-import { openDay, record, recordPlan, account } from "./chronicle.js?v=seven-1.0.0";
-import { updateMate, setTask, chopAt, frontDeadfall, DAY_TASKS, NIGHT_TASKS } from "./mates.js?v=seven-1.0.0";
-import * as C from "./config.js?v=seven-1.0.0";
+import { createRng } from "./rng.js?v=seven-1.1.0";
+import { composeRoster } from "./names.js?v=seven-1.1.0";
+import { createWorld, areaOfRow, K, kindAt, walkable, lostSpots, fellTree } from "./world.js?v=seven-1.1.0";
+import { dist, cellOf, moveBody, nearestWalkable, walkTo } from "./body.js?v=seven-1.1.0";
+import { openDay, record, recordPlan, account } from "./chronicle.js?v=seven-1.1.0";
+import { updateMate, setTask, chopAt, frontDeadfall, DAY_TASKS, NIGHT_TASKS } from "./mates.js?v=seven-1.1.0";
+import * as C from "./config.js?v=seven-1.1.0";
 
 // ---- the clock ---------------------------------------------------------------
 export const minutes = (sim) => sim.ticks * C.TICK_MIN;
@@ -52,9 +52,10 @@ export function createSim(opts = {}) {
     const spot = nearestWalkable(world, sim.camp.x + Math.cos(a) * 2, sim.camp.y + Math.sin(a) * 2);
     const skills = { cut: 0, carry: 0, keen: 0, ...(opts.team && opts.team[i] ? opts.team[i].skills : {}) };
     const id = `m${i}`;
+    const role = opts.team && opts.team[i] ? opts.team[i].role || null : null;
     sim.roster.push({ id, name: names[i] });
     sim.mates.push({
-      id, name: names[i], slot: i, x: spot.cx + 0.5, y: spot.cy + 0.5, facing: 0, lucidity: 100,
+      id, name: names[i], role, slot: i, x: spot.cx + 0.5, y: spot.cy + 0.5, facing: 0, lucidity: 100,
       skills, points: skills.cut + skills.carry + skills.keen, practice: {},
       task: { kind: "free", chunk: 0, carry: 0 }, following: false, callPending: false, asleep: false,
       fake: false, since: null, away: [], path: null, goal: null, repath: 0,
@@ -327,7 +328,7 @@ function restoreReal(sim, slot) {
   const away = [];
   for (let d = ms.lastDay + 1; d <= sim.day; d++) away.push(d);
   const m = {
-    id: ms.id, name: ms.name, slot: ms.slot, x: ms.x, y: ms.y, facing: 0, lucidity: ms.lucidity,
+    id: ms.id, name: ms.name, role: ms.role || null, slot: ms.slot, x: ms.x, y: ms.y, facing: 0, lucidity: ms.lucidity,
     skills: { ...ms.skills }, points: ms.points, practice: { ...ms.practice },
     task: { kind: "free", chunk: 0, carry: 0 }, following: true, callPending: false, asleep: false,
     fake: false, since: null, away, path: null, goal: null, repath: 0,
@@ -381,7 +382,7 @@ export function resolveNight(sim) {
     const spots = lostSpots(sim.world, area);
     const s = spots.length ? spots[Math.floor(r[3] * spots.length)] : nearestWalkable(sim.world, here.x, here.y - 6);
     sim.missing = {
-      id: m.id, name: m.name, slot: m.slot, skills: { ...m.skills }, points: m.points, practice: { ...m.practice },
+      id: m.id, name: m.name, role: m.role || null, slot: m.slot, skills: { ...m.skills }, points: m.points, practice: { ...m.practice },
       lucidity: m.lucidity, x: s.cx + 0.5, y: s.cy + 0.5, area, lastDay: night, nights: 1, found: false,
     };
     // Something takes the empty slot: same name, same skills. Nobody finds it strange.

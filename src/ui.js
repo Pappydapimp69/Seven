@@ -24,6 +24,27 @@ export function close() {
 }
 export const isOpen = () => current !== null;
 
+/**
+ * After a panel re-renders, put focus back where it was. `selector` is the
+ * button just pressed; if it is now disabled, the next enabled button in the
+ * same table row (or list) takes it. `force` wins when given.
+ */
+export function refocus(selector, force = null) {
+  const m = $("modal");
+  const pick = (sel) => sel && m.querySelector(sel);
+  let el = pick(force);
+  if (!el && selector) {
+    const was = pick(selector);
+    if (was && !was.disabled) el = was;
+    else if (was) {
+      const row = was.closest("tr, .plan") || m;
+      el = [...row.querySelectorAll("button:not([disabled])")][0] || null;
+    }
+  }
+  if (!el) el = m.querySelector("button:not([disabled])");
+  if (el) el.focus();
+}
+
 /** Bind data-do="name" buttons in the open panel to handlers. */
 export function bind(handlers) {
   for (const b of $("modal").querySelectorAll("[data-do]")) {
