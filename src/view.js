@@ -13,9 +13,9 @@
 // and scaled up; the canvas backing is CSS size × devicePixelRatio, re-read on
 // every resize and every DPR change.
 
-import { K } from "./world.js?v=seven-1.12.1";
-import { hash01 } from "./rng.js?v=seven-1.12.1";
-import { FIRE_LIGHT, DAWN, DUSK, PILE_CAP, SURPLUS_CAP } from "./config.js?v=seven-1.12.1";
+import { K } from "./world.js?v=seven-1.12.2";
+import { hash01 } from "./rng.js?v=seven-1.12.2";
+import { FIRE_LIGHT, DAWN, DUSK, PILE_CAP, SURPLUS_CAP } from "./config.js?v=seven-1.12.2";
 
 export const SLOT_COLORS = ["#e0b354", "#5fb3c9", "#d9745a", "#9fc46a", "#b98fd6", "#e88fb0"];
 export const HFOV = (72 * Math.PI) / 180;
@@ -30,19 +30,28 @@ export function createView(canvas, opts = {}) {
   const ctx = canvas.getContext("2d");
   const off = document.createElement("canvas");
   const o = off.getContext("2d");
-  let W = 0, H = 0, dpr = 1, RW = 0, RH = 0, img = null, zbuf = null, focal = 1;
+  let W = 0, H = 0, dpr = 1, RW = 0, RH = 0, img = null, img32 = null, zbuf = null, focal = 1;
   const sprites = new Map();
   const state = { visible: new Set() };
 
+  // Quality scales the INTERNAL resolution only (the canvas backing stays
+  // CSS × devicePixelRatio, crisp text and rings). A machine that cannot keep
+  // the frame cheap gets fewer, wider pixels instead of lag; one with room to
+  // spare gets them back. See tune() below.
+  let quality = 1, avgMs = 4, frames = 0;
   function resize() {
     dpr = window.devicePixelRatio || 1;
     W = window.innerWidth; H = window.innerHeight;
     canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
     canvas.style.width = W + "px"; canvas.style.height = H + "px";
-    RW = Math.max(200, Math.min(480, Math.round(W / 2)));
-    RH = Math.max(120, Math.round((RW * H) / W));
+    allocate();
+  }
+  function allocate() {
+    RW = Math.max(160, Math.min(480, Math.round((W / 2) * quality)));
+    RH = Math.max(100, Math.round((RW * H) / W));
     off.width = RW; off.height = RH;
     img = o.createImageData(RW, RH);
+    img32 = new Uint32Array(img.data.buffer);
     zbuf = new Float32Array(RW);
     focal = RW / 2 / Math.tan(HFOV / 2);
   }
@@ -149,7 +158,22 @@ export function createView(canvas, opts = {}) {
     return fireCanvas;
   }
 
+  function tune(ms) {
+    avgMs += (ms - avgMs) * 0.08;
+    if (++frames < 45) return;
+    frames = 0;
+    if (avgMs > 11 && quality > 0.34) { quality = Math.max(0.34, quality * 0.8); allocate(); }
+    else if (quality < 1) {
+      // Grow only if the bigger image is predicted to stay cheap: cost goes with
+      // the pixel count, so a step up costs about the step squared. That keeps
+      // it from hovering at the edge of the shrink threshold.
+      const next = Math.min(1, quality * 1.15);
+      if (avgMs * (next / quality) ** 2 < 8) { quality = next; allocate(); }
+    }
+  }
+
   function draw(world, view, clock) {
+    const TS = performance.now();
     const L = view.lead, yaw = L.yaw ?? -Math.PI / 2;
     const px = L.x, py = L.y;
     const dx = Math.cos(yaw), dy = Math.sin(yaw);
@@ -161,19 +185,25 @@ export function createView(canvas, opts = {}) {
     const flick = 1 + 0.04 * Math.sin(clock.real * 9);
     const lit = view.pylons.filter((p) => p.state === "lit");
     // Light at a world point: [level 0..~1.3, warmth 0..1].
+    // Light at a world point, as a SHARED [level, warmth] pair (read it at once —
+    // it is overwritten by the next call). No allocation and no Math.hypot: this
+    // runs tens of thousands of times a frame.
+    const LW = [1, 0], fr2 = fire ? (FIRE_LIGHT * flick) ** 2 : 0, fr = fire ? FIRE_LIGHT * flick : 0;
     const light = (x, y) => {
       let l = ambient, warm = 0;
       if (fire) {
-        const d = Math.hypot(x - fire.x, y - fire.y), r = FIRE_LIGHT * flick;
-        if (d < r) { const k = (1 - d / r) ** 1.4 * fireS; l += k; warm += k; }
+        const ddx = x - fire.x, ddy = y - fire.y, d2 = ddx * ddx + ddy * ddy;
+        if (d2 < fr2) { const k = (1 - Math.sqrt(d2) / fr) ** 1.4 * fireS; l += k; warm += k; }
       }
-      const dl = Math.hypot(x - px, y - py);
-      if (dl < 3.6) l += 0.5 * (1 - dl / 3.6) * (1 - day);
-      for (const p of lit) { const d = Math.hypot(x - p.x, y - p.y); if (d < 2.8) l += 0.55 * (1 - d / 2.8); }
-      return [Math.min(1.3, l), Math.min(1, warm)];
+      const ex = x - px, ey = y - py, e2 = ex * ex + ey * ey;
+      if (e2 < 12.96 && day < 1) l += 0.5 * (1 - Math.sqrt(e2) / 3.6) * (1 - day);
+      for (let i = 0; i < lit.length; i++) { const p = lit[i], qx = x - p.x, qy = y - p.y, q2 = qx * qx + qy * qy; if (q2 < 7.84) l += 0.55 * (1 - Math.sqrt(q2) / 2.8); }
+      LW[0] = l > 1.3 ? 1.3 : l; LW[1] = warm > 1 ? 1 : warm;
+      return LW;
     };
     const fogRgb = [Math.round(18 + 70 * day), Math.round(24 + 86 * day), Math.round(26 + 80 * day)];
 
+    const T0 = performance.now();
     // ---- sky and ground, per pixel ----
     const data = img.data, hz = RH / 2;
     const sky0 = [Math.round(10 + 120 * day), Math.round(13 + 150 * day), Math.round(26 + 160 * day)];
@@ -181,31 +211,33 @@ export function createView(canvas, opts = {}) {
       const row = y * RW * 4;
       if (y < hz) {
         const k = y / hz;
-        const r = sky0[0] * (1 - k) + fogRgb[0] * k, g = sky0[1] * (1 - k) + fogRgb[1] * k, b = sky0[2] * (1 - k) + fogRgb[2] * k;
-        for (let x = 0; x < RW; x++) { const i = row + x * 4; data[i] = r; data[i + 1] = g; data[i + 2] = b; data[i + 3] = 255; }
+        const r = (sky0[0] * (1 - k) + fogRgb[0] * k) | 0, g = (sky0[1] * (1 - k) + fogRgb[1] * k) | 0, b = (sky0[2] * (1 - k) + fogRgb[2] * k) | 0;
+        // The sky is one colour along a row: one fill, not RW pixel writes.
+        img32.fill((255 << 24) | (b << 16) | (g << 8) | r, y * RW, (y + 1) * RW);
         continue;
       }
       const rowDist = (EYE * focal) / (y - hz + 0.5);
       const fog = Math.min(1, rowDist / FOG_DIST);
       const lx0 = px + rowDist * (dx - plx), ly0 = py + rowDist * (dy - ply);
       const sx = (rowDist * 2 * plx) / RW, sy = (rowDist * 2 * ply) / RW;
-      let wx = lx0, wy = ly0;
+      let wx = lx0, wy = ly0, fl = 1, fw = 0;
       for (let x = 0; x < RW; x++, wx += sx, wy += sy) {
         const cx = Math.floor(wx), cy = Math.floor(wy);
         const k = cx < 0 || cy < 0 || cx >= world.W || cy >= world.H ? K.FOREST : world.grid[cy * world.W + cx];
         const base = FLOOR[k];
         const v = 0.9 + 0.2 * (((cx * 7 + cy * 13) & 7) / 7);
-        const [l, warm] = x % 2 === 0 || !lastL ? (lastL = light(wx, wy)) : lastL;
+        if ((x & 3) === 0) { const lw = light(wx, wy); fl = lw[0]; fw = lw[1]; }
+        const l = fl, warm = fw;
         const i = row + x * 4;
         data[i] = (base[0] * v * l + 60 * warm) * (1 - fog) + fogRgb[0] * day * fog;
         data[i + 1] = (base[1] * v * l + 25 * warm) * (1 - fog) + fogRgb[1] * day * fog;
         data[i + 2] = base[2] * v * l * (1 - fog) + fogRgb[2] * day * fog;
         data[i + 3] = 255;
       }
-      lastL = null;
     }
     o.putImageData(img, 0, 0);
 
+    const T1 = performance.now();
     // ---- tree walls, one DDA ray per column ----
     for (let x = 0; x < RW; x++) {
       const cam = (2 * x) / RW - 1;
@@ -249,6 +281,7 @@ export function createView(canvas, opts = {}) {
       }
     }
 
+    const T2 = performance.now();
     // ---- billboards ----
     const list = [];
     const add = (x, y, base, wWorld, hWorld, opts = {}) => list.push({ x, y, base, wWorld, hWorld, ...opts });
@@ -325,11 +358,14 @@ export function createView(canvas, opts = {}) {
       }
     }
 
+    const T3 = performance.now();
     // ---- to the screen ----
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(off, 0, 0, RW, RH, 0, 0, canvas.width, canvas.height);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const T4 = performance.now();
+    timing.floor = T1 - T0; timing.walls = T2 - T1; timing.sprites = T3 - T2; timing.blit = T4 - T3;
     const k = W / RW;
     labels.sort((a, b) => a.d - b.d);
     const placed = [];
@@ -399,10 +435,12 @@ export function createView(canvas, opts = {}) {
       ctx.strokeStyle = "rgba(255,240,200,0.9)"; ctx.lineWidth = 3;
       ctx.beginPath(); ctx.arc(W / 2, H / 2, 14, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * clock.busyFrac); ctx.stroke();
     }
+    tune(performance.now() - TS);
   }
+  const timing = { floor: 0, walls: 0, sprites: 0, blit: 0 };
   let lastL = null, lastPhase = 0;
   const strikes = [], pulses = [];
   const ripple = (size = 1) => pulses.push({ t: performance.now() / 1000, size });
 
-  return { draw, resize, ripple, get pulses() { return pulses.length; }, get visible() { return state.visible; }, get size() { return { W, H, dpr, RW, RH }; } };
+  return { draw, resize, ripple, timing, get RW() { return RW; }, get quality() { return quality; }, get avgMs() { return avgMs; }, setQuality(q) { quality = q; allocate(); }, get pulses() { return pulses.length; }, get visible() { return state.visible; }, get size() { return { W, H, dpr, RW, RH }; } };
 }

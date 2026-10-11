@@ -8,6 +8,7 @@ if [ -d /opt/pw-browsers ] && [ -d /opt/node22/lib/node_modules/playwright ]; th
   node tests/play.mjs
   node tests/view.mjs
   node tests/sound.mjs
+  node tests/perf.mjs
 else
   echo "play: SKIPPED — Playwright/Chromium not available here"
 fi

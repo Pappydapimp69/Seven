@@ -12,7 +12,7 @@
 // What the always-on layers do comes from soundscape.js, which only knows
 // public facts (the woods you are in, night, fire, pylons) — never lucidity.
 
-import { mixFor, scaleFor, placeSound, placeAngle, dirAngle, stepFor, uiSound } from "./soundscape.js?v=seven-1.12.1";
+import { mixFor, scaleFor, placeSound, placeAngle, dirAngle, stepFor, uiSound } from "./soundscape.js?v=seven-1.12.2";
 
 export const stats = { steps: 0, plays: 0, ui: 0 };
 let ctx = null, master = null, analyser = null, sfx = null, music = null, amb = null, verb = null;
@@ -21,7 +21,7 @@ let noiseBuf = null;
 const settings = { music: true, sfx: true };
 const live = { wind: null, windLfo: null, fireGain: null, firePan: null, hum: null, humGain: null, humPan: null, birdsGain: null, cricketsGain: null, musicGain: null };
 let sched = null, nextNote = 0, nextChord = 0, chordRoot = 0, lastStep = 0, nextBird = 0, nextCricket = 0, nextCrackle = 0, nextOwl = 0;
-let lastState = null, last = { x: 0, y: 0, t: 0 };
+let lastState = null, last = { x: 0, y: 0, t: 0 }, lastEase = 0;
 
 /** Call from inside a user gesture. Safe to call again. */
 export function unlock() {
@@ -203,8 +203,16 @@ export function update(st, dt) {
   let lit = null, litAge = 0;
   for (const p of st.lit) { const d = Math.hypot(p.x - L.x, p.y - L.y); if (!lit || d < lit.dist) { lit = { ...placeSound(L, L.yaw, p), dist: d }; litAge = p.age; } }
   lastState = { ...st, fireDist: fire ? fire.dist : null, fireFuel: st.fire ? st.fire.fuel : 0, litDist: lit ? lit.dist : null, litAge };
+  // The layers' levels move slowly, so they are set ten times a second, not
+  // every frame: each setTargetAtTime adds an event to the audio timeline.
+  const nowS = performance.now() / 1000;
   const m = mixFor(lastState);
   const ease = (param, v, k = 0.35) => param.setTargetAtTime(v, t, k);
+  if (nowS - lastEase >= 0.1) { lastEase = nowS; layers(m, t, ease, fire, lit); }
+  footsteps(st, L);
+}
+
+function layers(m, t, ease, fire, lit) {
   ease(live.wind.gain, m.wind, 1.2);
   ease(live.birdsGain.gain, m.birds, 1);
   ease(live.cricketsGain.gain, m.crickets, 1);
@@ -214,7 +222,9 @@ export function update(st, dt) {
   if (lit) live.humPan.pan.setTargetAtTime(lit.pan, t, 0.1);
   live.hum.forEach((o, i) => o.frequency.setTargetAtTime(m.humPitch * (i ? 1.006 : 1), t, 0.5));
   ease(live.musicGain.gain, m.music, 2);
+}
 
+function footsteps(st, L) {
   // Footsteps: from how far the lead has really moved, not from any button.
   const now = performance.now() / 1000;
   const moved = Math.hypot(L.x - last.x, L.y - last.y), gone = now - last.t;

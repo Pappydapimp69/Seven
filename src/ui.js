@@ -142,18 +142,32 @@ export function navigate(action, e) {
 }
 
 // ---- HUD --------------------------------------------------------------------
+// Writing the same text to the DOM every frame still costs a style pass each
+// time; only touch an element when what it shows has changed.
+const shown = new Map();
+function put(id, text) {
+  if (shown.get(id) === text) return;
+  shown.set(id, text);
+  $(id).textContent = text;
+}
+function flag(id, cls, on) {
+  const k = id + "." + cls;
+  if (shown.get(k) === on) return;
+  shown.set(k, on);
+  $(id).classList.toggle(cls, on);
+}
 export function hud({ count, day, clock, area, carry, pile, prompt, hint, night }) {
-  $("hud-count").textContent = count;
-  $("hud-day").textContent = `Day ${day}`;
-  $("hud-clock").textContent = clock;
-  $("hud-clock").classList.toggle("night", night);
-  $("hud-area").textContent = `Woods ${area} of 7`;
-  $("hud-wood").textContent = carry > 0 ? `Carrying ${carry} wood` : "";
-  $("hud-pile").textContent = pile ? `Pile ${pile.pile}${pile.surplus ? ` · surplus ${pile.surplus}` : ""}` : "";
-  $("prompt").textContent = prompt || "";
-  $("prompt").classList.toggle("on", !!prompt);
-  $("hint").textContent = hint || "";
-  $("hint").classList.toggle("on", !!hint);
+  put("hud-count", count);
+  put("hud-day", `Day ${day}`);
+  put("hud-clock", clock);
+  flag("hud-clock", "night", !!night);
+  put("hud-area", `Woods ${area} of 7`);
+  put("hud-wood", carry > 0 ? `Carrying ${carry} wood` : "");
+  put("hud-pile", pile ? `Pile ${pile.pile}${pile.surplus ? ` · surplus ${pile.surplus}` : ""}` : "");
+  put("prompt", prompt || "");
+  flag("prompt", "on", !!prompt);
+  put("hint", hint || "");
+  flag("hint", "on", !!hint);
 }
 
 let lastRef = null, msgTimer = 0;

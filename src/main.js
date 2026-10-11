@@ -2,20 +2,20 @@
 // this file reads sim.pending and opens the matching panel, and the panel
 // answers through the sim's exported actions.
 
-import * as S from "./sim.js?v=seven-1.12.1";
-import { perceive } from "./percept.js?v=seven-1.12.1";
-import { createView, SLOT_COLORS } from "./view.js?v=seven-1.12.1";
-import { createInput } from "./input.js?v=seven-1.12.1";
-import * as UI from "./ui.js?v=seven-1.12.1";
-import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.12.1";
-import * as Audio from "./audio.js?v=seven-1.12.1";
-import { createRng } from "./rng.js?v=seven-1.12.1";
-import { composeRoster } from "./names.js?v=seven-1.12.1";
-import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, TASK_SKILL, frontDeadfall } from "./mates.js?v=seven-1.12.1";
-import { areaOfRow, kindAt } from "./world.js?v=seven-1.12.1";
-import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_INFO, NO_SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.12.1";
+import * as S from "./sim.js?v=seven-1.12.2";
+import { perceive } from "./percept.js?v=seven-1.12.2";
+import { createView, SLOT_COLORS } from "./view.js?v=seven-1.12.2";
+import { createInput } from "./input.js?v=seven-1.12.2";
+import * as UI from "./ui.js?v=seven-1.12.2";
+import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.12.2";
+import * as Audio from "./audio.js?v=seven-1.12.2";
+import { createRng } from "./rng.js?v=seven-1.12.2";
+import { composeRoster } from "./names.js?v=seven-1.12.2";
+import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, TASK_SKILL, frontDeadfall } from "./mates.js?v=seven-1.12.2";
+import { areaOfRow, kindAt } from "./world.js?v=seven-1.12.2";
+import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_INFO, NO_SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.12.2";
 
-const BUILD = "seven-1.12.1";
+const BUILD = "seven-1.12.2";
 const esc = UI.esc;
 const store = (() => { try { return window.localStorage; } catch { return null; } })();
 const readJSON = (k, d) => { try { const v = store && store.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
@@ -448,6 +448,25 @@ window.__seven = {
   get sim() { return sim; },
   get visible() { return [...renderer.visible]; },
   get seen() { return view; },
+  get quality() { return renderer.quality; },
+  get avgMs() { return renderer.avgMs; },
+  setQ(q) { renderer.setQuality(q); },
+  get seenSize() { return renderer.size; },
+  /** Time the pieces of a frame, in ms each, averaged over n frames (for finding lag). */
+  profile(n = 60) {
+    const t = {}; const time = (k, f) => { const t0 = performance.now(); f(); t[k] = (t[k] || 0) + (performance.now() - t0) / n; };
+    for (let i = 0; i < n; i++) {
+      let v; time("perceive", () => { v = perceive(sim); v.lead.yaw = sim.lead.yaw ?? -Math.PI / 2; });
+      time("context", () => S.contextAction(sim));
+      time("view", () => renderer.draw(sim.world, v, { mod: S.minuteOfDay(sim), real: performance.now() / 1000, busyFrac: null }, 0.016));
+      time("hud", () => UI.hud({ count: v.count, day: sim.day, clock: S.clockText(sim), night: false, area: 1, carry: 0, pile: null, prompt: "", hint: "" }));
+      time("audio", () => Audio.update({ area: 0, night: false, daylight: 1, lead: { x: sim.lead.x, y: sim.lead.y, yaw: v.lead.yaw }, fire: null, lit: [], ground: 1, busy: false, panelOpen: false }, 0.016));
+      time("ticks x1", () => { S.tick(sim, {}); });
+      time("ticks x30", () => { for (let k = 0; k < 30; k++) S.tick(sim, {}); });
+    }
+    t.stages = { ...renderer.timing, RW: renderer.RW };
+    return t;
+  },
   get pulses() { return renderer.pulses; },
   Audio,
   worldMove,
