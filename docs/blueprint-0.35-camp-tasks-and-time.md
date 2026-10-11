@@ -113,6 +113,15 @@ fakes come from.
   the fire at dusk draws from the pile. Moving camp means carrying the pile or
   leaving it behind. (Today `sim.wood` is one global number; that changes.)
 
+- **Nobody is alerted.** IDEAS: nothing is announced; the replacement takes the
+  slot. A sleeping lead wakes to a full roster.
+- **The call is only heard by someone awake.** The lead hears it only if they
+  took the watch or a night shift at dusk. Otherwise whoever WAS awake may
+  mention it at dawn — and that report comes through a person, who can be the
+  fake. Nobody awake, nobody hears. The call repeats on later nights while the
+  missing one is inside the spatial window. This makes the watch the camp's
+  ear, and staying up yourself a real dusk choice.
+
 ## Open
 
 - What a "chunk" is for each task, in clock time.
