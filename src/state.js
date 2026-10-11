@@ -14,11 +14,11 @@
 // The sim's job is to keep an honest, testable record of what is TRUE; `percept.js`
 // is the only place allowed to lie about it.
 
-import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=seven-0.37.0";
-import { makeRng } from "./rng.js?v=seven-0.37.0";
-import { areaOfRow } from "./trail.js?v=seven-0.37.0";
-import { practice } from "./tasks.js?v=seven-0.37.0";
-import { updateCompanions, companionRemark } from "./party.js?v=seven-0.37.0";
+import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=seven-0.38.0";
+import { makeRng } from "./rng.js?v=seven-0.38.0";
+import { areaOfRow } from "./trail.js?v=seven-0.38.0";
+import { practice } from "./tasks.js?v=seven-0.38.0";
+import { updateCompanions, companionRemark } from "./party.js?v=seven-0.38.0";
 
 export const PARTY_SIZE = 6; // you + 5 companions — the spec's five NPCs, plus the player
 export const MAX_LUCIDITY = 100;

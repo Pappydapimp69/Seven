@@ -1,5 +1,5 @@
-import { moveWithCollision, cellToWorld } from "./world.js?v=seven-0.37.0";
-import { areaOfRow } from "./trail.js?v=seven-0.37.0";
+import { moveWithCollision, cellToWorld } from "./world.js?v=seven-0.38.0";
+import { areaOfRow } from "./trail.js?v=seven-0.38.0";
 // seven.js — Seven-specific campaign rules that do not need DOM or Three.
 
 export const TEAM_LOADOUTS = Object.freeze({

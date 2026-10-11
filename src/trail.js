@@ -23,9 +23,9 @@
 // iteration whatever it decides. A generator whose draw count depends on what it
 // already placed re-phases every later consumer of the same stream.
 
-import { makeRng } from "./rng.js?v=seven-0.37.0";
-import { CELL, FEATURE, cellToWorld } from "./world.js?v=seven-0.37.0";
-import { CELL_KIND } from "./camp.js?v=seven-0.37.0";
+import { makeRng } from "./rng.js?v=seven-0.38.0";
+import { CELL, FEATURE, cellToWorld } from "./world.js?v=seven-0.38.0";
+import { CELL_KIND } from "./camp.js?v=seven-0.38.0";
 
 /** Cells per side. 120 x 2.6 m is about 310 m — seven areas of ~16 cells each. */
 export const TRAIL_GRID = 120;
