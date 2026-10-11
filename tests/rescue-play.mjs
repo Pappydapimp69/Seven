@@ -28,7 +28,8 @@ const fails=[]; const A=(c,m)=>{if(!c)fails.push(m)};
 A(r.missing===1 && r.placed, `nobody went missing with a position by day 3: ${JSON.stringify(r)}`);
 A(r.found, "walking to the missing one did not find them");
 A(r.twinOpen, "bringing them to camp did not open the choice at the fire");
-A(r.L && r.R && r.L.length===r.R.length && r.L.filter((x,i)=>x!==r.R[i]).length>=1, `the two accounts do not differ: ${JSON.stringify([r.L,r.R])}`);
+// Different in any way: a bent fact, a swapped order, or a moment added that nobody lived (the 'shadow' kind adds a line).
+A(r.L && r.R && r.L.length && r.R.length && JSON.stringify(r.L)!==JSON.stringify(r.R), `the two accounts do not differ: ${JSON.stringify([r.L,r.R])}`);
 A(r.after && (r.after.recovered!==r.after.abandoned), `the choice did not resolve the missing one: ${JSON.stringify(r.after)}`);
 A(r.twinClosed && r.kind==="seven", "the choice did not return to Seven's HUD");
 A(errs.length===0, "page errors: "+errs.join("|"));
