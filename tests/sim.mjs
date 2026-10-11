@@ -187,7 +187,21 @@ T.check("the far side: pylons are real people + 1, each try spends one, a fake c
   assert(s.status === "ended" && s.ending.kind === "home", `ending ${s.ending && s.ending.kind}`);
 });
 
-T.check("a call sounds the same whether anyone answers", () => {
+T.check("a whistle: the near come back sooner than the far, and nobody out of earshot comes", () => {
+  const s = fresh(30);
+  setClock(s, 2, 10 * 60); s.dawnDone = 99;
+  const [near, far, gone] = s.mates;
+  s.mates.forEach((m) => { m.task = { kind: "camp", chunk: 0, carry: 0 }; m.following = false; });
+  near.x = s.lead.x + 3; near.y = s.lead.y; far.x = s.lead.x + 15; far.y = s.lead.y; gone.x = s.lead.x + 40; gone.y = s.lead.y;
+  S.callOut(s);
+  assert(!near.following && !far.following, "someone came the instant the whistle sounded");
+  let tn = -1, tf = -1;
+  for (let i = 0; i < 2 * HOUR && (tn < 0 || tf < 0); i++) { S.tick(s, {}); if (tn < 0 && near.following) tn = i; if (tf < 0 && far.following) tf = i; }
+  assert(tn >= 0 && tf >= 0 && tn < tf, `near started back at tick ${tn}, far at ${tf}`);
+  assert(!gone.following && !gone.heard, "someone forty cells off heard the whistle");
+});
+
+T.check("a whistle sounds the same whether anyone hears", () => {
   const s = fresh();
   s.mates.forEach((m) => { m.x = 1e3; });
   S.callOut(s);

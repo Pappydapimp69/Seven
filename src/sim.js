@@ -5,14 +5,14 @@
 // exported actions. Messages for the player go through sim.say(); they never
 // mention the hidden meter.
 
-import { createRng } from "./rng.js?v=seven-1.6.0";
-import { composeRoster } from "./names.js?v=seven-1.6.0";
-import { createWorld, areaOfRow, K, kindAt, walkable, lostSpots, fellTree } from "./world.js?v=seven-1.6.0";
-import { dist, cellOf, moveBody, nearestWalkable, walkTo } from "./body.js?v=seven-1.6.0";
-import { openDay, record, recordPlan, account } from "./chronicle.js?v=seven-1.6.0";
-import { makeCampAt, takeCampDown as campDown, campWood, stackWood, takeWood } from "./camp.js?v=seven-1.6.0";
-import { updateMate, setTask, chopAt, frontDeadfall, practice, moving, DAY_TASKS, NIGHT_TASKS } from "./mates.js?v=seven-1.6.0";
-import * as C from "./config.js?v=seven-1.6.0";
+import { createRng } from "./rng.js?v=seven-1.7.0";
+import { composeRoster } from "./names.js?v=seven-1.7.0";
+import { createWorld, areaOfRow, K, kindAt, walkable, lostSpots, fellTree } from "./world.js?v=seven-1.7.0";
+import { dist, cellOf, moveBody, nearestWalkable, walkTo } from "./body.js?v=seven-1.7.0";
+import { openDay, record, recordPlan, account } from "./chronicle.js?v=seven-1.7.0";
+import { makeCampAt, takeCampDown as campDown, campWood, stackWood, takeWood } from "./camp.js?v=seven-1.7.0";
+import { updateMate, setTask, chopAt, frontDeadfall, practice, moving, DAY_TASKS, NIGHT_TASKS } from "./mates.js?v=seven-1.7.0";
+import * as C from "./config.js?v=seven-1.7.0";
 
 // ---- the clock ---------------------------------------------------------------
 export const minutes = (sim) => sim.ticks * C.TICK_MIN;
@@ -223,16 +223,20 @@ export function rest(sim) {
   return { ok: true, sleep: false };
 }
 
-/** C: call out. It sounds the same whether or not anyone answers. */
+/**
+ * C: whistle. It sounds the same whether or not anyone hears. Whoever does
+ * comes back to you EVENTUALLY: the further off, the longer before they start,
+ * and they finish the chunk in their hands first.
+ */
 export function callOut(sim) {
-  sim.say("You call out.");
+  sim.say("You whistle.");
   for (const m of sim.mates) {
     if (m.asleep || dist(m, sim.lead) > C.CALL_RANGE) continue;
     if (!m.fake && m.lucidity < C.CALL_MIN_LUCIDITY) continue;
-    if (m.task && m.task.chunk > 0) m.callPending = true;
-    else m.following = true;
+    m.heard = { wait: Math.round(dist(m, sim.lead) * C.WHISTLE_DELAY) };
   }
 }
+export const whistle = callOut;
 
 function finishBusy(sim) {
   const b = sim.lead.busy, L = sim.lead, w = sim.world;

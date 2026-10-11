@@ -10,8 +10,8 @@
 // round a deadfall. All world generation draws from its own rng (seed-derived),
 // so the run's sim stream is independent of the map.
 
-import { createRng } from "./rng.js?v=seven-1.6.0";
-import { MAP_W, MAP_H, AREA_H, AREAS, TRAIL_HALF, EXIT_ROWS } from "./config.js?v=seven-1.6.0";
+import { createRng } from "./rng.js?v=seven-1.7.0";
+import { MAP_W, MAP_H, AREA_H, AREAS, TRAIL_HALF, EXIT_ROWS } from "./config.js?v=seven-1.7.0";
 
 export const K = Object.freeze({ FOREST: 0, TRAIL: 1, CLEAR: 2, DEADFALL: 3, STUMP: 4, TREE: 5, EXIT: 6 });
 const WALKABLE = [false, true, true, false, false, false, true];

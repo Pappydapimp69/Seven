@@ -161,7 +161,7 @@ const sim = (p, f) => p.evaluate(f);
   ok(y1 < y0 - 0.5, `dragging up on the left walks north (${(y1 - y0).toFixed(2)})`);
   const msgs0 = await sim(p, () => window.__seven.sim.msgs.length);
   await p.tap("[data-act='call']");
-  ok(await sim(p, () => window.__seven.sim.msgs.at(-1).text === "You call out."), "the Call button calls");
+  ok(await sim(p, () => window.__seven.sim.msgs.at(-1).text === "You whistle."), "the Whistle button whistles");
   void msgs0;
   await p.screenshot({ path: path.join(ROOT, "tests", "shot-phone.png") });
   await ctx.close();

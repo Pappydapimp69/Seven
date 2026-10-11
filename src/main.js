@@ -2,19 +2,19 @@
 // this file reads sim.pending and opens the matching panel, and the panel
 // answers through the sim's exported actions.
 
-import * as S from "./sim.js?v=seven-1.6.0";
-import { perceive } from "./percept.js?v=seven-1.6.0";
-import { createView, SLOT_COLORS } from "./view.js?v=seven-1.6.0";
-import { createInput } from "./input.js?v=seven-1.6.0";
-import * as UI from "./ui.js?v=seven-1.6.0";
-import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.6.0";
-import { createRng } from "./rng.js?v=seven-1.6.0";
-import { composeRoster } from "./names.js?v=seven-1.6.0";
-import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, frontDeadfall } from "./mates.js?v=seven-1.6.0";
-import { areaOfRow } from "./world.js?v=seven-1.6.0";
-import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_INFO, NO_SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.6.0";
+import * as S from "./sim.js?v=seven-1.7.0";
+import { perceive } from "./percept.js?v=seven-1.7.0";
+import { createView, SLOT_COLORS } from "./view.js?v=seven-1.7.0";
+import { createInput } from "./input.js?v=seven-1.7.0";
+import * as UI from "./ui.js?v=seven-1.7.0";
+import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.7.0";
+import { createRng } from "./rng.js?v=seven-1.7.0";
+import { composeRoster } from "./names.js?v=seven-1.7.0";
+import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, frontDeadfall } from "./mates.js?v=seven-1.7.0";
+import { areaOfRow } from "./world.js?v=seven-1.7.0";
+import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_INFO, NO_SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.7.0";
 
-const BUILD = "seven-1.6.0";
+const BUILD = "seven-1.7.0";
 const esc = UI.esc;
 const store = (() => { try { return window.localStorage; } catch { return null; } })();
 const readJSON = (k, d) => { try { const v = store && store.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
@@ -88,7 +88,7 @@ function howPanel(back) {
       <li><b>${label("fire")}</b> — at camp, light or feed the fire from the woodpile.</li>
       <li><b>${label("camp")}</b> — make camp here, or take it down. The woodpile stays where it is.</li>
       <li><b>${label("rest")}</b> — sleep after dark (or from the dusk panel); by day, rest an hour.</li>
-      <li><b>${label("call")}</b> — call out. Whoever hears comes, once their hands are free.</li>
+      <li><b>${label("call")}</b> — whistle. Whoever hears it comes back to you in time — the further off, the longer it takes.</li>
       <li><b>${label("pause")}</b> — pause.</li>
       <li>At camp, at <b>dawn</b> and <b>dusk</b>, you set everyone's work. Nowhere else.</li>
       <li>The fire keeps the camp safe at night — the camp only — and dies in the night unless it is stocked or someone keeps watch. Its light reaches further than its warmth.</li>
@@ -291,8 +291,8 @@ function endPanel() {
 // ---- what each control is called on the device in the player's hands ----------------
 const LABELS = {
   key: { act: "E", fire: "F", camp: "Q", rest: "R", call: "C", pause: "Esc", move: "WASD" },
-  pad: { act: "A", fire: "X", camp: "LB", rest: "B", call: "Y", pause: "Start", move: "Left stick" },
-  touch: { act: "Act", fire: "Fire", camp: "Camp", rest: "Rest", call: "Call", pause: "☰", move: "Drag on the left" },
+  pad: { act: "A", fire: "X", camp: "LB", rest: "B", call: "R3 (click the right stick)", pause: "Start", move: "Left stick" },
+  touch: { act: "Act", fire: "Fire", camp: "Camp", rest: "Rest", call: "Whistle", pause: "☰", move: "Drag on the left" },
 };
 const label = (name) => (LABELS[input.device] || LABELS.key)[name] || name;
 

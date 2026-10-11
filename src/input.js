@@ -96,7 +96,7 @@ export function createInput({ onAction, stickEl, stickKnob }) {
       if (Math.abs(rx) > 0.2) { turn += rx; device = "pad"; }
       const b = (i) => !!(gp.buttons[i] && gp.buttons[i].pressed);
       if (b(14)) mx -= 1; if (b(15)) mx += 1; if (b(12)) my -= 1; if (b(13)) my += 1;
-      const map = { 0: "act", 2: "fire", 3: "call", 4: "camp", 5: "camp", 1: "rest", 9: "pause", 8: "pause" };
+      const map = { 0: "act", 2: "fire", 11: "call", 4: "camp", 5: "camp", 1: "rest", 9: "pause", 8: "pause" };
       gp.buttons.forEach((btn, i) => {
         const was = pad.buttons[i];
         if (btn.pressed && !was) {
