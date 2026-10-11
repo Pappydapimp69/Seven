@@ -14,7 +14,7 @@
 // gathered wood is CARRIED by the gatherer and only counts once it is on the
 // pile. No rng except the wood yield a felled tree already draws.
 
-import { SKILL_MAX } from "./seven.js?v=seven-0.38.0";
+import { SKILL_MAX } from "./seven.js?v=seven-0.39.0";
 
 export const DAY_TASKS = Object.freeze(["free", "chop", "gather", "camp"]);
 export const NIGHT_TASKS = Object.freeze(["sleep", "watch", "work", "free"]);
