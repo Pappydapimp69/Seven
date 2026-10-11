@@ -5,16 +5,16 @@
 // exported actions. Messages for the player go through sim.say(); they never
 // mention the hidden meter.
 
-import { createRng } from "./rng.js?v=seven-1.14.0";
-import { composeRoster } from "./names.js?v=seven-1.14.0";
-import { createWorld, areaOfRow, K, kindAt, walkable, lostSpots, fellTree, nearestLandmark } from "./world.js?v=seven-1.14.0";
-import { dist, cellOf, moveBody, nearestWalkable, walkTo } from "./body.js?v=seven-1.14.0";
-import { openDay, record, recordPlan, account } from "./chronicle.js?v=seven-1.14.0";
-import { makeCampAt, takeCampDown as campDown, campWood, stackWood, takeWood } from "./camp.js?v=seven-1.14.0";
-import { updateMate, setTask, chopAt, frontDeadfall, practice, moving, DAY_TASKS, NIGHT_TASKS } from "./mates.js?v=seven-1.14.0";
-import * as C from "./config.js?v=seven-1.14.0";
-import { signature, whistleOf } from "./whistle.js?v=seven-1.14.0";
-import { startTutorial } from "./tutorial.js?v=seven-1.14.0";
+import { createRng } from "./rng.js?v=seven-1.15.0";
+import { composeRoster } from "./names.js?v=seven-1.15.0";
+import { createWorld, areaOfRow, K, kindAt, walkable, lostSpots, fellTree, nearestLandmark } from "./world.js?v=seven-1.15.0";
+import { dist, cellOf, moveBody, nearestWalkable, walkTo } from "./body.js?v=seven-1.15.0";
+import { openDay, record, recordPlan, account } from "./chronicle.js?v=seven-1.15.0";
+import { makeCampAt, takeCampDown as campDown, campWood, stackWood, takeWood, lightWoodFor, burnMultFor } from "./camp.js?v=seven-1.15.0";
+import { updateMate, setTask, chopAt, frontDeadfall, practice, moving, DAY_TASKS, NIGHT_TASKS } from "./mates.js?v=seven-1.15.0";
+import * as C from "./config.js?v=seven-1.15.0";
+import { signature, whistleOf } from "./whistle.js?v=seven-1.15.0";
+import { startTutorial } from "./tutorial.js?v=seven-1.15.0";
 
 // ---- the clock ---------------------------------------------------------------
 export const minutes = (sim) => sim.ticks * C.TICK_MIN;
@@ -188,7 +188,8 @@ export function fireAction(sim) {
   const c = sim.camp;
   if (busy(sim) || !atCamp(sim, sim.lead)) return { ok: false, why: c.built ? "Not at the fire." : "There is no camp." };
   if (c.fire <= 0) {
-    if (campWood(c) < C.FIRE_LIGHT_WOOD) return { ok: false, why: "Not enough wood stacked to light a fire." };
+    const need = lightWoodFor(areaOf(c));
+    if (campWood(c) < need) return { ok: false, why: `Not enough wood stacked: a fire this deep takes ${need} to light.` };
     startBusy(sim, "fire_light", C.FIRE_MIN);
     return { ok: true };
   }
@@ -277,8 +278,9 @@ function finishBusy(sim) {
       break;
     }
     case "fire_light":
-      if (campWood(sim.camp) >= C.FIRE_LIGHT_WOOD) {
-        takeWood(sim.camp, C.FIRE_LIGHT_WOOD); sim.camp.fire = C.FIRE_LIGHT_HOURS;
+      const need = lightWoodFor(areaOf(sim.camp));
+      if (campWood(sim.camp) >= need) {
+        takeWood(sim.camp, need); sim.camp.fire = C.FIRE_LIGHT_HOURS;
         record(sim, "fire", ["lead"]);
         sim.say("The fire catches.");
         sim.sfx("fire");
@@ -627,7 +629,7 @@ export function tick(sim, input = {}) {
 
   // Fire and pylons burn.
   if (sim.camp.built && sim.camp.fire > 0) {
-    sim.camp.fire = Math.max(0, sim.camp.fire - h);
+    sim.camp.fire = Math.max(0, sim.camp.fire - h * burnMultFor(areaOf(sim.camp)));
     // A fire dying in the night wakes the lead sleeping beside it: cold, dark, and time to choose.
     const mod = minuteOfDay(sim);
     if (sim.camp.fire === 0 && L.asleep && atCamp(sim, L) && (mod >= C.DUSK || mod < C.DAWN - 60)) {
@@ -700,3 +702,5 @@ function drain(sim, p, keen, night, h) {
 
 export { frontDeadfall, walkable };
 export { campWood };
+
+export { lightWoodFor, burnMultFor };

@@ -4,9 +4,9 @@
 // stays where it was, and walking camp forward past someone lost abandons
 // them with no prompt and no message.
 
-import { record } from "./chronicle.js?v=seven-1.14.0";
-import { areaOfRow } from "./world.js?v=seven-1.14.0";
-import { PILE_CAP, SURPLUS_CAP, CAMPDOWN_FALSE, DIRS8 } from "./config.js?v=seven-1.14.0";
+import { record } from "./chronicle.js?v=seven-1.15.0";
+import { areaOfRow } from "./world.js?v=seven-1.15.0";
+import { PILE_CAP, SURPLUS_CAP, CAMPDOWN_FALSE, DIRS8, FIRE_LIGHT_WOOD, LIGHT_WOOD_PER_AREA, BURN_PER_AREA } from "./config.js?v=seven-1.15.0";
 
 const areaOf = (p) => areaOfRow(Math.floor(p.y));
 
@@ -61,3 +61,9 @@ function bearingTo(from, to) {
   const ang = Math.atan2(to.x - from.x, -(to.y - from.y));
   return DIRS8[Math.round(((ang + Math.PI * 2) % (Math.PI * 2)) / (Math.PI / 4)) % 8];
 }
+
+// ---- the deeper the camp, the hungrier the fire ----------------------------------
+/** Wood to light a fire at a camp in woods `area` (0 = the first). */
+export const lightWoodFor = (area) => FIRE_LIGHT_WOOD + area * LIGHT_WOOD_PER_AREA;
+/** How many times faster a fire burns there. */
+export const burnMultFor = (area) => 1 + BURN_PER_AREA * area;

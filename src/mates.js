@@ -5,18 +5,18 @@
 // hears finishes the chunk in their hands, then follows. Work comes in chunks
 // (one chop, one tree); a day chunk is only started if it ends before dusk.
 
-import { K, bfs, kindAt, areaOfRow, fellTree, clearDeadfall } from "./world.js?v=seven-1.14.0";
-import { dist, cellOf, walkTo, nearestWalkable } from "./body.js?v=seven-1.14.0";
-import { record } from "./chronicle.js?v=seven-1.14.0";
-import { makeCampAt, takeCampDown, stackWood, takeWood, campWood } from "./camp.js?v=seven-1.14.0";
-import { pathTo, areaOfRow as rowArea, nearestLandmark, LANDMARK_NAME } from "./world.js?v=seven-1.14.0";
+import { K, bfs, kindAt, areaOfRow, fellTree, clearDeadfall } from "./world.js?v=seven-1.15.0";
+import { dist, cellOf, walkTo, nearestWalkable } from "./body.js?v=seven-1.15.0";
+import { record } from "./chronicle.js?v=seven-1.15.0";
+import { makeCampAt, takeCampDown, stackWood, takeWood, campWood, lightWoodFor } from "./camp.js?v=seven-1.15.0";
+import { pathTo, areaOfRow as rowArea, nearestLandmark, LANDMARK_NAME } from "./world.js?v=seven-1.15.0";
 import {
-  MATE_SPEED, TICK_MIN, DUSK, CHOP_MIN, CHOP_PROGRESS, CHOP_SKILL, FELL_MIN, FELL_YIELD, HAUL_LOAD,
+  MATE_SPEED, TICK_MIN, DUSK, CHOP_MIN, CHOP_PROGRESS, CHOP_SKILL, FELL_MIN, HAUL_LOAD,
   CAMP_RADIUS, WATCH_FEED_BELOW, DEADFALL_THICKER, TEAM, TEND_SKILL, MAKE_CAMP_MIN, DISMANTLE_MIN, BUILD_SKILL,
-  SCOUT_SPOT, TRACK_REACH, FIRE_LIGHT_WOOD, FIRE_LIGHT_HOURS, DIRS8, FIRE_FEED_HOURS, FIRE_MAX_HOURS, PRACTICE_CHUNKS, FAKE_LEARNS, SKILL_MAX,
-} from "./config.js?v=seven-1.14.0";
-import { hash01 } from "./rng.js?v=seven-1.14.0";
-import { whistleOf } from "./whistle.js?v=seven-1.14.0";
+  SCOUT_SPOT, TRACK_REACH, GATHER_MIN, GATHER_PIECE, GATHER_CAP, TREE_PIECES, FIRE_LIGHT_HOURS, DIRS8, FIRE_FEED_HOURS, FIRE_MAX_HOURS, PRACTICE_CHUNKS, FAKE_LEARNS, SKILL_MAX,
+} from "./config.js?v=seven-1.15.0";
+import { hash01 } from "./rng.js?v=seven-1.15.0";
+import { whistleOf } from "./whistle.js?v=seven-1.15.0";
 
 export const DAY_TASKS = Object.freeze(["free", "chop", "gather", "tend", "move", "scout", "camp"]);
 export const NIGHT_TASKS = Object.freeze(["sleep", "watch", "work", "free"]);
@@ -185,8 +185,9 @@ export function updateMate(sim, m) {
     t.chunk = 0;
     const mod = minuteOfDay(sim);
     if (mod < DUSK - 90 && !night) return;
-    if (camp.fire <= 0 && campWood(camp) >= FIRE_LIGHT_WOOD) {
-      takeWood(camp, FIRE_LIGHT_WOOD); camp.fire = FIRE_LIGHT_HOURS;
+    const need = lightWoodFor(rowArea(Math.floor(camp.y)));
+    if (camp.fire <= 0 && campWood(camp) >= need) {
+      takeWood(camp, need); camp.fire = FIRE_LIGHT_HOURS;
       record(sim, "fire", [m.id]);
       practice(m, "tend");
     } else if (camp.fire > 0 && camp.fire < WATCH_FEED_BELOW + 2 && campWood(camp) > 0) {
@@ -247,11 +248,14 @@ export function updateMate(sim, m) {
   }
 
   if (kind === "gather") {
-    if (t.carry > 0) {
-      if (dist(m, camp) <= CAMP_RADIUS - 0.5) { t.carry = stackWood(camp, t.carry); if (t.carry === 0) afterChunk(m); else { m.following = false; } return; }
+    // One piece a time: they head in with a handful, not after every piece.
+    const cap = GATHER_CAP + Math.floor((m.skills.carry || 0) / 2);
+    if (t.carry > 0 && (t.carry >= cap || t.returning || (t.chunk === 0 && !(t.kind === "work" || fits(sim, GATHER_MIN))))) {
+      t.returning = true;
+      if (dist(m, camp) <= CAMP_RADIUS - 0.5) { t.carry = stackWood(camp, t.carry); if (t.carry === 0) { t.returning = false; afterChunk(m); } else { m.following = false; } return; }
       return goCamp(sim, m);
     }
-    if (t.chunk === 0 && !(t.kind === "work" || fits(sim, FELL_MIN))) return goCamp(sim, m);
+    if (t.chunk === 0 && !(t.kind === "work" || fits(sim, GATHER_MIN))) return goCamp(sim, m);
     // An old woodpile left where a camp came down is hauled in first: it is wood already cut.
     const pile = sim.piles.filter((p) => p.wood > 0).sort((a, b) => dist(a, m) - dist(b, m))[0];
     if (pile) {
@@ -266,7 +270,7 @@ export function updateMate(sim, m) {
     let tree = t.tree ? w.trees.find((x) => x.id === t.tree) : null;
     if (!tree || tree.felled) {
       tree = null; t.tree = null; t.chunk = 0;
-      if (t.noTree > 0) { t.noTree--; return goCamp(sim, m); }
+      if (t.noTree > 0) { t.noTree--; if (t.carry > 0) t.returning = true; return goCamp(sim, m); }
       const c = cellOf(m), campArea = areaOfRow(Math.floor(camp.y));
       let found = null;
       const path = bfs(w, c.cx, c.cy, (x, y) => {
@@ -276,16 +280,17 @@ export function updateMate(sim, m) {
         return false;
       }, 4000);
       tree = path && found ? w.trees.find((x) => x.cx === found.x && x.cy === found.y) : null;
-      if (!tree) { t.noTree = 150; return goCamp(sim, m); }
+      if (!tree) { t.noTree = 150; if (t.carry > 0) t.returning = true; return goCamp(sim, m); }
       t.tree = tree.id; t.stand = { cx: found.sx, cy: found.sy };
     }
     if (t.chunk === 0 && walkTo(w, m, t.stand.cx, t.stand.cy, MATE_SPEED) !== "arrived") return;
     t.chunk += TICK_MIN;
-    if (t.chunk >= FELL_MIN / (1 + 0.12 * (m.skills.carry || 0))) {
+    if (t.chunk >= GATHER_MIN / (1 + 0.12 * (m.skills.carry || 0))) {
       t.chunk = 0;
-      fellTree(w, tree);
-      t.tree = null;
-      t.carry += sim.rng.int(FELL_YIELD[0], FELL_YIELD[1]) + Math.floor((m.skills.carry || 0) / 2);
+      // ONE piece per action. A tree gives only so many; the last one brings it down.
+      t.carry += GATHER_PIECE;
+      tree.left = (tree.left ?? TREE_PIECES) - 1;
+      if (tree.left <= 0) { fellTree(w, tree); t.tree = null; }
       record(sim, "fell", [m.id]);
       practice(m, "carry");
       if (m.callPending) { m.callPending = false; m.following = true; }

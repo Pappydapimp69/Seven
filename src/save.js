@@ -4,10 +4,10 @@
 // (Brain mirage#E8: a round trip agreeing with itself is not proof); a body
 // standing in a wall is moved to the nearest open cell.
 
-import { createRng } from "./rng.js?v=seven-1.14.0";
-import { createWorld, clearDeadfall, fellTree, walkable } from "./world.js?v=seven-1.14.0";
-import { nearestWalkable } from "./body.js?v=seven-1.14.0";
-import { attach } from "./sim.js?v=seven-1.14.0";
+import { createRng } from "./rng.js?v=seven-1.15.0";
+import { createWorld, clearDeadfall, fellTree, walkable } from "./world.js?v=seven-1.15.0";
+import { nearestWalkable } from "./body.js?v=seven-1.15.0";
+import { attach } from "./sim.js?v=seven-1.15.0";
 
 export const SAVE_VERSION = 1;
 export const SAVE_KEY = "seven:run";
@@ -31,6 +31,7 @@ export function serialize(sim) {
     world: {
       deadfalls: w.deadfalls.map((d) => ({ progress: d.progress, cleared: d.cleared })),
       felled: w.trees.filter((t) => t.felled).map((t) => t.id),
+      treeLeft: w.trees.filter((t) => !t.felled && t.left != null).map((t) => [t.id, t.left]),   // pieces gathered from a tree still standing
       pylons: w.pylons.map((p) => ({ state: p.state, litAt: p.litAt })),
     },
   };
@@ -40,6 +41,7 @@ export function deserialize(data) {
   if (!data || data.version !== SAVE_VERSION || !Number.isFinite(data.seed)) return null;
   const world = createWorld(data.seed);
   data.world.deadfalls.forEach((s, i) => { const d = world.deadfalls[i]; if (!d) return; d.progress = s.progress; if (s.cleared) clearDeadfall(world, d); });
+  for (const [id, left] of data.world.treeLeft || []) { const t = world.trees.find((x) => x.id === id); if (t && Number.isInteger(left)) t.left = left; }
   for (const id of data.world.felled) { const t = world.trees.find((x) => x.id === id); if (t) fellTree(world, t); }
   data.world.pylons.forEach((s, i) => { const p = world.pylons[i]; if (p) { p.state = s.state; p.litAt = s.litAt; } });
   const rng = createRng(data.seed); rng.state = data.rng;

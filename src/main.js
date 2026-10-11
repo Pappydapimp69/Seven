@@ -2,21 +2,21 @@
 // this file reads sim.pending and opens the matching panel, and the panel
 // answers through the sim's exported actions.
 
-import * as S from "./sim.js?v=seven-1.14.0";
-import { perceive } from "./percept.js?v=seven-1.14.0";
-import { createView, SLOT_COLORS } from "./view.js?v=seven-1.14.0";
-import { createInput } from "./input.js?v=seven-1.14.0";
-import * as UI from "./ui.js?v=seven-1.14.0";
-import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.14.0";
-import { STEPS, TRAINEES, tutorialStep } from "./tutorial.js?v=seven-1.14.0";
-import * as Audio from "./audio.js?v=seven-1.14.0";
-import { createRng } from "./rng.js?v=seven-1.14.0";
-import { composeRoster } from "./names.js?v=seven-1.14.0";
-import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, TASK_SKILL, frontDeadfall } from "./mates.js?v=seven-1.14.0";
-import { areaOfRow, kindAt } from "./world.js?v=seven-1.14.0";
-import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_INFO, NO_SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.14.0";
+import * as S from "./sim.js?v=seven-1.15.0";
+import { perceive } from "./percept.js?v=seven-1.15.0";
+import { createView, SLOT_COLORS } from "./view.js?v=seven-1.15.0";
+import { createInput } from "./input.js?v=seven-1.15.0";
+import * as UI from "./ui.js?v=seven-1.15.0";
+import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.15.0";
+import { STEPS, TRAINEES, tutorialStep } from "./tutorial.js?v=seven-1.15.0";
+import * as Audio from "./audio.js?v=seven-1.15.0";
+import { createRng } from "./rng.js?v=seven-1.15.0";
+import { composeRoster } from "./names.js?v=seven-1.15.0";
+import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, TASK_SKILL, frontDeadfall } from "./mates.js?v=seven-1.15.0";
+import { areaOfRow, kindAt } from "./world.js?v=seven-1.15.0";
+import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_INFO, NO_SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.15.0";
 
-const BUILD = "seven-1.14.0";
+const BUILD = "seven-1.15.0";
 const esc = UI.esc;
 const store = (() => { try { return window.localStorage; } catch { return null; } })();
 const readJSON = (k, d) => { try { const v = store && store.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
@@ -369,7 +369,7 @@ function hintText() {
     return `No camp yet. ${k("Q", "Camp")} makes one where you stand — nothing is safe at night without it.`;
   if (L.carry > 0 && c.built && !S.atCamp(sim, L)) return "Carry the wood back to camp. It counts once it is on the pile.";
   if (S.isNight(sim)) {
-    if (c.built && S.atCamp(sim, L) && c.fire <= 0 && S.campWood(c) >= 2) return `${k("F", "Fire")} lights the fire. It keeps the camp safe tonight — the camp only.`;
+    if (c.built && S.atCamp(sim, L) && c.fire <= 0 && S.campWood(c) >= S.lightWoodFor(areaOfRow(Math.floor(c.y)))) return `${k("F", "Fire")} lights the fire (it takes ${S.lightWoodFor(areaOfRow(Math.floor(c.y)))} wood this deep, and burns faster the deeper you go). It keeps the camp safe tonight — the camp only.`;
     if (c.built && S.atCamp(sim, L) && c.fire > 0) return `${k("R", "Rest")} to sleep. ${k("F", "Fire")} first to stock the fire — it has to last till dawn, or someone has to keep watch.`;
     if (c.built && S.atCamp(sim, L)) return `${k("R", "Rest")} to sleep. With no fire, the camp is not safe tonight.`;
     if (c.built && !S.atCamp(sim, L)) return "It is dark. Get back to the fire.";

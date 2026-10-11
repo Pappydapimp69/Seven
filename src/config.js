@@ -67,6 +67,12 @@ export const DEADFALL_THICKER = 0.25;        // each area deeper, a trunk takes 
 export const FELL_MIN = 60;
 export const FELL_YIELD = [3, 5];
 export const HAUL_LOAD = 6;
+// A companion gathering: ONE piece of wood per action, however skilled (skill makes the action
+// quicker and the load bigger, never the piece bigger). A tree has only so many pieces.
+export const GATHER_MIN = 30;
+export const GATHER_PIECE = 1;
+export const GATHER_CAP = 3;                 // pieces carried before heading in; +1 per two carry levels
+export const TREE_PIECES = 4;
 export const MAKE_CAMP_MIN = 120;
 export const DISMANTLE_MIN = 60;
 export const FIRE_MIN = 15;
@@ -77,7 +83,9 @@ export const REST_MIN = 60;                  // resting by day passes an hour
 // ---- camp and fire ----------------------------------------------------------
 export const CAMP_RADIUS = 3.5;              // the fire's shield: the campsite only
 export const FIRE_LIGHT = 7.5;               // its light reaches further. Light is not safety.
-export const FIRE_LIGHT_WOOD = 2;
+export const FIRE_LIGHT_WOOD = 2;            // to light a fire in the first woods...
+export const LIGHT_WOOD_PER_AREA = 1;        // ...and one more for every woods deeper
+export const BURN_PER_AREA = 0.25;           // a fire burns 25% faster for every woods deeper
 export const FIRE_LIGHT_HOURS = 3;
 export const FIRE_FEED_HOURS = 1.5;
 export const FIRE_MAX_HOURS = 14;
