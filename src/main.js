@@ -27,6 +27,7 @@ import { keyed } from "./keys.js?v=seven-0.34.0";
 import { createInput, ACTIONS } from "./input.js?v=seven-0.34.0";
 import { createAudio } from "./audio.js?v=seven-0.34.0";
 import { createDiag } from "./diag.js?v=seven-0.34.0";
+import { generateTrail, areaOfRow } from "./trail.js?v=seven-0.34.0";
 import { hashSeed, makeRng } from "./rng.js?v=seven-0.34.0";
 import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.34.0";
 
@@ -1215,7 +1216,7 @@ function startSeven({ seed, difficulty, team } = {}) {
   campaignSeed = seedValue;
   tut = null;
   setObjective(null);
-  const world = generateWorld(seedValue, { dense: true });
+  const world = generateTrail(seedValue);
   const sim = createRun({ seed: seedValue, difficulty: difficulty || "standard", level: 1, campaignLength: 1, world });
   sim.seven = true;
   sim.expedition = createExpedition();

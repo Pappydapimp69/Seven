@@ -19,6 +19,7 @@
 
 import { createRun } from "./state.js?v=seven-0.34.0";
 import { generateWorld } from "./world.js?v=seven-0.34.0";
+import { generateTrail } from "./trail.js?v=seven-0.34.0";
 import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.34.0";
 import { attachSites, serializeWoods, deserializeWoods } from "./woods.js?v=seven-0.34.0";
 import { serializeExpedition, deserializeExpedition } from "./expedition.js?v=seven-0.34.0";
@@ -74,7 +75,9 @@ export const SAVE_KEY = "seven:run";
 // the expedition record carries day/area/missing-person branch state.
 // v8: Seven disappearances became playable mysteries: asks, accounts,
 // accusations, and search-ready recovery state now ride inside expedition.
-export const SAVE_VERSION = 8;
+// v9: Seven walks trail.js's woods, not the dense basin. A v8 Seven save would
+// regenerate onto a different map with its positions pasted on, so it is refused.
+export const SAVE_VERSION = 9;
 
 const store = () => (typeof localStorage === "undefined" ? null : localStorage);
 
@@ -371,7 +374,7 @@ export function deserializeRun(data) {
   // is the routing key because it is already in every payload at every
   // version, which is exactly what camp.js said it was for.
   const camp = data.seed === CAMP_SEED;
-  const world = camp ? attachSites(buildCamp()) : data.expedition ? generateWorld(data.seed, { dense: true }) : null;
+  const world = camp ? attachSites(buildCamp()) : data.expedition ? generateTrail(data.seed) : null;
   const sim = createRun({
     seed: data.seed,
     difficulty: data.difficulty,

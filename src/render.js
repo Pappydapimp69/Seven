@@ -446,19 +446,39 @@ export function createRenderer(canvas, sim) {
 
     // TREES, for the perimeter wall and the thin wood inside it. Instanced —
     // there are over a thousand.
-    let treeCount = 0;
-    for (let i = 0; i < sim.world.cellKind.length; i++) {
-      const k = sim.world.cellKind[i];
-      if (k === KIND.TREELINE || k === KIND.WOOD) treeCount++;
+    // THE TRAIL'S FOREST IS MOSTLY INTERIOR. Seven's woods are 120 cells a
+    // side and ~85% forest; drawing every cell put 550k triangles on screen,
+    // nearly all of them behind the first rows of trunks and the fog. Only
+    // trees within SEEN_DEPTH cells of walkable ground are drawn. The camp is
+    // small enough to draw whole, so it keeps every tree.
+    const SEEN_DEPTH = 4;
+    let visibleTree = null;
+    if (sim.world.trail) {
+      const near = new Uint8Array(grid * grid);
+      for (let i = 0; i < near.length; i++) if (!sim.world.blocked[i]) near[i] = 1;
+      for (let pass = 0; pass < SEEN_DEPTH; pass++) {
+        const next = Uint8Array.from(near);
+        for (let cz = 1; cz < grid - 1; cz++) for (let cx = 1; cx < grid - 1; cx++) {
+          const i = cz * grid + cx;
+          if (!near[i] && (near[i - 1] || near[i + 1] || near[i - grid] || near[i + grid])) next[i] = 1;
+        }
+        near.set(next);
+      }
+      visibleTree = near;
     }
+    const drawsTree = (cx, cz) => {
+      const k = kindAt(cx, cz);
+      return (k === KIND.TREELINE || k === KIND.WOOD) && (!visibleTree || visibleTree[cz * grid + cx]);
+    };
+    let treeCount = 0;
+    for (let cz = 0; cz < grid; cz++) for (let cx = 0; cx < grid; cx++) if (drawsTree(cx, cz)) treeCount++;
     const trunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.22, 0.32, 3.4, 5), trunkMat, treeCount);
     const crowns = new THREE.InstancedMesh(new THREE.ConeGeometry(1.5, 4.4, 6), leafMat, treeCount);
     const m = new THREE.Matrix4(), q = new THREE.Quaternion();
     let n = 0;
     for (let cz = 0; cz < grid; cz++) {
       for (let cx = 0; cx < grid; cx++) {
-        const k = kindAt(cx, cz);
-        if (k !== KIND.TREELINE && k !== KIND.WOOD) continue;
+        if (!drawsTree(cx, cz)) continue;
         const { x, z } = cellToWorld(cx, cz, grid);
         // Deterministic jitter from the cell index — the same camp every time,
         // without touching the sim's rng.

@@ -51,6 +51,10 @@ echo "== expedition (one woods, many days) =="
 node tests/expedition.mjs
 echo
 
+echo "== trail (the woods: big, zoned, gated by time) =="
+node tests/trail.mjs
+echo
+
 echo "== seven (team loadouts and final choices) =="
 node tests/seven.mjs
 echo
