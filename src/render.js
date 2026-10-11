@@ -7,7 +7,7 @@
 
 import * as THREE from "../lib/three.module.js";
 import { CELL, cellToWorld, gridOf } from "./world.js?v=seven-0.34.0";
-import { nightFactor } from "./state.js?v=seven-0.34.0";
+import { nightFactor, pylonBurn } from "./state.js?v=seven-0.34.0";
 import { perceivedMonoliths, perceivedPylons, perceivedCompanions, perceivedWorldItems, perceivedSelected, distortion } from "./percept.js?v=seven-0.34.0";
 import { PYLON_RADIUS } from "./state.js?v=seven-0.34.0";
 import { WEATHER_LOOK, dayMarks } from "./woods.js?v=seven-0.34.0";
@@ -1359,6 +1359,18 @@ export function createRenderer(canvas, sim) {
       obj.userData.glow.intensity = live ? 0.5 + shown * 1.4 : 0.05;
       obj.userData.ring.material.opacity = live ? 0.12 + shown * 0.22 : 0.05;
       obj.userData.ring.material.color.set(live ? PALETTE.pylonLive : PALETTE.pylonDead);
+      // SEVEN: a lit pylon BURNS, blue to red over 36 hours, then goes dark.
+      // Read off the real pylon by id — the burn is the one honest instrument.
+      const real = sim.expedition ? sim.pylons.find((x) => x.id === p.id) : null;
+      const burn = real ? pylonBurn(sim, real) : 0;
+      if (burn > 0) {
+        const c = new THREE.Color(PALETTE.pylonLive).lerp(new THREE.Color(0xff4a2a), 1 - burn);
+        obj.userData.core.material.color.copy(c);
+        obj.userData.ring.material.color.copy(c);
+        obj.userData.core.scale.setScalar(1.0 + burn * 0.4 + Math.sin(elapsed * 2 + p.x) * 0.05);
+        obj.userData.glow.intensity = 0.9 + burn * 1.6;
+        obj.userData.ring.material.opacity = 0.2 + burn * 0.25;
+      }
     }
 
     // ---- ground items — kind SHOWN can be a lie, but the mesh itself never is:

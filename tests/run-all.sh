@@ -63,6 +63,10 @@ echo "== campfire (one camp, a woodpile, a fire that lasts a night) =="
 node tests/campfire.mjs
 echo
 
+echo "== pylon zones (a lit pylon shields its area from depth, 36h) =="
+node tests/pylonzone.mjs
+echo
+
 echo "== seven (team loadouts and final choices) =="
 node tests/seven.mjs
 echo

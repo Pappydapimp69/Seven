@@ -16,6 +16,7 @@
 
 import { generateWorld, worldToCell, cellToWorld, moveWithCollision, isBlockedAt, CELL, ITEM_KINDS, FEATURE } from "./world.js?v=seven-0.34.0";
 import { makeRng } from "./rng.js?v=seven-0.34.0";
+import { areaOfRow } from "./trail.js?v=seven-0.34.0";
 import { updateCompanions, companionRemark } from "./party.js?v=seven-0.34.0";
 
 export const PARTY_SIZE = 6; // you + 5 companions — the spec's five NPCs, plus the player
@@ -170,6 +171,24 @@ export function sevenClock(t) {
     hoursToDusk: night ? 0 : DUSK_HOUR - hour,
     hoursToDawn: night ? (DAWN_HOUR - hour + 24) % 24 : 0,
   };
+}
+/**
+ * PYLONS SHIELD DEPTH, per area (blueprint 0.35; IDEAS: a pylon slows the fill,
+ * it is not a reset). A lit pylon cancels the depth multiplier for every mind in
+ * ITS area — the route band it stands in — for 36 clock hours, then burns out.
+ * Lighting a second in the same area does not stack; it only burns later.
+ * `spent` still means lit; `litAt` is the only new field (Brain: delete the old
+ * model's fields rather than growing a parallel one).
+ */
+export const PYLON_BURN = 36 * GAME_HOUR;
+export function pylonBurn(sim, p) {
+  if (!sim.expedition || !p || !p.spent || p.litAt == null) return 0;
+  return Math.max(0, 1 - (sim.time - p.litAt) / PYLON_BURN);
+}
+export function areaShielded(sim, ch) {
+  if (!sim.expedition || !sim.world || !sim.world.trail || !ch) return false;
+  const a = areaOfRow(worldToCell(ch.x, ch.z, sim.world.grid).cz);
+  return sim.pylons.some((p) => p.area === a && pylonBurn(sim, p) > 0);
 }
 
 /** Which day it is, 1-based. */
@@ -848,6 +867,7 @@ export function activatePylon(sim, actor = sim.player) {
 
   const inside = sim.party.filter((c) => dist2D(p, c) <= PYLON_RADIUS);
   p.spent = true;
+  if (sim.expedition) p.litAt = sim.time;
   for (const ch of inside) {
     if (ch.hallucinating) recover(sim, ch, "pylon");
     ch.lucidity = Math.min(MAX_LUCIDITY, ch.lucidity + PYLON_DRAW);
@@ -940,7 +960,7 @@ export function tickLucidity(sim, ch, dt) {
   // the draw count are exactly what they were in daylight.
   const night = nightFactor(sim, ch);
   if (night > 0) mult *= 1 + (NIGHT_DRAIN_MULT - 1) * night;
-  const depthMult = 1 + DEPTH_DRAIN * depthOf(sim, ch);
+  const depthMult = 1 + DEPTH_DRAIN * (areaShielded(sim, ch) ? 0 : depthOf(sim, ch));
   mult *= depthMult;
   if (sim.expedition) {
     mult *= SEVEN_DRAIN_SCALE;

@@ -308,6 +308,8 @@ export function serializeRun(sim) {
       // RESTORED one, which confirmed a pylon a tick early there and put the
       // two runs permanently out of phase. Measured: 12 of 60 seeds forked.
       spent: !!p.spent, primedBy: [...(p.primedBy || [])], primedAt: p.primedAt ?? -1e9,
+      // Seven: which area the pylon shields, and when it was lit (it burns 36h).
+      ...(p.area !== undefined ? { area: p.area } : {}), ...(p.litAt != null ? { litAt: p.litAt } : {}),
     })),
     // The built fire, whole. Same reason the pylons above are saved whole: it
     // exists in no seed-generated world, so nothing can rebuild it.
