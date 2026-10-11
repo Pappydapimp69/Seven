@@ -69,7 +69,12 @@ fakes come from.
 
 - What a "chunk" is for each task, in clock time.
 - Night risk numbers: alone, away from camp, no fire.
-- Fire vs pylon roles (leaning: fire shields NIGHT only, as the code does now;
+- DECIDED 2026-10-11: fire shields NIGHT only; pylons shield DEPTH and decay —
+  one lit in an area slows sanity loss for a day or two, then burns out. The
+  campfire burns out overnight unless stocked with enough wood to reach
+  morning, or someone is tasked with feeding it (a night watch).
+- Open: pylons per area; whether a fire dying hits everyone or only the waking.
+- (was) Fire vs pylon roles (leaning: fire shields NIGHT only, as the code does now;
   pylon shields DEPTH, scarce, burns down; neither heals — IDEAS: a pylon slows
   the fill rate, it is not a reset). If fire also blunts depth, pylons become
   redundant and the rotting supply line dies.
