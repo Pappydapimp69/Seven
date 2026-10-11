@@ -4,33 +4,26 @@ A fork of MIRAGE. The design of record is `docs/IDEAS.md` — the entry titled
 **"THE WOODS: full design note"**. Read it before doing anything non-trivial.
 `docs/HANDOFF-the-woods.md` says which slice to build first and why.
 
-## Where it is now (2026-08-30)
+## Where it is now (2026-10-11): seven-1.0.0, the remake
 
-**The alpha is built, deployed and playable: https://pappydapimp69.github.io/Seven/**
-One scripted day, a swap in the night, three questions in the morning, and a
-name. `docs/PLAYTEST-the-woods.md` says what to watch for; it is the first
-thing to read before touching anything.
+**Live: https://pappydapimp69.github.io/Seven/**
 
-What shipped, and where it lives:
+The owner had the game remade from the ground up ("it's too buggy"). It is now
+a 2D top-down canvas game with no build step; the old 3D MIRAGE-derived code is
+gone (last at commit 98af10a, seven-0.41.0). Read `docs/adr/0004-the-remake.md`
+and `docs/blueprint-1.0-remake.md` first.
 
-- `src/names.js` — the roster, composed per run rather than picked.
-- `src/chronicle.js` — the record of the day, the account derived from it, and
-  the ONE fact bent for a fake. This is the file the whole design rests on.
-- `src/woods.js` — the day, the night, the morning, the verdict.
-- `src/main.js` / `index.html` / `css/style.css` — the wiring and the panels.
-- `tests/names.mjs`, `tests/chronicle.mjs`, `tests/woods.mjs`, and
-  `tests/woods-play.mjs` (a whole day in a real browser, to a verdict).
-- ADRs `0002-the-woods-alpha.md` (why this slice) and `0003-two-alphas.md`
-  (it was built twice, in parallel — what happened to the other one).
-
-Nothing beyond the alpha is built, on purpose: no map, no travel, no crafting,
-no day/night, no pylons, no recruitment, no skills, no meta-progression, no
-ending. All of it is in the design note and none of it matters if the asking
-is not fun. **Do not start it before the playtest answers that.**
-
-The one instrument that will answer it: every finished day writes a line to
-`seven:days` and the title screen shows days walked, caught, and how many of
-the last five. The interesting shape is a hit rate that climbs and then stops.
+- `src/config.js` — every tuning number.
+- `src/world.js` — the map: trail, seven areas, sealed deadfall rows, pockets
+  with pylons, fellable trees, BFS.
+- `src/sim.js` — the truth: clock, the lead's actions, camp/fire/woodpile,
+  pylons, plans, the night, rescue and the twin, the far side.
+- `src/mates.js` — companions' tasks, one state machine.
+- `src/chronicle.js` — the day's facts and the account (a fake bends ONE fact).
+- `src/percept.js` — the only liar. `src/render.js` draws from it.
+- `src/save.js`, `src/input.js`, `src/ui.js`, `src/main.js` (panels + loop).
+- Tests: `tests/run-all.sh` — world, sim, chronicle, save, triggers, a
+  whole-run bot (`tests/bot.mjs`), and `tests/play.mjs` in a real browser.
 
 ## Before you edit anything
 
@@ -86,7 +79,7 @@ file-by-file why anything is stuck — run it after any sync.
 
 ## What this repo is, and is not
 
-MIRAGE is the BONES: the sim/percept split, the party, the verbs, the save
+MIRAGE was the BONES: the sim/percept split, the party, the verbs, the save
 discipline, the test harness. All of it works and ships. SEVEN adds organs.
 
 The owner's framing: *"If you break the bones, the whole system flops over and
@@ -190,8 +183,8 @@ history — `git log` before 2ddae20 is MIRAGE's, and the commit messages there
 are the best record of why things are shaped the way they are.
 
 MIRAGE itself was built inside `Pappydapimp69/Opticon` and extracted once it
-stood on its own (`docs/adr/0001-extracted-from-opticon.md`). `lib/three.module.js`
-is a real vendored copy, not a shim.
+stood on its own (`docs/adr/0001-extracted-from-opticon.md`). Since seven-1.0.0
+none of that code remains in this repo; the history is still there.
 
 Relevant Brain entries, all first-hand from building the bones: `mirage#E11`
 (cross-frame state on an object the caller rebuilds), `#E13` (a window predicate
@@ -201,19 +194,11 @@ not just preemption), `#E15` (chain cohesion is not proximity), `#E16` (a guard
 that never failed is unmeasured). `brain query deduction` and `accusation` both
 return zero — that ground is uncovered, so there is no prior art to miss.
 
-## Two things worth knowing before you touch the save
+## Before you touch the save
 
-- **The camp is not a seed.** Its map is authored, so `deserializeRun` routes
-  the sentinel seed to `buildCamp()`. Before that existed, a saved camp run
-  resumed as a procedurally generated BASIN with the camp positions pasted on,
-  and nothing errored anywhere.
 - **`/mirage/` and `/seven/` share one localStorage.** GitHub Pages serves every
-  project of one account from ONE origin; the project name is a path. SEVEN's
-  keys are namespaced (`seven:run`, `seven:settings`, `seven:days`) for that
-  reason. Do not un-namespace them.
+  project of one account from ONE origin. SEVEN's keys are namespaced
+  (`seven:run`, `seven:pool`, `seven:runs`). Do not un-namespace them.
+- **Walkers' paths are save state.** Dropping them on save made a resumed run
+  diverge (`tests/save.mjs` catches it).
 
-## Inherited open item
-`tests/balance.mjs` is RED: the `deceived` bot policy wins 17% of standard seeds
-against a 35% assertion, `deceived/bleak` 0%. This is a difficulty decision the
-owner has not made, not a bug — the structural bugs behind it were found and
-fixed. Do not "fix" it by tuning constants they chose.

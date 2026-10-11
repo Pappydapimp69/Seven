@@ -1,5 +1,8 @@
 # Working list
 
+> **2026-10-11: the game was remade from scratch (seven-1.0.0, ADR 0004).** Items below
+> that name files under `src/` or old tests describe the old codebase (commit 98af10a).
+
 Brain's local store holds **proposals** — things I already believe and want
 promoted. It has nowhere for **open items**: a ripple I predicted but have not
 confirmed, a non-blocking bug found mid-batch, a hypothesis to try next. Those

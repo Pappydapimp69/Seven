@@ -1,2608 +1,343 @@
-// main.js — wiring. Menu -> run -> debrief, and the frame loop that pumps
-// input into the sim, the sim into perception, and perception into the screen.
+// main.js — the loop, the panels, and the wiring. The sim never sees the DOM;
+// this file reads sim.pending and opens the matching panel, and the panel
+// answers through the sim's exported actions.
 
-import {
-  createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem, dropItem, craftItem, gatherTarget, offerItem,
-  possess, release, possessableCompanions, activatePylon, pylonAt,
-  callCompanion, clearMoss, mossedAt, feedFire, buildFire, FIRE_COST,
-  PARTY_SIZE, DIFFICULTY, reachOf, LOG_RADIUS, CORROBORATE_RADIUS, GAME_HOUR, sevenClock, SEVEN_CAMP_RADIUS, woodForFire, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
-} from "./state.js?v=seven-0.41.0";
-import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.41.0";
-import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.41.0";
-import { generateWorld, worldToCell } from "./world.js?v=seven-0.41.0";
-import {
-  attachSites, startDay, beatAt, briefFor, canWork, workBeat, fallNight, ask, accuse,
-  updateWorkHold, dawnLine, BEATS, PHASE, ASKS_ALLOWED,
-} from "./woods.js?v=seven-0.41.0";
-import {
-  createExpedition, spendDaylight, recordFact, sleep, resolveNight, advanceArea, placeMissing, twinAccounts, resolveTwin, SEVEN_NIGHT_CHANCE,
-  recoverMissing, activeMystery, askMystery, accuseMystery, proveMystery, MYSTERY_ASKS_ALLOWED,
-  startKeystoneMorning, advanceKeystoneMorning,
-} from "./expedition.js?v=seven-0.41.0";
-import { DEFAULT_TEAM, applyTeamLoadout, teamSkill, finalDecision, finalCount, nearbyIds, campIds, FIRE_DAYLIGHT, restCheck, raiseSkill, SKILL_MAX, createCamp, depositWood, dismantleCamp, makeCamp,
-  dawnCalls, loudWord, missingSpot, checkFound, stepFound, startHomeward, lightHomePylon, homewardOver, finishHomeward, nightExposure, pickUpPiles } from "./seven.js?v=seven-0.41.0";
-import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.41.0";
-import { createRenderer } from "./render.js?v=seven-0.41.0";
-import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.41.0";
-import { keyed } from "./keys.js?v=seven-0.41.0";
-import { createInput, ACTIONS } from "./input.js?v=seven-0.41.0";
-import { createAudio } from "./audio.js?v=seven-0.41.0";
-import { createDiag } from "./diag.js?v=seven-0.41.0";
-import { generateTrail, areaOfRow } from "./trail.js?v=seven-0.41.0";
-import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, setTask, effectiveKind } from "./tasks.js?v=seven-0.41.0";
-import { hashSeed, makeRng } from "./rng.js?v=seven-0.41.0";
-import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.41.0";
+import * as S from "./sim.js?v=seven-1.0.0";
+import { perceive } from "./percept.js?v=seven-1.0.0";
+import { createRenderer, SLOT_COLORS } from "./render.js?v=seven-1.0.0";
+import { createInput } from "./input.js?v=seven-1.0.0";
+import * as UI from "./ui.js?v=seven-1.0.0";
+import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.0.0";
+import { createRng } from "./rng.js?v=seven-1.0.0";
+import { composeRoster } from "./names.js?v=seven-1.0.0";
+import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, frontDeadfall } from "./mates.js?v=seven-1.0.0";
+import { areaOfRow } from "./world.js?v=seven-1.0.0";
+import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_MAX, TEAM, RETURN_FRACTION } from "./config.js?v=seven-1.0.0";
 
-const BUILD = "seven-0.41.0";
+const BUILD = "seven-1.0.0";
+const esc = UI.esc;
+const store = (() => { try { return window.localStorage; } catch { return null; } })();
+const readJSON = (k, d) => { try { const v = store && store.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
+const writeJSON = (k, v) => { try { store && store.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } };
 
-const el = (id) => document.getElementById(id);
-const canvas = el("gl");
+const canvas = document.getElementById("game");
+const renderer = createRenderer(canvas);
+let sim = null, view = null, headless = false, endShown = false, moved = false, lastSave = 0, acc = 0;
 
-const audio = createAudio();
-// ONE persistent input instance for the whole app lifetime — title, pause,
-// debrief, and gameplay all read the same pad/keyboard, dispatched by
-// input.setMode('menu' | 'game'). A per-run instance (the previous design)
-// meant nothing before the first run existed could see a gamepad at all, so a
-// controller-only player had no way to even press Start.
-const input = createInput(canvas, { sensitivity: 1, onScheme: refreshSchemeUI });
-// Tab on a PC: movement, resolution and zoom readout. Input and display facts only.
-const diag = createDiag(canvas);
-window.addEventListener("keydown", (e) => {
-  if (e.code !== "Tab" || e.repeat || !run) return;
-  e.preventDefault();
-  diag.toggle();
+const input = createInput({
+  onAction, stickEl: document.getElementById("stick"), stickKnob: document.getElementById("knob"),
 });
-let run = null; // { sim, percept, renderer, hud }
-let paused = false;
-let coopAllowed = false; // title-screen Party option; gates the mid-run join poll
-// Slot 0's selection, mirrored out for the HUD, the touch buttons and the
-// debug hooks. The authoritative copy lives on each player (makeLocalPlayer).
-const lead = () => (run && run.players[0]) || { selected: 0, selectedItem: 0 };
-let whisperTimer = 0;
-// Seconds of SIM time since the last autosave (see step()).
-let saveTimer = 0;
-// Horizontal field of view in degrees, from stored preferences. Applied to
-// each renderer as it is built, since a run can start before the pause menu
-// has ever been opened.
-let fovPref = 78;
-let sevenTeamPref = DEFAULT_TEAM;
-// Sim-seconds between autosaves. Short enough that a closed tab costs little,
-// long enough that a serialise is nowhere near a per-frame cost.
-const AUTOSAVE_EVERY = 5;
-let lastFrame = 0;
-let campaignSeed = 0; // the seed the player actually entered/rolled — each basin in the campaign derives its own seed from this so "New basin" always starts a fresh campaign
 
-const LAYERS = ["title", "hudLayer", "pauseLayer", "debriefLayer", "finalLayer", "planLayer", "twinLayer"];
-const runKindOf = (sim) => (sim.expedition ? "seven" : sim.woods ? "woods" : sim.trainer ? "training" : "basin");
-function screens(show) {
-  for (const id of LAYERS) el(id).classList.toggle("hidden", id !== show);
-  input.setMode(show === "hudLayer" ? "game" : "menu");
-  // Restored on the way back to the HUD: clearing it on every menu and never
-  // setting it again left Seven wearing the basin's HUD after one pause.
-  document.body.dataset.runKind = show === "hudLayer" && run ? runKindOf(run.sim) : "";
-  // Before focus is seated, so the grid is already its final shape: showing or
-  // hiding Resume changes which rows exist.
-  if (show === "title") { refreshTitleSave(); refreshLearnLabel(); }
-  if (show !== "hudLayer") setupMenuFocus(show);
+// ---- play actions ---------------------------------------------------------------
+function onAction(a, e) {
+  if (UI.isOpen()) { UI.navigate(a, e); return; }
+  if (!sim || sim.status !== "playing" || sim.pending) return;
+  if (a === "pause") return pausePanel();
+  if (S.busy(sim)) return;
+  if (a === "act") {
+    const r = S.act(sim);
+    if (r && r.kind === "ask") askPanel(r.m);
+    else if (r && r.kind === "none") sim.say(r.label + ".");
+  } else if (a === "fire") { const r = S.fireAction(sim); if (!r.ok && r.why) sim.say(r.why); }
+  else if (a === "camp") { const r = S.campAction(sim); if (!r.ok && r.why) sim.say(r.why); }
+  else if (a === "rest") S.rest(sim);
+  else if (a === "call") S.callOut(sim);
 }
 
-// ---- gamepad/keyboard menu navigation --------------------------------------
-// Same shape as Opticon's menu grid nav: a screen's focusable controls carry
-// data-row/data-col, horizontal nav is confined to the current row and
-// vertical nav lands on the nearest column of the adjacent row — a single
-// button GRID per screen, not a flat list, so no direction can ever wander
-// into the wrong control (Brain: a flat single-axis focus list over visually
-// distinct groups lets any direction leak into the wrong group).
-// The morning's two panels are menus like any other, and they join the same
-// grid rather than growing their own key handling. Naming somebody is the most
-// consequential press in the game; it must not be the one control that a pad
-// or a keyboard cannot reach.
-const ROOT_SELECTOR = {
-  title: "#title", pauseLayer: "#pauseLayer", debriefLayer: "#debriefLayer",
-  finalLayer: "#finalLayer", planLayer: "#planLayer", twinLayer: "#twinLayer",
-  accusePanel: "#accusePanel", verdictPanel: "#verdictPanel",
-};
-const menu = { root: null, row: 0, col: 0 };
+// ---- runs, points, the record ---------------------------------------------------------
+const bank = () => readJSON("seven:pool", 0);
+const runs = () => readJSON("seven:runs", []);
 
-function menuElements() {
-  const sel = ROOT_SELECTOR[menu.root];
-  if (!sel) return [];
-  // HIDDEN CONTROLS ARE NOT IN THE GRID. `display:none` still matches a
-  // querySelector, so once the title screen gained a Resume button that only
-  // appears when a save exists, a controller pressing Down landed focus on an
-  // invisible row and confirm did nothing — the pad looked broken. Anything
-  // that can be conditionally shown has to be filtered here, not just styled.
-  return Array.from(document.querySelectorAll(`${sel} [data-row]`)).filter((e) => e.offsetParent !== null);
+function startRun(opts) {
+  sim = S.createSim(opts);
+  endShown = false; moved = false; acc = 0;
+  UI.close(); UI.setPlaying(true);
+  save();
 }
-function currentFocusEl() {
-  return menuElements().find((e) => Number(e.dataset.row) === menu.row && Number(e.dataset.col) === menu.col);
-}
-function menuFocusApply() {
-  document.querySelectorAll(".gpfocus").forEach((e) => e.classList.remove("gpfocus"));
-  const cur = currentFocusEl();
-  if (cur) {
-    cur.classList.add("gpfocus");
-    cur.scrollIntoView?.({ block: "nearest" });
-  }
-}
-function menuNavX(delta) {
-  const els = menuElements().filter((e) => Number(e.dataset.row) === menu.row);
-  const cols = els.map((e) => Number(e.dataset.col)).sort((a, b) => a - b);
-  if (cols.length < 2) return;
-  const i = cols.indexOf(menu.col);
-  const next = Math.max(0, Math.min(cols.length - 1, (i < 0 ? 0 : i) + delta));
-  if (cols[next] === menu.col) return;
-  menu.col = cols[next];
-  menuFocusApply();
-}
-function menuNavY(delta) {
-  const rows = [...new Set(menuElements().map((e) => Number(e.dataset.row)))].sort((a, b) => a - b);
-  if (rows.length < 2) return;
-  const i = rows.indexOf(menu.row);
-  const next = Math.max(0, Math.min(rows.length - 1, (i < 0 ? 0 : i) + delta));
-  if (rows[next] === menu.row) return;
-  menu.row = rows[next];
-  const rowCols = menuElements().filter((e) => Number(e.dataset.row) === menu.row).map((e) => Number(e.dataset.col));
-  if (!rowCols.includes(menu.col)) menu.col = rowCols[0] ?? 0;
-  menuFocusApply();
-}
-function menuConfirm() {
-  // Not a synthetic keyboard/mouse event, just `.click()` — the DOM element's
-  // own listener (set difficulty, start the run, resume, …) does the real work
-  // identically regardless of what triggered it, the same pattern Opticon uses.
-  currentFocusEl()?.click();
-}
-function menuCancel() {
-  if (menu.root === "pauseLayer") togglePause(); // B backs out to resume, same as Escape
-  // Backing out of the name list returns to the morning rather than to a
-  // settings screen. Backing out of the VERDICT does nothing: the run is over
-  // and the only way on is the button.
-  else if (menu.root === "accusePanel") closeWoodsPanel();
-}
-function setupMenuFocus(root) {
-  const prevRoot = menu.root;
-  menu.root = root;
-  const els = menuElements();
-  if (!els.length) {
-    input.setMenuHandlers(null, null, null, null);
-    return;
-  }
-  const stillValid = prevRoot === root && els.some((e) => Number(e.dataset.row) === menu.row && Number(e.dataset.col) === menu.col);
-  if (!stillValid) {
-    menu.row = Number(els[0].dataset.row);
-    menu.col = Number(els[0].dataset.col);
-  }
-  menuFocusApply();
-  input.setMenuHandlers(menuNavX, menuNavY, menuConfirm, menuCancel);
-}
+function save() { if (sim && store && sim.status === "playing") saveTo(store, sim); lastSave = performance.now(); }
 
-// ---- device-adaptive UI (Brain: device-adaptive-ui / show-the-active-scheme)
-// Reshape the on-screen UI to match whichever device is actually in the
-// player's hands, live, as devices change — never make the player translate.
-function menuHintFor(scheme) {
-  return {
-    keyboard: "Arrows / WASD move · Enter / Space select",
-    gamepad: "D-pad / stick move · [A] select · [B] back",
-    touch: "Tap to select",
-  }[scheme] || "";
-}
-function refreshSchemeUI(scheme) {
-  document.body.dataset.scheme = scheme;
-  document.querySelectorAll(".menu-hints").forEach((e) => paintHint(e, menuHintFor(scheme)));
-  if (run) run.hud.setHints(scheme);
-  // An objective on screen names buttons, and they are the OLD controller's
-  // buttons until it is repainted — picking up a pad mid-objective must not
-  // leave "press Q/R" on the screen.
-  paintObjective();
-}
-
-
-// ---- title-screen save state ------------------------------------------------
-// Whether a resumable save exists, re-read every time the title screen is
-// shown (a run can end, or another tab can clear it, while the title sits open).
-let hasSaveNow = false;
-// One-press-to-arm guard on "Walk in" while a save exists — see its handler.
-let newRunArmed = false;
-
-/**
- * Sync the title screen to whatever is in the save slot: show or hide Resume,
- * label it with how far the run got, and reset the discard confirmation.
- * Deliberately reports basin/elapsed/difficulty and NOTHING about anyone's
- * lucidity — the meters are invisible, and a menu is not a loophole for them.
- */
-function refreshTitleSave() {
-  const data = loadSave();
-  hasSaveNow = !!data;
-  newRunArmed = false;
-  const start = el("startBtn");
-  if (start) {
-    start.textContent = hasSaveNow ? "New run" : "Walk in";
-    start.classList.remove("confirm-new");
-  }
-  // The woods button arms the same way and has to be un-armed the same way. It
-  // was missed once and the button kept saying "press again" after the save
-  // had already gone, which is a prompt that lies about what the press does.
-  const woodsBtn = el("woodsBtn");
-  if (woodsBtn) {
-    woodsBtn.textContent = "Seven";
-    woodsBtn.appendChild(Object.assign(document.createElement("span"), { id: "woodsDetail", className: "resume-detail" }));
-    woodsBtn.classList.remove("confirm-new");
-    refreshWoodsTally();
-  }
-  const btn = el("continueBtn");
-  if (!btn) return;
-  btn.classList.toggle("show", hasSaveNow);
-  if (hasSaveNow) {
-    const d = describeSave(data);
-    const mm = String(d.minutes).padStart(2, "0");
-    const ss = String(d.seconds).padStart(2, "0");
-    el("continueDetail").textContent = d.expedition
-      ? `seven · day ${d.expedition.day} · area ${d.expedition.area}/7 · ${d.expedition.daylight}h light`
-      : d.woods
-      ? (d.woods.phase === "morning"
-          ? `the woods · the morning after · ${d.woods.asksLeft} questions left`
-          : `the woods · day one · ${d.woods.beat} of ${BEATS.length} done`)
-      : `basin ${d.level} of ${d.campaignLength} · ${mm}:${ss} in · ${DIFFICULTY[d.difficulty]?.label || d.difficulty} · seed ${d.seed}`;
-  }
-  // The menu grid changes shape when Resume appears/disappears, so re-seat
-  // focus or a controller can be left pointing at a row that no longer exists.
-  if (menu.root === "title") setupMenuFocus("title");
-}
-
-// ---- the walk in -----------------------------------------------------------
-// A tutorial stage is a REAL run, mounted through the same mountRun as anything
-// else, with its basin post-processed by applyStage. There is no tutorial mode
-// to exit and no second implementation of any verb — the overlay only watches
-// (brain: the-game-prologue#E15).
-// Objectives whose carried items are the lesson's props and must not be spent.
-const ITEM_PROPS = new Set(["ground", "craft", "hands"]);
-let tut = null; // { stage, index, done } while a stage is running; null otherwise
-
-function tutorialProgress() {
-  const s = loadSettings();
-  return s.tutorial || { done: [], current: 0 };
-}
-
-/**
- * The running count, on the button that starts another day.
- *
- * Deliberately plain and deliberately including the LAST FIVE separately: a
- * lifetime hit rate hides the only shape anybody cares about here, which is
- * whether the player is getting better at this or has quietly stopped
- * deducing and started guessing.
- */
-function refreshWoodsTally() {
-  const d = el("woodsDetail");
-  if (!d) return;
-  const t = summariseTally();
-  if (!t.days) { d.textContent = ""; return; }
-  const recent = t.recent.n >= 3 ? ` · last ${t.recent.n}: ${t.recent.caught}` : "";
-  d.textContent = ` · ${t.days} day${t.days === 1 ? "" : "s"} walked · caught ${t.caught}${recent}`;
-}
-
-function refreshLearnLabel() {
-  const d = el("learnDetail");
-  if (!d) return;
-  const p = tutorialProgress();
-  const n = p.done.length;
-  d.textContent = n === 0 ? "" : n >= STAGES.length ? " · done" : ` · ${n}/${STAGES.length}`;
-  // Loud until it has been finished, then it steps back. A player who has never
-  // done the walk in should not have to notice a quiet button underneath a loud
-  // one to find out the game has a tutorial at all.
-  el("learnBtn")?.classList.toggle("quiet", n >= STAGES.length);
-  // FIRST VISIT: the walk in is the only way in until it is finished. Stopping
-  // halfway keeps it locked — the button resumes where they left off.
-  el("title")?.classList.toggle("first-walk", n < STAGES.length);
-  // The grid just changed shape; re-seat focus so a pad is not left on a row
-  // that has been hidden.
-  if (menu.root === "title") setupMenuFocus("title");
-}
-
-/**
- * Start the walk in: ONE run, on the camp, from objective `index`.
- *
- * The old shape built a fresh basin per stage and tore it down on completion,
- * so nothing persisted and nowhere was anywhere. This mounts the camp once;
- * `openObjective` then opens each objective around a player who never leaves.
- */
-function startTutorial(index = 0) {
-  const obj = STAGES[index];
-  if (!obj) { tut = null; screens("title"); return null; }
-  const world = buildCamp();
-  const sim = createRun({ seed: CAMP_SEED, difficulty: "gentle", level: 1, campaignLength: 1, world });
-  // Nobody decays while they are being taught. Time still moves, so the call
-  // cadences still recharge — see state.js noDrain.
-  sim.noDrain = true;
-  // NOBODY IS IN YOUR PARTY HERE. The five are present as people to practise a
-  // verb on — hand IREN a flare, check in on HALDER — not as a crew you are
-  // keeping together, and they should not be filling the log with small talk
-  // over the top of a tutorial that gives one instruction at a time. See
-  // party.js companionRemark: the rolls still happen, only the line is dropped.
-  sim.noChatter = true;
-  sim.canClearMoss = false;
-  sim.callUnlocked = false;
-  sim.trainer = world.trainer;
-  campParty(sim, world);
-  const r = mountRun(sim, keyed(obj.brief, input.activeScheme));
-  tut = { index, stage: obj, done: false, beats: [] };
-  enterObjective(index, sim);
-  return r;
-}
-
-// ---------------------------------------------------------------------------
-// THE WOODS — one day, one night, one morning.
-// ---------------------------------------------------------------------------
-//
-// The alpha of docs/IDEAS.md's design note. All of the day's LOGIC is in
-// woods.js and is tested without a browser; everything here is wiring — which
-// screen is up, which key does what, and keeping the named hand walking to the
-// right place.
-
-let woodsUi = null; // { panel } while a morning panel is open; null otherwise
-
-/** Start a day. Same camp the tutorial uses, plus the four worksites. */
-function startWoods(seedText) {
-  const world = attachSites(buildCamp());
-  const sim = createRun({ seed: CAMP_SEED, difficulty: "gentle", level: 1, campaignLength: 1, world });
-  // Nobody's mind moves during the alpha. The question being tested is whether
-  // ASKING is fun; a decay meter running underneath would change what the
-  // player is paying attention to and would make a failed run ambiguous
-  // between "I could not tell" and "I ran out of time".
-  sim.noDrain = true;
-  sim.canClearMoss = false;
-  sim.callUnlocked = true;
-  sim.trainer = null;
-
-  // ONE SEED, and it is the day's only source of anything. `sim.rng` is the
-  // simulation's stream and is consumed by walking; the day is drawn off a
-  // separate generator derived from the same seed so that what happens tonight
-  // does not depend on how far the player wandered today.
-  const seed = seedText ? hashSeed(String(seedText)) : (Math.random() * 0xffffffff) >>> 0;
-  sim.woodsSeed = seed;
-  sim.woods = startDay(sim, makeRng(seed), sim.companions.map((c) => c.id));
-  for (const c of sim.companions) c.name = sim.woods.nameById[c.id];
-
-  campParty(sim, world);
-  const r = mountRun(sim, dawnLine(sim.woods.weather));
-  tut = null;
-  enterBeat(sim);
-  return r;
-}
-
-/**
- * Open the current beat: set the objective line, light the site, and send the
- * named hand walking to it.
- *
- * The hand walks THEMSELVES. They are not summoned and not following — they
- * have a job and they know where it is, which is both truer to the fiction and
- * the only way seven beats can be worked without fighting the CALL cooldown
- * the cohesion system deliberately imposes.
- */
-function enterBeat(sim = run.sim) {
-  const w = sim.woods;
-  if (!w) return;
-  for (const c of sim.companions) c.jobSite = null;
-  if (w.phase !== PHASE.DAY) { w.activeSiteId = null; setObjective(null); return; }
-  const b = beatAt(w);
-  if (!b) { w.activeSiteId = null; return; }
-  const site = sim.world.sites.find((s) => s.id === b.site);
-  w.activeSiteId = site.id;
-  const hand = sim.companions.find((c) => c.id === w.assign[b.id]);
-  if (hand && site) hand.jobSite = { x: site.x, z: site.z, id: site.id };
-  setObjective(`${w.beat + 1}/${BEATS.length}  The ${site.label}`, briefFor(w));
-}
-
-/** The interact key, at a worksite. */
-function woodsWork(sim) {
-  const w = sim.woods;
-  if (!w || w.phase !== PHASE.DAY) return false;
-  if (!canWork(sim, w).ok) return false;
-  const before = w.beat;
-  workBeat(sim, w, emitToHud);
-  if (w.beat === before) return false;
-  if (w.phase === PHASE.NIGHT) { audio.play("dayEnd"); woodsTurnIn(sim); }
-  else { audio.play("beat"); enterBeat(sim); }
-  return true;
-}
-
-/** state.js's emit signature, routed into the subtitle line. */
-function emitToHud(sim, kind, text, opts = {}) {
-  sim.events.push({ ...opts, kind, text, t: sim.time });
-  hudSay(text);
-}
-
-/**
- * The night, on screen.
- *
- * Two phases with real time between them, because the night is the ONE thing
- * in this game that has to be felt rather than read. Without it the day ends
- * and the morning starts on the next frame: the party snaps to a ring around
- * the fire and the player is standing somewhere they were not, which reads as
- * a glitch and not as a night. The swap happens behind the black.
- *
- * The text on it is about the fire and the cold. It says nothing about anyone,
- * because the whole design rests on nobody finding anything strange — a line
- * here would be the game pointing, and there would be nothing left to deduce.
- */
-const NIGHT_HOLD = 4.2;       // seconds of black: fall + hold
-const NIGHT_LIFT = 3.3;       // seconds of opening again
-let nightBlackout = false;    // true only while the screen is covered
-let nightAt = -1;             // performance.now() when the screen closed; -1 when idle
-
-/**
- * PURELY PRESENTATIONAL. The model has already moved on — the night resolved,
- * the phase is the morning, everyone is around the ash — and this only covers
- * the moment of it. Deliberately not the other way round: making the phase
- * change wait on a wall-clock timer would put a real state transition on a
- * clock, which is untestable, pauses badly, and is exactly the sort of thing
- * that goes wrong in a backgrounded tab.
- *
- * Input is swallowed while it is up. Not because anything would break, but
- * because a player pressing keys at a black screen and having them silently
- * count is worse than having them silently not.
- */
-function playNightfall() {
-  const layer = el("nightfall");
-  if (!layer) return;
-  nightBlackout = true;
-  nightAt = performance.now();
-  el("nightfallText").textContent = "You put the fire down and turn in.";
-  layer.classList.remove("hidden", "lifting");
-  void layer.offsetWidth;
-  layer.classList.add("show");
-}
-
-/**
- * Ticked from the frame loop, NOT from setTimeout.
- *
- * A browser throttles timers hard in a hidden or backgrounded tab — down to
- * once a minute — so a multi-second sequence built out of nested setTimeouts
- * can stall for as long as the player is looking at something else, and come
- * back to a screen that is still black. rAF stops cleanly instead and resumes
- * where it was, which is the behaviour this actually wants: the night should
- * pause with the game, not run without it.
- *
- * (It is also the difference between a headless test that passes and one that
- * hangs, which is how this was noticed.)
- */
-function updateNightfall() {
-  if (nightAt < 0) return;
-  const layer = el("nightfall");
-  if (!layer) { nightAt = -1; return; }
-  // WALL CLOCK, not the frame loop's dt. The loop caps dt at 0.1s so a slow or
-  // backgrounded frame cannot teleport the simulation — which is right for the
-  // sim and wrong here: under heavy throttling the accumulated dt runs at a
-  // fraction of real time and a four-second fade stretches to fifteen. This is
-  // presentation and belongs on the real clock. It still stops with the loop,
-  // which is the property setTimeout does not have.
-  // performance.now() AT CALL TIME, not the frame timestamp rAF hands in. A
-  // rAF timestamp is the time the frame was scheduled for, and under heavy
-  // throttling it is delivered well BEHIND the current clock — measured here at
-  // ~200ms in the past, persistently, which made the elapsed time negative on
-  // every frame and the fade never end. The frame timestamp is right for
-  // simulation deltas and wrong for "how long has this been on screen".
-  const t = (performance.now() - nightAt) / 1000;
-  if (nightBlackout && t >= NIGHT_HOLD) {
-    nightBlackout = false;
-    el("nightfallText").textContent = "";
-    layer.classList.add("lifting");
-    layer.classList.remove("show");
-  }
-  if (!nightBlackout && t >= NIGHT_HOLD + NIGHT_LIFT) {
-    layer.classList.add("hidden");
-    layer.classList.remove("lifting");
-    nightAt = -1;
-  }
-}
-
-function woodsSleep(sim) {
-  const w = sim.woods;
-  fallNight(sim, w, makeRng, emitToHud);
-  for (const c of sim.companions) c.jobSite = null;
-  w.activeSiteId = null;
-  // Everyone is up and around the ash. Standing them in a ring means the
-  // player wakes to a party that is THERE, which is what makes the morning
-  // about who they are rather than about finding them.
-  const fire = sim.world.sites.find((s) => s.id === "fire");
-  sim.companions.forEach((c, i) => {
-    const a = (i / sim.companions.length) * Math.PI * 2;
-    c.x = fire.x + Math.cos(a) * 4.5;
-    c.z = fire.z + Math.sin(a) * 4.5;
-    c.wanderUntil = Infinity;
-    c.pingAt = Infinity;
+// ---- panels ---------------------------------------------------------------------
+function titlePanel() {
+  UI.setPlaying(false);
+  const saved = store ? loadFrom(store) : null;
+  const r = runs();
+  const home = r.reduce((s, x) => s + (x.saved || 0), 0);
+  UI.open(`
+    <h1>SEVEN</h1>
+    <p class="lede">Seven of you set out to walk the trail through the woods, and come out the other side.</p>
+    ${saved && saved.status === "playing" ? `<button data-do="cont" autofocus>Continue — day ${saved.day}</button>` : ""}
+    <button data-do="new">New run</button>
+    <button data-do="how">How to play</button>
+    ${r.length ? `<p class="small">${r.length} run${r.length > 1 ? "s" : ""} walked · ${home} brought home${bank() ? ` · ${bank()} points banked` : ""}</p>` : ""}
+    <p class="small dim">${BUILD}</p>`);
+  UI.bind({
+    cont: () => { sim = saved; endShown = false; acc = 0; UI.close(); UI.setPlaying(true); },
+    new: () => recruitPanel(Date.now() % 1e9),
+    how: () => howPanel(titlePanel),
   });
-  sim.player.x = fire.x;
-  sim.player.z = fire.z + 6;
-  paintMorning(sim);
 }
 
-/** Called from workBeat's caller once the last beat lands. */
-function woodsTurnIn(sim) {
-  woodsSleep(sim);
-  playNightfall();
+function howPanel(back) {
+  UI.open(`
+    <h2>How to play</h2>
+    <ul class="how">
+      <li><b>Walk</b> — WASD / arrows · left side of the screen on touch · stick on a pad. North is up.</li>
+      <li><b>E</b> (Act / pad A) — chop the deadfall, fell a marked tree, talk to someone, light a pylon with someone beside you.</li>
+      <li><b>F</b> (Fire / X) — at camp, light or feed the fire from the woodpile.</li>
+      <li><b>Q</b> (Camp / bumpers) — make camp here, or take it down. The woodpile stays where it is.</li>
+      <li><b>R</b> (Rest / B) — sleep after dark; by day, rest an hour.</li>
+      <li><b>C</b> (Call / Y) — call out. Whoever hears comes, once their hands are free.</li>
+      <li>At camp, at <b>dawn</b> and <b>dusk</b>, you set everyone's work. Nowhere else.</li>
+      <li>The fire keeps the camp safe at night. The camp only. Its light reaches further than its warmth.</li>
+      <li>A pylon takes two pairs of hands, and keeps the deep woods off this stretch for a day and a half.</li>
+    </ul>
+    <button data-do="back" autofocus>Back</button>`, { onBack: back, wide: true });
+  UI.bind({ back });
 }
 
-function paintMorning(sim) {
-  const w = sim.woods;
-  if (!w) return;
-  const asked = w.asked.map((id) => w.nameById[id]).join(", ");
-  setObjective(
-    "The morning",
-    `Ask about yesterday — to ask someone, {checkin}. ${w.asksLeft} of ${ASKS_ALLOWED} left.` +
-    (asked ? ` Already asked: ${asked} — reading them again is free.` : "") +
-    " When you are ready, press {name} to name somebody.",
-  );
-}
-
-/** Ask one of them about yesterday. */
-function woodsAsk(sim, id) {
-  const w = sim.woods;
-  const acc = ask(sim, w, id);
-  if (!acc) {
-    // A refusal has to say WHY, or it reads as the key not working. The one
-    // thing it may never say is anything about who is who.
-    hudSay("No time. You have asked enough for one morning.");
-    return;
-  }
-  showAccount(acc, w);
-  paintMorning(sim);
-}
-
-function showAccount(acc, w) {
-  el("accountName").textContent = acc.name;
-  el("accountWeather").textContent = acc.weather;
-  const list = el("accountLines");
-  list.innerHTML = "";
-  for (const line of acc.lines) {
-    const li = document.createElement("li");
-    li.textContent = line;
-    list.appendChild(li);
-  }
-  el("asksLeft").textContent = acc.repeat
-    ? `${acc.name} already told you this — reading it again is free`
-    : `${w.asksLeft} of ${ASKS_ALLOWED} questions left`;
-  openWoodsPanel("accountPanel");
-}
-
-function openWoodsPanel(id) {
-  el("woodsLayer").classList.remove("hidden");
-  for (const p of ["accountPanel", "accusePanel", "verdictPanel"]) {
-    el(p).classList.toggle("hidden", p !== id);
-  }
-  woodsUi = { panel: id };
-  // The two panels with buttons in them join the shared focus grid; the
-  // account panel has none and leaves the grid alone.
-  if (ROOT_SELECTOR[id]) setupMenuFocus(id);
-}
-
-function closeWoodsPanel() {
-  el("woodsLayer").classList.add("hidden");
-  const had = woodsUi?.panel;
-  woodsUi = null;
-  // Hand the grid back, or a pad is left driving a menu that is no longer on
-  // screen — the failure mode setupMenuFocus already exists to prevent when
-  // the title's shape changes.
-  if (ROOT_SELECTOR[had]) input.setMenuHandlers(null, null, null, null);
-}
-
-function openAccuse(sim) {
-  const w = sim.woods;
-  if (!w || w.phase !== PHASE.MORNING) return;
-  const row = el("accuseRow");
-  row.innerHTML = "";
-  el("accusePanel").querySelector(".woods-who").textContent = "One of them was not here yesterday.";
-  el("accusePanel").querySelector(".woods-sub").textContent = "Name them. You get one answer, and it is the last thing that happens.";
-  sim.companions.forEach((c, i) => {
-    const b = document.createElement("button");
-    b.className = "diff";
-    b.textContent = c.name;
-    b.dataset.row = "0";
-    b.dataset.col = String(i);
-    b.addEventListener("click", () => woodsAccuse(sim, c.id));
-    row.appendChild(b);
-  });
-  openWoodsPanel("accusePanel");
-}
-
-function woodsAccuse(sim, id) {
-  const w = sim.woods;
-  const v = accuse(sim, w, id);
-  if (!v) return;
-  el("verdictAgain").classList.remove("hidden");
-  el("verdictDone").textContent = "Back to the trailhead";
-  el("verdictHead").textContent = v.correct ? "You were right." : "You were wrong.";
-  el("verdictHead").className = `woods-who ${v.correct ? "woods-right" : "woods-wrong"}`;
-  el("verdictBody").textContent = v.correct
-    ? `${v.taken} went out into the trees in the night. Whatever came back to the fire wearing that name is still standing there.`
-    : `${v.accused} was here the whole time. It was ${v.taken}.`;
-  el("verdictTell").textContent = tellText(w, sim);
-  // The economy, stated once, at the end. A player who spent one question and
-  // guessed right should see that they did; a player who spent all three and
-  // guessed wrong should see that too. It is the only place the cost of asking
-  // is ever named as a number.
-  const spent = ASKS_ALLOWED - w.asksLeft;
-  el("verdictCost").textContent =
-    `You asked ${spent === 0 ? "nobody" : spent === 1 ? "one of them" : `${spent} of them`}` +
-    `${spent < ASKS_ALLOWED ? `, with ${ASKS_ALLOWED - spent} question${ASKS_ALLOWED - spent === 1 ? "" : "s"} left.` : ", which was all of them."}`;
-  openWoodsPanel("verdictPanel");
-  // One line in the tally, then the slot goes. The tally is the only record
-  // that this day was ever played, and it is what the title screen counts.
-  recordDay({
-    seed: sim.woodsSeed ?? null,
-    tell: w.perturbation?.kind ?? null,
-    asked: ASKS_ALLOWED - w.asksLeft,
-    correct: !!v.correct,
-    at: Date.now(),
-  });
-  // The run is over. Drop the slot so "Resume" cannot hand back a finished
-  // morning — the same rule the basin debrief follows.
-  clearSave();
-  refreshWoodsTally();
-  const t = summariseTally();
-  el("verdictTally").textContent = t.days > 1
-    ? `${t.days} days walked, ${t.caught} caught${t.recent.n >= 3 ? ` — ${t.recent.caught} of your last ${t.recent.n}` : ""}.`
-    : "";
-}
-
-/**
- * What they got wrong, said plainly, AFTER the answer. Derived from the
- * perturbation, so it describes whatever actually happened rather than reading
- * from a list — which is also why it is worth showing: a player who missed it
- * learns what KIND of thing to listen for next time without being handed a
- * catalogue of tells.
- */
-function tellText(w, sim) {
-  const p = w.perturbation;
-  if (!p) return "";
-  const nameOf = (id) => w.nameById[id] || id;
-  const f = w.chronicle.facts[p.at];
-  switch (p.kind) {
-    case "order": return `They told it out of order — the ${f.place} and the ${w.chronicle.facts[p.at + 1].place} the wrong way round.`;
-    case "actor": return `They put ${nameOf(p.to)} on a job that was ${nameOf(f.actor)}'s.`;
-    case "place": return `They put it at the ${p.to}. It was the ${f.place}.`;
-    case "object": return `They said ${p.to}. It was the ${f.object}.`;
-    case "weather": return `They had the weather wrong.`;
-    case "name": return `They had a name almost right: ${p.to}, for ${nameOf(f.actor)}.`;
-    default: return "";
-  }
-}
-
-/**
- * Place everybody for the camp: the trainer where the map says, the rest
- * standing around the yard. Nobody follows during the walk in — canonically
- * they finished their own training yesterday — so they are simply here.
- */
-function campParty(sim, world) {
-  const yard = world.camp;
-  sim.companions.forEach((c, i) => {
-    const a = (i / sim.companions.length) * Math.PI * 2;
-    c.x = yard.x + Math.cos(a) * 6 + 14;
-    c.z = yard.z + Math.sin(a) * 6;
-    c.wanderUntil = Infinity;   // stand still; the walk in is not about them moving
-    c.pingAt = Infinity;
-  });
-  sim.player.x = world.spawn.x;
-  sim.player.z = world.spawn.z;
-}
-
-/** Open objective `index` in the run already on screen. */
-function enterObjective(index, sim = run.sim) {
-  const obj = STAGES[index];
-  if (!obj) return;
-  tut = { index, stage: obj, done: false, beats: [] };
-  openObjective(sim, obj);
-  setObjective(`${index + 1}/${STAGES.length}  ${obj.title}`, obj.brief);
-  if (obj.line) setTimeout(() => run && hudSay(`${sim.companions[obj.line.who - 1].name}: ${obj.line.text}`), 1200);
-}
-
-/**
- * The objective banner. Text may carry button tokens (keys.js); they are filled
- * for the controller in use NOW, and the raw text is kept so a controller
- * change can repaint it.
- */
-let objectiveShown = { title: null, text: "" };
-function setObjective(title, text) {
-  objectiveShown = { title, text: text || "" };
-  paintObjective();
-}
-function paintObjective() {
-  const box = el("objective");
-  if (!box) return;
-  const { title, text } = objectiveShown;
-  box.classList.toggle("hidden", !title);
-  if (!title) return;
-  el("objectiveTitle").textContent = title;
-  el("objectiveText").textContent = keyed(text, input.activeScheme);
-}
-
-function hudSay(text) { run?.hud.say(text, ""); }
-
-/** An objective's step just fired: show its debrief, then open the next one. */
-function completeStage() {
-  if (!tut || tut.done) return;
-  tut.done = true;
-  const { stage, index } = tut;
-  const p = tutorialProgress();
-  if (!p.done.includes(stage.id)) p.done.push(stage.id);
-  p.current = Math.min(index + 1, STAGES.length);
-  saveSettings({ tutorial: p });
-  setObjective(`${stage.title} — done`, stage.debrief);
-  hudSay(stage.debrief);
-  // Long enough to read, short enough that it does not feel like a cutscene.
-  setTimeout(() => {
-    if (!tut) return;
-    const next = index + 1;
-    if (next >= STAGES.length) { tut = null; setObjective(null); screens("title"); return; }
-    // NO REMOUNT. The same run, the same camp, the same player standing where
-    // they were left — only the objective changes.
-    enterObjective(next);
-  }, 4200);
-}
-
-function startRun({ seed, difficulty } = {}) {
-  const seedValue = seed ?? Math.floor(Math.random() * 0xffffff) + 1;
-  campaignSeed = seedValue;
-  tut = null;
-  setObjective(null);
-  const sim = createRun({ seed: seedValue, difficulty: difficulty || "standard", level: 1, campaignLength: CAMPAIGN_LENGTH });
-  // A NEW run always clears the slot: leaving the old save behind would offer
-  // a Resume that silently jumps out of the run now on screen (Brain: dbh#E4 —
-  // New Game must go through the real construction path, and must not leave
-  // stale authoritative state lying around behind it).
-  clearSave();
-  return mountRun(sim, "Six of you. One basin. Keep them together.");
-}
-
-/**
- * Resume a saved run. Deliberately shares mountRun with startRun so a resumed
- * run is wired EXACTLY like a fresh one — same percept binding, renderer, hud,
- * player list. Returns null if there is nothing valid to resume, so the caller
- * can fall back rather than mounting a half-run.
- */
-function resumeRun() {
-  const data = loadSave();
-  const sim = data && deserializeRun(data);
-  if (!sim) return null;
-  campaignSeed = sim.seed;
-  // A day in the woods resumes as a day in the woods, not as basin 1 of 1.
-  // The line matters as much as the wiring: waking up to "Basin 1 of 1" after
-  // a night in the trees is the game telling the player they are somewhere
-  // they are not.
-  if (sim.expedition) {
-    applySevenTeam(sim);
-    const r = mountRun(sim, `Day ${sim.expedition.day}. You pick the trail back up.`);
-    updateSevenObjective(sim);
-    return r;
-  }
-  if (sim.woods) {
-    const r = mountRun(sim, sim.woods.phase === PHASE.MORNING
-      ? "Grey light. The fire is down to ash and everyone is up."
-      : "You pick the day back up where you left it.");
-    resumeWoodsUi(sim);
-    return r;
-  }
-  return mountRun(sim, `Basin ${sim.level} of ${sim.campaignLength}. You pick up where you stopped.`);
-}
-
-/**
- * Put the day's UI back after a reload. The DAY state itself came out of the
- * save; this only re-derives what is on screen from it — which site is lit,
- * who is walking where, which banner is showing.
- */
-function resumeWoodsUi(sim) {
-  tut = null;
-  closeWoodsPanel();
-  const w = sim.woods;
-  if (w.phase === PHASE.DAY) { enterBeat(sim); return; }
-  w.activeSiteId = null;
-  for (const c of sim.companions) c.jobSite = null;
-  if (w.phase === PHASE.MORNING) paintMorning(sim);
-  else setObjective(null);
-}
-
-/** Everything a run needs on screen, shared by a fresh start and a resume. */
-function mountRun(sim, openingLine) {
-  // DROP THE PREVIOUS RUN'S RENDERER FIRST.
-  //
-  // Every mount builds a fresh scene, a fresh geometry set and a fresh WebGL
-  // context on the same canvas, and until now nothing ever let the old one go.
-  // It was survivable while a session mounted two or three runs in its whole
-  // life; THE WOODS put "walk another day" one press away from the verdict, so
-  // a player settling in for six runs was stacking six live contexts and six
-  // scenes on one canvas — and a browser hard-caps live WebGL contexts and
-  // starts discarding the oldest, which is a black screen with nothing in the
-  // console. A headless page found it first by wedging so completely it could
-  // not navigate to about:blank.
-  run?.renderer?.dispose?.();
-  const seedValue = sim.seed;
-  const percept = createPercept(sim.player);
-  const renderer = createRenderer(canvas, sim);
-  renderer.setFov(fovPref);
-  const hud = createHud(sim, percept, { onChorus: () => audio.play("chorus") });
-  paused = false;
-  whisperTimer = 0;
-  run = { sim, percept, renderer, hud, players: [makeLocalPlayer(0, sim.player, percept)] };
-  document.body.dataset.runKind = runKindOf(sim);
-  input.setView(sim.player.yaw || 0, 0);
-  hud.setHints(input.activeScheme);
-  hud.say(openingLine, "warn");
-  saveTimer = 0;
-  // THE DAY'S seed, not the map's. Every woods run is on the same authored
-  // camp, whose seed is a sentinel (-1) and says nothing about which day this
-  // is — printing it told a player their day was "seed -1" and made two
-  // completely different days look identical. The seed worth showing is the one
-  // that decided the roster, the weather, who did what and who was taken.
-  el("seedLabel").textContent = sim.woods
-    ? `day ${sim.woodsSeed ?? "—"}`
-    : `seed ${seedValue}`;
-  screens("hudLayer");
-  audio.start();
-  // The camp is a wood in daylight; a basin is a fogged plain. Crossfaded, not
-  // switched — see audio.js setBiome.
-  audio.setBiome(sim.world.cellKind ? 1 : 0);
-  // A controller player has no use for mouse pointer lock — their look comes
-  // from the right stick regardless of lock state — and requesting it here
-  // would either no-op or flash a browser permission prompt for nothing.
-  if (input.activeScheme !== "gamepad") input.requestLock();
-  lastFrame = 0;
-  // No assignment to window.__seven here: `sim`, `percept` and `renderer` are
-  // getters over the live `run`, so they already follow this new run. Writing to
-  // them throws in strict mode (ES modules are always strict), which is exactly
-  // what the smoke test caught.
-  return run;
-}
-
-/**
- * A basin cleared with more of the campaign left: rebuild a fresh world under
- * the same run rather than dropping to the debrief screen. The party's
- * lucidity/scars/hallucination state, doses, inventory, and cumulative stats
- * carry forward (see createRun's carryOver) — a worn-down party walks into the
- * next fog still worn down, not reset to full. Percept/renderer are rebuilt
- * from scratch because the world (terrain, rock instancing, monolith/pylon/
- * item positions) is entirely new geometry, not something last basin's
- * renderer can be pointed at in place.
- */
-function advanceLevel() {
-  const old = run.sim;
-  const carryOver = {
-    party: old.party.map((c) => ({
-      id: c.id,
-      lucidity: c.lucidity,
-      scars: c.scars,
-      hallucinating: c.hallucinating,
-      hallucination: c.hallucination,
-      goneTime: c.goneTime,
-      // Rolled once at campaign start (createRun ignores these for the
-      // player, who has no trait vector) — carried so a personality doesn't
-      // reshuffle at the next basin.
-      drain: c.drain,
-      stoic: c.stoic,
-      chatty: c.chatty,
-      wander: c.wander,
-      selfCare: c.selfCare,
-      // Couch co-op: carry who a second player is driving across the basin
-      // boundary, or their pad goes dead at the transition.
-      humanSlot: c.humanSlot,
-    })),
-    doses: old.doses,
-    inventory: old.inventory,
-    slotSeq: old.slotSeq,
-    wood: old.wood,
-    stone: old.stone,
-    stats: old.stats,
-    // Travels with the inventory it names, so ids stay unique across basins.
-    nextSlotId: old.nextSlotId,
+function recruitPanel(seed) {
+  const names = composeRoster(createRng(seed), TEAM);
+  const budget = BASE_POINTS + bank();
+  const team = names.map((name) => ({ name, skills: { cut: 0, carry: 0, keen: 0 } }));
+  const spent = () => team.reduce((s, t) => s + t.skills.cut + t.skills.carry + t.skills.keen, 0);
+  const render = () => {
+    const left = budget - spent();
+    UI.open(`
+      <h2>Your team</h2>
+      <p class="small">Spend ${budget} points. <b>Cut</b> chops faster. <b>Carry</b> fells and hauls more. <b>Keen</b> holds up longer in the deep woods.</p>
+      <table class="team">
+        <tr><th></th>${SKILLS.map((s) => `<th>${s}</th>`).join("")}</tr>
+        ${team.map((t, i) => `<tr><td><span class="dot" style="background:${SLOT_COLORS[i]}"></span>${esc(t.name)}</td>${SKILLS.map((s) => `
+          <td class="sk"><button class="mini" data-do="dec" data-arg="${i}:${s}" ${t.skills[s] ? "" : "disabled"}>−</button><span>${t.skills[s]}</span><button class="mini" data-do="inc" data-arg="${i}:${s}" ${left && t.skills[s] < SKILL_MAX ? "" : "disabled"}>+</button></td>`).join("")}</tr>`).join("")}
+      </table>
+      <p class="small">${left} left</p>
+      <button data-do="go" autofocus>Set out</button>
+      <button data-do="even">Spread the points evenly</button>
+      <button data-do="names">Different people</button>
+      <button data-do="back">Back</button>`, { onBack: titlePanel, wide: true });
+    UI.bind({
+      inc: (arg) => { const [i, s] = arg.split(":"); if (budget - spent() > 0) team[+i].skills[s]++; render(); },
+      dec: (arg) => { const [i, s] = arg.split(":"); if (team[+i].skills[s] > 0) team[+i].skills[s]--; render(); },
+      even: () => { team.forEach((t) => (t.skills = { cut: 0, carry: 0, keen: 0 })); let k = 0; while (spent() < budget) { const t = team[k % TEAM]; t.skills[SKILLS[Math.floor(k / TEAM) % 3]]++; k++; } render(); },
+      names: () => recruitPanel((seed * 7919 + 13) % 1e9),
+      go: () => { writeJSON("seven:pool", 0); startRun({ seed, team }); },
+      back: titlePanel,
+    });
   };
-  const nextLevel = old.level + 1;
-  // Deterministic per-level seed derived from the campaign's own seed, so a
-  // given campaign seed always produces the same sequence of basins.
-  const seed = campaignSeed + nextLevel * 104729;
-  const sim = createRun({ seed, difficulty: old.difficulty, level: nextLevel, campaignLength: old.campaignLength, carryOver });
-  const percept = createPercept(sim.player);
-  run.renderer.dispose();
-  const renderer = createRenderer(canvas, sim);
-  renderer.setFov(fovPref);
-  const hud = createHud(sim, percept, { onChorus: () => audio.play("chorus") });
-  hud.setHints(input.activeScheme);
-  hud.say(`Basin ${nextLevel} of ${sim.campaignLength}. The party pushes on.`, "warn");
-  // createRun rebuilt every character object, so each joined player's percept
-  // has to be re-bound to the NEW object for the mind they are driving —
-  // sim.humans is already restored in slot order by carryOver.
-  const players = sim.humans.map((ch, slot) =>
-    slot === 0 ? makeLocalPlayer(0, ch, percept) : makeLocalPlayer(slot, ch, createPercept(ch)));
-  run = { sim, percept, renderer, hud, players };
-  input.setView(sim.player.yaw || 0, 0);
-  lastFrame = 0;
+  render();
 }
 
-const SEVEN_AREAS = 7;
-function applySevenTeam(sim) {
-  return applyTeamLoadout(sim, sim.sevenTeam || sevenTeamPref || DEFAULT_TEAM);
-}
-
-function sevenRoute(sim) {
-  const exitZ = -(sim.world.grid / 2 - 2) * sim.world.cell;
-  const startZ = sim.world.camp.z;
-  const total = Math.max(1, startZ - exitZ);
-  const progress = Math.max(0, Math.min(1, (startZ - sim.player.z) / total));
-  return { exitZ, startZ, progress, area: Math.min(SEVEN_AREAS - 1, Math.floor(progress * SEVEN_AREAS)) };
-}
-
-// TIME, NOT A WALLET. An action that "takes an hour" asks for an hour of the
-// simulation to run, fast, starting now: everyone keeps moving, minds keep
-// draining, and dusk comes when the clock says. `e.lapse` is the sim-seconds
-// still owed, and it is save state — it decides how many ticks run.
-const LAPSE_REPS = 20;   // ticks per frame while an action's hours pass
-const WORK_LAPSE = 8;    // ticks per frame while the lead holds a work target
-const SLEEP_LAPSE = 60;  // ticks per frame while the camp sleeps to dawn
-function spendSevenDaylight(sim, amount, reason) {
-  const e = sim.expedition;
-  if (!e || !(amount > 0)) return false;
-  e.lapse = (e.lapse || 0) + amount * GAME_HOUR;
-  e.lastSpend = { day: e.day, amount, reason };
-  return true;
-}
-
-// ---- the plan: dawn and dusk, at the camp ---------------------------------
-let planUi = null; // { phase, choice: { [id]: kind } } while the plan is open
-const atBuiltCamp = (sim) => !!(sim.camp && sim.camp.built && Math.hypot(sim.player.x - sim.camp.x, sim.player.z - sim.camp.z) <= CAMP_RADIUS);
-const skillLine = (c) => Object.entries(c.skills || {}).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k, v]) => `${k} ${v}`).join(" · ") || "—";
-function openPlan(sim, phase) {
-  const opts = phase === "dawn" ? DAY_TASKS : NIGHT_TASKS;
+function planPanel(kind) {
+  const tasks = kind === "dawn" ? DAY_TASKS : NIGHT_TASKS;
   const choice = {};
-  for (const c of sim.companions) {
-    const k = c.task && c.task.kind;
-    choice[c.id] = phase === "dawn" ? (DAY_TASKS.includes(k) ? k : "free") : (NIGHT_TASKS.includes(k) ? k : "sleep");
+  let prevPlan = null;
+  for (let d = sim.day - 1; d >= 1 && !prevPlan; d--) prevPlan = sim.chronicle[d] && sim.chronicle[d].plan;
+  for (const m of sim.mates) {
+    const cur = kind === "dawn" && prevPlan ? prevPlan[m.id] : m.task ? m.task.kind : null;
+    choice[m.id] = tasks.includes(cur) && cur !== "free" ? cur : kind === "dawn" ? "free" : "sleep";
   }
-  planUi = { phase, choice };
-  el("planHead").textContent = phase === "dawn" ? `Dawn, day ${sim.expedition.day}` : "Dusk";
-  el("planSub").textContent = phase === "dawn"
-    ? "Set the day. This is the only time it changes until dusk."
-    : "Who sleeps, who keeps the fire, who keeps working in the dark.";
-  el("planGo").textContent = phase === "dawn" ? "Begin the day" : "Into the night";
-  const rows = el("planRows");
-  rows.textContent = "";
-  sim.companions.forEach((c, i) => {
-    const row = document.createElement("div");
-    row.className = "plan-row";
-    const name = Object.assign(document.createElement("span"), { className: "plan-name", textContent: c.name });
-    const skill = Object.assign(document.createElement("span"), { className: "plan-skill", textContent: skillLine(c) });
-    const b = Object.assign(document.createElement("button"), { className: "diff plan-task" });
-    b.dataset.row = String(i); b.dataset.col = "0"; b.dataset.who = c.id;
-    const paint = () => { b.textContent = TASK_LABEL[planUi.choice[c.id]]; };
-    b.addEventListener("click", () => {
-      const cur = opts.indexOf(planUi.choice[c.id]);
-      planUi.choice[c.id] = opts[(cur + 1) % opts.length];
-      paint();
+  const d = frontDeadfall(sim);
+  const render = () => {
+    UI.open(`
+      <h2>${kind === "dawn" ? `Dawn, day ${sim.day}` : "Dusk"}</h2>
+      <p class="small">${kind === "dawn"
+        ? `Set the day's work. It holds until dusk. ${d ? `The deadfall ahead is ${Math.round(d.progress * 100)}% cut.` : "The way north is open."}`
+        : "Who sleeps, who keeps the fire, who works on in the dark."} Pile: ${sim.camp.pile}.</p>
+      <div class="plan">${sim.mates.map((m) => `
+        <button data-do="cycle" data-arg="${m.id}" class="row"><span class="dot" style="background:${SLOT_COLORS[m.slot]}"></span>
+          <span class="nm">${esc(m.name)}</span><span class="task">${esc(TASK_LABEL[choice[m.id]])}</span></button>`).join("")}
+      </div>
+      <button data-do="done" autofocus>${kind === "dawn" ? "Start the day" : "Set the night"}</button>`, { onBack: null });
+    UI.bind({
+      cycle: (id, btn) => {
+        choice[id] = tasks[(tasks.indexOf(choice[id]) + 1) % tasks.length];
+        btn.querySelector(".task").textContent = TASK_LABEL[choice[id]];
+      },
+      done: () => { S.applyPlan(sim, kind, choice); UI.close(); },
     });
-    paint();
-    row.append(name, skill, b);
-    rows.appendChild(row);
-  });
-  el("planGo").dataset.row = String(sim.companions.length);
-  screens("planLayer");
-}
-function closePlan() {
-  if (!planUi || !run) return;
-  const sim = run.sim, e = sim.expedition;
-  for (const c of sim.companions) {
-    const k = planUi.choice[c.id];
-    // Night "work" carries on with whatever the day's task was.
-    const prior = c.task ? effectiveKind(c) : null;
-    setTask(c, k, e.day, k === "work" ? (prior === "chop" || prior === "gather" ? prior : null) : null);
-  }
-  planUi = null;
-  screens("hudLayer");
-  if (input.activeScheme !== "gamepad") input.requestLock();
-}
-
-// ---- the one you found, at the fire ---------------------------------------
-let twinUi = null; // { id, realLeft } while the choice is open
-function bringFoundHome(sim) {
-  const e = sim.expedition, id = sim.found.id;
-  const m = (e.missing || []).find((x) => x.id === id);
-  const mystery = (e.mysteries || []).find((x) => x.suspect === id && !x.recovered && !x.abandoned);
-  const name = nameOfSeven(sim, id);
-  // The fake was already exposed at a pylon: nobody to choose between.
-  if (!mystery || mystery.exposed) {
-    resolveTwin(e, id, true);
-    const c = sim.companions.find((x) => x.id === id);
-    if (c) c.replacedDay = null;
-    sim.found = null;
-    recordFact(e, { kind: "recovered", actor: "you", object: id, t: sim.time });
-    hudSay(`${name} is home.`);
-    audio.play("recover");
-    return;
-  }
-  const acc = twinAccounts(e, id, (who) => nameOfSeven(sim, who));
-  if (!acc || !m) { sim.found = null; return; }
-  // Which side the real one stands on: fixed by the day and the name, no draw.
-  const realLeft = (mystery.day + id.charCodeAt(id.length - 1)) % 2 === 0;
-  twinUi = { id, realLeft };
-  el("twinHead").textContent = `Two of ${name} at the fire.`;
-  el("twinSub").textContent = `Same name, same face. One of them never left. Ask them both about day ${acc.day}.`;
-  const fill = (ul, lines) => { ul.textContent = ""; for (const t of lines) ul.appendChild(Object.assign(document.createElement("li"), { textContent: t })); };
-  fill(el("twinLeft"), realLeft ? acc.real : acc.fake);
-  fill(el("twinRight"), realLeft ? acc.fake : acc.real);
-  screens("twinLayer");
-}
-function chooseTwin(left) {
-  if (!twinUi || !run) return;
-  const sim = run.sim, e = sim.expedition, id = twinUi.id;
-  const keptReal = left === twinUi.realLeft;
-  resolveTwin(e, id, keptReal);
-  const c = sim.companions.find((x) => x.id === id);
-  if (c && keptReal) c.replacedDay = null;
-  sim.found = null;
-  twinUi = null;
-  screens("hudLayer");
-  if (input.activeScheme !== "gamepad") input.requestLock();
-  // The same words either way: the game never says which one you kept.
-  hudSay(`One ${nameOfSeven(sim, id)} stays at the fire. The other walks into the trees.`);
-  recordFact(e, { kind: "kept", actor: "you", object: id, t: sim.time });
-}
-
-/** Dawn and dusk open the plan — at the camp. Away from it, nobody gets new orders. */
-function sevenPlanTriggers(sim) {
-  const e = sim.expedition;
-  if (!e || sim.status !== "playing" || planUi) return;
-  if (e.planDawnPending) {
-    e.planDawnPending = false;
-    if (atBuiltCamp(sim)) { openPlan(sim, "dawn"); return; }
-    for (const c of sim.companions) c.task = null;
-    hudSay("You woke away from the camp. Nobody has orders today.");
-  }
-  const clk = sevenClock(sim.time);
-  if (clk.night && clk.hour >= 18 && e.duskPlanDay !== e.day && !e.sleeping) {
-    e.duskPlanDay = e.day;
-    if (atBuiltCamp(sim)) openPlan(sim, "dusk");
-    else hudSay("Dark, and you are away from the camp. They will make their own way back.");
-  }
-}
-
-/** Take the camp down here, or make it where you stand. Both take clock time. */
-function campAction() {
-  if (!run) return;
-  const sim = run.sim;
-  const e = sim.expedition;
-  if (!e || !sim.camp) return;
-  if (sim.camp.built) {
-    const r = dismantleCamp(sim, CAMP_RADIUS);
-    if (!r.ok) { hudSay("You are not at the camp."); return; }
-    recordFact(e, { kind: "breakcamp", actor: "you", object: "camp", withWhom: nearbyIds(sim, "you", CORROBORATE_RADIUS), t: sim.time });
-    spendSevenDaylight(sim, 1, "camp");
-    hudSay("Camp comes down. The woodpile stays where it is.");
-  } else {
-    makeCamp(sim);
-    recordFact(e, { kind: "makecamp", actor: "you", object: "camp", withWhom: nearbyIds(sim, "you", CORROBORATE_RADIUS), t: sim.time });
-    // Walking forward is how you abandon them: no prompt, the window just closes.
-    const campArea = areaOfRow(worldToCell(sim.camp.x, sim.camp.z, sim.world.grid).cz);
-    if (campArea > e.area) advanceArea(e, campArea - e.area);
-    spendSevenDaylight(sim, 2, "camp");
-    hudSay("Camp, here. It wants a fire before dark.");
-  }
-  if (paused) togglePause();
-}
-
-/** Rest until morning: sleep where you are and let the night pass, fast. */
-function restUntilMorning() {
-  if (!run) return;
-  const sim = run.sim;
-  const chk = restCheck(sim, CAMP_RADIUS);
-  if (!chk.ok) return;
-  sim.expedition.sleeping = true;
-  sim.expedition.lapse = 0;
-  if (paused) togglePause();
-}
-
-const CAMP_RADIUS = SEVEN_CAMP_RADIUS; // the campsite, and the fire's night shield
-function resolveSevenNight(sim) {
-  const e = sim.expedition;
-  if (!e || e.phase !== "day" || sim.status !== "playing") return;
-  // DAWN decides, not an empty wallet: the night is resolved when the clock
-  // turns over into the next day.
-  if (sevenClock(sim.time).day <= e.day) return;
-  e.sleeping = false;
-  e.planDawnPending = true;
-  // Who stayed at camp today, written down before the day closes.
-  for (const id of campIds(sim, CAMP_RADIUS)) recordFact(e, { kind: "camp", actor: id, object: "camp", withWhom: [], t: sim.time });
-  sleep(e);
-  const before = e.missing.length;
-  // Fakes still standing in the camp: replaced, and neither exposed nor sent off.
-  e.heldFakes = sim.companions.filter((c) => c.replacedDay != null && !(e.mysteries || []).some((m) => m.suspect === c.id && m.exposed)).length;
-  e.exposure = nightExposure(sim, CAMP_RADIUS);
-  const gone = resolveNight(e, sim.rng, sim.companions.map((c) => c.id));
-  // FOUR DRAWS EVERY DAWN, whatever the night did: where a missing one stands
-  // (two), whether a false call comes, and its bearing.
-  const rSpot = sim.rng(), rSpare = sim.rng(), rFalse = sim.rng(), rBear = sim.rng();
-  void rSpare;
-  for (const m of e.missing) if (!m.recovered && !m.abandoned && m.x != null) m.nights = (m.nights || 0) + 1;
-  if (gone && e.missing.length > before) {
-    const c = sim.companions.find((x) => x.id === gone.missing.id);
-    if (c) c.replacedDay = e.day - 1;
-    const from = sim.camp && sim.camp.built ? sim.camp : sim.world.camp;
-    const spot = missingSpot(sim.world, gone.missing.area, from, rSpot);
-    if (spot) placeMissing(e, gone.missing.id, spot.x, spot.z);
-  }
-  // NOTHING IS ANNOUNCED (IDEAS): the same line whether or not anyone went.
-  emitToHud(sim, "expedition", "Night passes.");
-  // First light: calls from the trees, heard at the camp. Real ones hold their
-  // bearing from dawn to dawn; false ones come from nowhere in particular.
-  if (atBuiltCamp(sim)) {
-    for (const call of dawnCalls(e, sim.camp, rFalse, rBear)) {
-      emitToHud(sim, "expedition", `At first light, a voice from the trees to the ${call.bearing}. ${loudWord(call.loud)[0].toUpperCase()}${loudWord(call.loud).slice(1)}.`);
-    }
-  }
-  const key = startKeystoneMorning(e, sim.rng, sim.companions.map((c) => c.id), sim.time);
-  if (key) startSevenKeystone(sim, key);
-}
-
-function updateSevenObjective(sim) {
-  const e = sim.expedition;
-  if (!e) return;
-  const route = sevenRoute(sim);
-  const pct = Math.round(route.progress * 100);
-  const missing = e.missing.filter((m) => !m.recovered && !m.abandoned).length;
-  const mystery = activeMystery(e);
-  const mysteryLine = mystery
-    ? mystery.searchReady
-      ? " You named the one who came back wrong. Press {act} to search the back trail."
-      : mystery.proofPending
-        ? ` Bring ${nameOfSeven(sim, mystery.accused)} into a pylon and spend it.`
-      : ` Ask the party about day ${mystery.day} with {checkin}; ${mystery.asksLeft} question${mystery.asksLeft === 1 ? "" : "s"} left. Press {name} to name somebody.`
-    : "";
-  const clock = sevenClock(sim.time);
-  const when = clock.night ? "It is dark." : `Dusk in ${Math.max(0, Math.ceil(clock.hoursToDusk))}h.`;
-  const campLine = sim.camp && !sim.camp.built ? " The camp is packed." : "";
-  setObjective(
-    `Day ${e.day}  Area ${Math.min(SEVEN_AREAS, e.area + 1)}/${SEVEN_AREAS}`,
-    `The way out is north. ${when}${campLine}` +
-      (missing ? " Someone is still out there behind you." : "") +
-      mysteryLine,
-  );
-}
-
-function updateSevenProgress(sim) {
-  const e = sim.expedition;
-  if (!e || sim.status !== "playing") return;
-  const route = sevenRoute(sim);
-  // Where the lead stands is for the HUD. The rescue window moves with the
-  // CAMP (owner, 2026-10-11): making camp in a new area is moving forward.
-  if (route.area !== e.hereArea) {
-    if (route.area > (e.hereArea ?? 0)) recordFact(e, { kind: "trail", actor: "you", object: `area ${route.area + 1}`, t: sim.time });
-    e.hereArea = route.area;
-  }
-  // The one you found walks home with you; at a built camp, they are home.
-  const found = checkFound(sim);
-  if (found) {
-    sim.found = { id: found.id, x: found.x, z: found.z, facing: 0 };
-    recordFact(e, { kind: "found", actor: "you", object: found.id, t: sim.time });
-    hudSay(`You find ${nameOfSeven(sim, found.id)} out here. Bring them home.`);
-  }
-  if (sim.found && !twinUi && atBuiltCamp(sim) && Math.hypot(sim.found.x - sim.camp.x, sim.found.z - sim.camp.z) <= CAMP_RADIUS) {
-    bringFoundHome(sim);
-  }
-  if (route.progress >= 1) {
-    sim.status = "decision";
-    sim.ending = "edge";
-    emitToHud(sim, "end", "The trees break. There is open air ahead.");
-    openFinalDecision(sim);
-    return;
-  }
-  resolveSevenNight(sim);
-  updateSevenObjective(sim);
-}
-
-function recordSevenEvents(sim, events) {
-  const e = sim.expedition;
-  if (!e) return;
-  const near = (who) => nearbyIds(sim, who || "you", CORROBORATE_RADIUS);
-  for (const ev of events) {
-    if (ev.kind === "gather") {
-      const deadfall = /deadfall/i.test(ev.text || "");
-      recordFact(e, {
-        kind: deadfall ? "deadfall" : "gather",
-        object: deadfall ? "deadfall" : ev.resource,
-        actor: ev.who || "you",
-        amount: ev.amount ?? 0,
-        withWhom: near(ev.who),
-        t: sim.time,
-      });
-    } else if (ev.kind === "draw") {
-      recordFact(e, { kind: "pylon", actor: ev.who || "you", object: ev.id, withWhom: near(ev.who), t: sim.time });
-      spendSevenDaylight(sim, 0.25, "pylon");
-    } else if (ev.kind === "log") {
-      recordFact(e, { kind: "survey", actor: ev.who || "you", object: ev.id, withWhom: near(ev.who), t: sim.time });
-    } else if (ev.kind === "haul") {
-      recordFact(e, { kind: "gather", object: "wood", actor: ev.who, amount: ev.amount ?? 0, withWhom: near(ev.who), t: sim.time });
-    } else if (ev.kind === "fire" && /kindling catches/i.test(ev.text || "")) {
-      recordFact(e, { kind: "fire", actor: ev.who || "you", object: "the fire", withWhom: near(ev.who), t: sim.time });
-    } else if (ev.kind === "call") {
-      // The call event fires whether or not anyone answers (same text either
-      // way, on purpose), so the FACT is read off the world: only a mind that
-      // is actually summoned by the lead right now answered.
-      const c = sim.companions.find((x) => x.id === ev.who);
-      if (c && c.summonBy === sim.player.id && c.summonUntil > sim.time) {
-        recordFact(e, { kind: "call", actor: c.id, object: "your call", withWhom: near(c.id), t: sim.time });
-      }
-    } else if (ev.kind === "recover") {
-      recordFact(e, { kind: "recovered", actor: ev.who || "you", withWhom: near(ev.who), t: sim.time });
-    }
-  }
-  resolveSevenNight(sim);
-}
-
-function nameOfSeven(sim, id) {
-  if (id === "you") return "You";
-  return sim.companions.find((c) => c.id === id)?.name || id;
-}
-
-function paintSevenMystery(sim) {
-  const e = sim.expedition;
-  const m = activeMystery(e);
-  if (!m) { updateSevenObjective(sim); return; }
-  const asked = m.asked.map((id) => nameOfSeven(sim, id)).join(", ");
-  setObjective(
-    "The morning after",
-    m.searchReady
-      ? `${nameOfSeven(sim, m.suspect)} is still out there. Press {act} to search the back trail.`
-      : m.proofPending
-        ? `Bring ${nameOfSeven(sim, m.accused)} into a pylon and spend it. If you are wrong, the pylon is still gone.`
-      : `Ask about day ${m.day} with {checkin}. ${m.asksLeft} of ${MYSTERY_ASKS_ALLOWED} left.` +
-        (asked ? ` Already asked: ${asked}.` : "") +
-        " Press {name} to name who came back wrong.",
-  );
-}
-
-function sevenAsk(sim, id) {
-  const e = sim.expedition;
-  const acc = askMystery(e, id, (who) => nameOfSeven(sim, who));
-  if (!acc) {
-    hudSay("No more daylight for questions.");
-    return;
-  }
-  if (!acc.repeat) spendSevenDaylight(sim, 1, "ask");
-  showAccount(acc, { asksLeft: activeMystery(e)?.asksLeft ?? 0 });
-  paintSevenMystery(sim);
-  resolveSevenNight(sim);
-}
-
-function openSevenAccuse(sim) {
-  const m = activeMystery(sim.expedition);
-  if (!m || m.accused) return;
-  const row = el("accuseRow");
-  row.innerHTML = "";
-  sim.companions.forEach((c, i) => {
-    const b = document.createElement("button");
-    b.className = "diff";
-    b.textContent = c.name;
-    b.dataset.row = "0";
-    b.dataset.col = String(i);
-    b.addEventListener("click", () => sevenAccuse(sim, c.id));
-    row.appendChild(b);
-  });
-  el("accusePanel").querySelector(".woods-who").textContent = "One of them came back wrong.";
-  el("accusePanel").querySelector(".woods-sub").textContent = "Name them. If you are right, you can search the back trail.";
-  openWoodsPanel("accusePanel");
-}
-
-function sevenAccuse(sim, id) {
-  const v = accuseMystery(sim.expedition, id, (who) => nameOfSeven(sim, who));
-  if (!v) return;
-  el("verdictHead").textContent = "Take them to a pylon.";
-  el("verdictHead").className = "woods-who";
-  el("verdictBody").textContent = `${v.accused} is named. The woods will not answer until you spend real light on it.`;
-  el("verdictTell").textContent = "Bring them into a live pylon and fire it. Correct or wrong, that pylon is gone.";
-  el("verdictCost").textContent = "The accusation is only a suspicion until the pylon burns.";
-  el("verdictTally").textContent = "";
-  el("verdictAgain").classList.add("hidden");
-  el("verdictDone").textContent = "Back to the trail";
-  openWoodsPanel("verdictPanel");
-  paintSevenMystery(sim);
-}
-
-function sevenProveAtPylon(sim, pylon) {
-  const m = activeMystery(sim.expedition);
-  if (!m?.proofPending) return false;
-  const suspect = sim.companions.find((c) => c.id === m.accused);
-  if (!suspect || !pylon || Math.hypot(suspect.x - pylon.x, suspect.z - pylon.z) > PYLON_RADIUS) {
-    hudSay(`Bring ${nameOfSeven(sim, m.accused)} into the pylon before you burn it.`);
-    return false;
-  }
-  const v = proveMystery(sim.expedition, (who) => nameOfSeven(sim, who));
-  if (!v) return false;
-  if (v.correct) {
-    emitToHud(sim, "expedition", `${v.taken} is not what came back. The pylon goes dark.`);
-    hudSay("The pylon answers. Search the back trail while there is still light.");
-  } else {
-    emitToHud(sim, "expedition", `${v.accused} stands in the light and nothing breaks. The pylon is still gone.`);
-    hudSay(`${v.accused} was real enough for the pylon. The missing one is still behind you.`);
-  }
-  paintSevenMystery(sim);
-  return true;
-}
-
-function searchSevenBackTrail(sim) {
-  const e = sim.expedition;
-  const m = activeMystery(e);
-  if (!m?.searchReady) return false;
-  const skill = teamSkill(sim, "signal") * 0.2 + teamSkill(sim, "mend") * 0.15;
-  const cost = Math.max(1, Number((3 - skill).toFixed(2)));
-  spendSevenDaylight(sim, cost, "search");
-  if (recoverMissing(e, m.suspect)) {
-    recordFact(e, { kind: "recovered", actor: "you", object: m.suspect, t: sim.time });
-    emitToHud(sim, "expedition", `${nameOfSeven(sim, m.suspect)} answers from the back trail. You bring them home.`);
-    audio.play("recover");
-    updateSevenObjective(sim);
-    resolveSevenNight(sim);
-    return true;
-  }
-  audio.play("deny");
-  hudSay("The trail has already closed.");
-  updateSevenObjective(sim);
-  return true;
-}
-
-function startSevenKeystone(sim, key = sim.expedition?.keystone) {
-  if (!key?.active) return;
-  const base = sim.player;
-  for (const c of sim.companions) {
-    const i = key.order.indexOf(c.id);
-    const a = (i >= 0 ? i : c.index) * Math.PI * 0.4 + Math.PI * 0.15;
-    c.x = base.x + Math.cos(a) * 42;
-    c.z = base.z + Math.sin(a) * 42;
-    c.path = null;
-    c.jobSite = null;
-    c.wanderGoal = { x: c.x, z: c.z };
-    c.wanderUntil = sim.time + 60;
-    c.keystoneAway = true;
-  }
-  emitToHud(sim, "expedition", "Morning comes back empty. No one is standing where they slept.");
-  paintSevenMystery(sim);
-}
-
-function updateSevenKeystone(sim) {
-  const key = sim.expedition?.keystone;
-  if (!key?.active) return;
-  const returned = advanceKeystoneMorning(sim.expedition, sim.time);
-  if (!returned.length) return;
-  const ring = 5.5;
-  returned.forEach((id, n) => {
-    const c = sim.companions.find((x) => x.id === id);
-    if (!c) return;
-    const slot = key.returned.indexOf(id);
-    const a = -Math.PI / 2 + slot * 0.55 + n * 0.08;
-    c.x = sim.player.x + Math.cos(a) * ring;
-    c.z = sim.player.z + Math.sin(a) * ring;
-    c.path = null;
-    c.jobSite = null;
-    c.wanderGoal = null;
-    c.wanderUntil = sim.time + 4;
-    c.keystoneAway = false;
-    emitToHud(sim, "expedition", `${c.name} comes back through the trees.`);
-  });
-  if (!key.active) emitToHud(sim, "expedition", "The count is whole again. That is not the same as true.");
-  paintSevenMystery(sim);
-}
-
-function startSeven({ seed, difficulty, team } = {}) {
-  const seedValue = seed ?? Math.floor(Math.random() * 0xffffff) + 1;
-  campaignSeed = seedValue;
-  tut = null;
-  setObjective(null);
-  const world = generateTrail(seedValue);
-  const sim = createRun({ seed: seedValue, difficulty: difficulty || "standard", level: 1, campaignLength: 1, world });
-  sim.seven = true;
-  sim.expedition = createExpedition({ replacementChance: SEVEN_NIGHT_CHANCE });
-  sim.camp = createCamp(world.camp);
-  applyTeamLoadout(sim, team || sevenTeamPref || DEFAULT_TEAM, { overwrite: true });
-  updateSevenObjective(sim);
-  clearSave();
-  const r = mountRun(sim, "Seven of you enter the woods. The way out is north.");
-  updateSevenObjective(sim);
-  openPlan(sim, "dawn");
-  return r;
-}
-
-let finalUi = null;
-
-function openFinalDecision(sim = run?.sim) {
-  if (!sim?.expedition) return;
-  const layer = el("finalLayer");
-  if (!layer) return;
-  finalUi = true;
-  // Recount if nothing has been tried yet: you may have turned back and brought someone home.
-  if (!sim.homeward || sim.homeward.tried.length === 0) startHomeward(sim);
-  paintHomeward(sim, "");
-  layer.classList.remove("hidden");
-  screens("finalLayer");
-}
-
-/** The edge: one button per teammate not yet tried, and what the last light did. */
-function paintHomeward(sim, said) {
-  const h = sim.homeward;
-  el("finalHead").textContent = "The edge of the woods";
-  el("finalBody").textContent = `${h.pylons} pylon${h.pylons === 1 ? "" : "s"} still stand${h.pylons === 1 ? "s" : ""} at the edge. Each takes two pairs of hands: yours, and one of theirs. What is not real cannot light one.`;
-  el("finalState").textContent = said;
-  const box = el("finalPylons");
-  box.textContent = "";
-  let row = 0;
-  for (const c of sim.companions) {
-    if (h.tried.includes(c.id)) continue;
-    const b = Object.assign(document.createElement("button"), { className: "big-btn", textContent: `Light one with ${c.name}` });
-    b.dataset.row = String(row++); b.dataset.col = "0";
-    b.addEventListener("click", () => lightWith(c.id));
-    box.appendChild(b);
-  }
-  el("finalReturn").dataset.row = String(row);
-  setupMenuFocus("finalLayer");
-}
-function lightWith(id) {
-  const sim = run?.sim;
-  if (!sim || sim.status !== "decision") return;
-  const r = lightHomePylon(sim, id);
-  if (!r) return;
-  const name = nameOfSeven(sim, id);
-  const said = r.real
-    ? `${name} steps into the light, and is gone. Home.`
-    : `The light takes nothing. The pylon goes dark, and ${name} is not there any more.`;
-  audio.play(r.real ? "recover" : "reveal");
-  if (homewardOver(sim)) {
-    finishHomeward(sim);
-    finalUi = null;
-    el("finalLayer")?.classList.add("hidden");
-    hudSay(said);
-    finish();
-    return;
-  }
-  paintHomeward(sim, said);
-}
-
-function chooseFinal(choice) {
-  const sim = run?.sim;
-  if (!sim || sim.status !== "decision") return;
-  if (choice === "return") {
-    // Not yet: someone may still be out there. Step back into the trees and play on.
-    sim.status = "playing";
-    sim.ending = null;
-    sim.player.z += sim.world.cell * 3;
-    finalUi = null;
-    el("finalLayer")?.classList.add("hidden");
-    screens("hudLayer");
-    if (input.activeScheme !== "gamepad") input.requestLock();
-    return;
-  }
-  finalDecision(sim, choice);
-  finalUi = null;
-  el("finalLayer")?.classList.add("hidden");
-  finish();
-}
-
-/**
- * The pylon this mind BELIEVES it is standing in — real, phantom, or a spent
- * one the hallucination is still painting as full. Truth is never consulted;
- * that is the point.
- */
-function nearestBelievedPylon(sim, percept, actor) {
-  if (!percept?.active) return null;
-  for (const ph of percept.phantomPylons || []) {
-    if (Math.hypot(ph.x - actor.x, ph.z - actor.z) <= PYLON_RADIUS) return ph;
-  }
-  for (const p of sim.pylons) {
-    if (!percept.deadPylonsLookLive?.has(p.id)) continue;
-    if (Math.hypot(p.x - actor.x, p.z - actor.z) <= PYLON_RADIUS) return p;
-  }
-  return null;
-}
-
-function nearestPhantom(sim, percept, actor = sim.player) {
-  if (!percept.active) return null;
-  let best = null, bestD = Infinity;
-  for (const ph of percept.phantomMonoliths) {
-    const d = Math.hypot(ph.x - actor.x, ph.z - actor.z);
-    if (d < bestD) { bestD = d; best = ph; }
-  }
-  return bestD <= LOG_RADIUS * reachOf(run.sim) ? best : null;
-}
-
-/** Is there a pickup within reach right now? Checked before falling back to a
- * marker survey — one contextual "interact" verb, not a separate pickup button. */
-function nearestPickupItem(sim, actor = sim.player) {
-  return sim.items
-    .filter((it) => it.discovered && !it.taken && Math.hypot(it.x - actor.x, it.z - actor.z) <= ITEM_PICKUP_RADIUS * reachOf(run.sim))
-    .sort((a, b) => Math.hypot(a.x - actor.x, a.z - actor.z) - Math.hypot(b.x - actor.x, b.z - actor.z))[0] || null;
-}
-
-/**
- * Run one verb. `player` is the local player pressing the button — slot 0 (the
- * lead) by default. Every verb below takes the acting CHARACTER, so a joined
- * player surveys the marker THEY are standing at and picks up the item THEY
- * walked to, rather than firing the lead's action from across the basin.
- *
- * What stays shared is the pack, not the position: one inventory, one dose
- * supply, one wood/stone pile. Two people reaching into the same bag is the
- * intended co-op texture — the argument about who gets the last flare is the
- * point — so only the reach itself is per-actor.
- */
-function handleAction(action, arg, player = run.players[0]) {
-  const { sim, hud } = run;
-  const actor = player.eye;
-  const percept = player.percept;
-  if (sim.status !== "playing") return;
-  // THE WALK IN'S ITEMS ARE PROPS UNTIL THE STEP THAT NEEDS THEM IS DONE. The
-  // flare and tether are consumed by use, dropped by drop and handed away by
-  // give, and the next step needs them (craft needs both, hands needs the
-  // ember). Using one stranded the lesson with nothing left to finish it —
-  // a soft lock no step could recover from. So they are held, not spent.
-  if (tut && ITEM_PROPS.has(tut.stage.id)) {
-    const strands = action === ACTIONS.USE_ITEM || action === ACTIONS.DROP_ITEM ||
-      (action === ACTIONS.OFFER_ITEM && tut.stage.id !== "hands");
-    // Hands has one right answer. Handing the ember to anyone else would pass
-    // the step's item to somebody the lesson is not about.
-    const wrongHand = action === ACTIONS.OFFER_ITEM && tut.stage.id === "hands" &&
-      sim.companions[player.selected]?.id !== tut.stage.step.target;
-    if (wrongHand && sim.inventory.length) {
-      audio.play("deny");
-      hud.say("Not them — hand it to IREN.", "warn");
-      return;
-    }
-    if (strands && sim.inventory.length) {
-      audio.play("deny");
-      hud.say(tut.stage.id === "hands" ? "Hold on to that — hand it to IREN." : "Hold on to that — the next step needs it.", "warn");
-      return;
-    }
-  }
-  // THE WOODS intercepts three keys and nothing else. Placed here rather than
-  // inside each case so the interception is in ONE place and readable as a
-  // list: the interact key works a beat, check-in asks about yesterday, and
-  // give names somebody. Everything else falls through to the basin game
-  // untouched, which is what keeps this a layer rather than a fork of the
-  // input handling.
-  if (sim.woods) {
-    // Nothing lands while the screen is black. See playNightfall.
-    if (nightBlackout && action !== ACTIONS.PAUSE) return;
-    // A beat is a HOLD, not a press (see woods.js WORK_HOLD_TIME), so the
-    // interact ACTION does nothing here — the hold is driven from step() off
-    // the raw interact flag, exactly like gathering. Swallowed rather than
-    // fallen through, or a tap at a worksite would go to the basin verbs
-    // underneath and survey a marker that is not there.
-    if (action === ACTIONS.SURVEY && sim.woods.phase === PHASE.DAY) return;
-    if (sim.woods.phase === PHASE.MORNING) {
-      if (action === ACTIONS.CHECK_IN) {
-        if (typeof arg === "number") player.selected = arg;
-        const target = sim.companions[player.selected];
-        if (target) woodsAsk(sim, target.id);
-        return;
-      }
-      if (action === ACTIONS.OFFER_ITEM) { openAccuse(sim); return; }
-      if (action === ACTIONS.SURVEY && woodsUi) { closeWoodsPanel(); return; }
-    }
-    if (sim.woods.phase === PHASE.VERDICT && action !== ACTIONS.PAUSE) return;
-  }
-
-  if (sim.expedition) {
-    const mystery = activeMystery(sim.expedition);
-    if (woodsUi && action === ACTIONS.SURVEY) { closeWoodsPanel(); return; }
-    if (mystery && !mystery.accused && action === ACTIONS.CHECK_IN) {
-      if (typeof arg === "number") player.selected = arg;
-      const target = sim.companions[player.selected];
-      if (target) sevenAsk(sim, target.id);
-      return;
-    }
-    if (mystery && !mystery.accused && action === ACTIONS.OFFER_ITEM) {
-      openSevenAccuse(sim);
-      return;
-    }
-  }
-
-  switch (action) {
-    case ACTIONS.SURVEY: {
-      // A pickup takes priority over a survey when both are in reach — items
-      // sit much closer to the ground than a monolith you can stand inside the
-      // radius of, so this only ever matters when the player deliberately
-      // walked up to something small.
-      const item = nearestPickupItem(sim, actor);
-      if (item) {
-        const pres = pickupItem(sim, actor);
-        if (!pres.ok) {
-          audio.play("deny");
-          hud.say(pres.reason === "full" ? "Hands are full. Use or drop something first." : "Nothing to pick up here.", "warn");
-        } else {
-          audio.play(pres.real ? "log" : "logFalse");
-        }
-        break;
-      }
-      // Gathering is next in the priority chain, but it's a HOLD now (see
-      // tick()'s updateGatherHold), not a tap — a bare press here just needs
-      // to not fall through to a confusing "nothing to survey" message.
-      if (gatherTarget(sim, actor)) break;
-      // Standing in an unspent pylon, the verb spends it. Same key, because a
-      // pylon is not something you carry or aim — it is a thing you are
-      // standing in, and "act on what is here" already means exactly that. It
-      // takes priority over surveying: nobody walks into the light of a pylon
-      // to write in a notebook.
-      // Believed pylons, not real ones. A hallucinating lead is shown pylons
-      // that are not there and spent ones that look full; if the verb only
-      // responded to real ones, pressing it on a phantom would do nothing
-      // visible and that silence would be a perfect lucidity readout. So the
-      // press always LANDS — same line, same sound — and the difference shows
-      // up as nobody ever joining you.
-      // Moss first: a crusted pylon is not a pylon yet, and pylonAt hides it
-      // deliberately. Pressing the verb on one gives a real in-fiction answer
-      // either way — it comes off, or it will not shift — which is what makes
-      // this a gate on the WORLD rather than a guard on the input.
-      const mossy = mossedAt(sim, actor);
-      if (mossy) {
-        const mres = clearMoss(sim, mossy, actor);
-        audio.play(mres.ok ? "recover" : "deny");
-        hud.say(mres.ok
-          ? "The moss comes away. Whatever this is, it is still live."
-          : "Moss has grown right over it. It will not shift.", mres.ok ? "good" : "warn");
-        break;
-      }
-      const realPylon = pylonAt(sim, actor);
-      const believedPylon = realPylon || nearestBelievedPylon(sim, percept, actor);
-      if (believedPylon) {
-        const mystery = activeMystery(sim.expedition);
-        const suspect = mystery?.proofPending
-          ? sim.companions.find((c) => c.id === mystery.accused)
-          : null;
-        if (mystery?.proofPending && realPylon && (!suspect || Math.hypot(suspect.x - realPylon.x, suspect.z - realPylon.z) > PYLON_RADIUS)) {
-          audio.play("deny");
-          hud.say(`Bring ${nameOfSeven(sim, mystery.accused)} into the pylon before you burn it.`, "warn");
-          break;
-        }
-        const ares = activatePylon(sim, actor);
-        audio.play(ares.confirmed ? "recover" : "log");
-        if (ares.confirmed) {
-          hud.say(
-            `The pylon gives out. ${ares.caught} of you caught it — it will not light again.`,
-            "good",
-          );
-          sevenProveAtPylon(sim, realPylon);
-        } else {
-          hud.say("Hands on the pylon. It needs a second pair before it will give.", "warn");
-        }
-        break;
-      }
-      // The fire, believed. Same rung as the HUD prompt puts it on — under the
-      // pylon, above the survey — and the same reason the pylon branch uses a
-      // believed target: the press must LAND identically whether or not there
-      // is a fire there, or the silence is a readout. What differs is that the
-      // wood buys nothing, and nobody is told.
-      const believedFire = believedFireAt(percept, sim, actor);
-      if (believedFire) {
-        const fres = feedFire(sim, actor);
-        if (!fres.ok) {
-          audio.play("deny");
-          hud.say("Nothing left to burn.", "warn");
-        } else {
-          if (!fres.fed) notePhantomFeed(percept);
-          // Charged either way, like the wood: the daylight bar must not tell a
-          // real fire from a believed one. The FACT is only written for a real one.
-          spendSevenDaylight(sim, FIRE_DAYLIGHT.feed, "fire");
-          if (fres.fed && sim.expedition) recordFact(sim.expedition, { kind: "feed", actor: "you", object: "the fire", withWhom: nearbyIds(sim, "you", CORROBORATE_RADIUS), t: sim.time });
-          audio.play("log");
-          hud.say("You feed the fire.", "good");
-        }
-        break;
-      }
-      // THE BOTTOM RUNG, and deliberately so. Building has no target on the
-      // ground, so anywhere it sat higher it would shadow a verb that does —
-      // which is how the craft-resolver version of this broke the Stake. Down
-      // here the only thing it can take precedence over is the "nothing to
-      // survey" refusal, and that is not a verb.
-      const marker = nearestPhantom(sim, percept, actor);
-      if (!marker && (!sim.fire || (sim.camp && sim.fire.fuel <= 0)) && woodForFire(sim) >= FIRE_COST.wood) {
-        const bres = buildFire(sim, actor);
-        if (bres.ok) spendSevenDaylight(sim, FIRE_DAYLIGHT.build, "fire");
-        audio.play(bres.ok ? "recover" : "deny");
-        hud.say(bres.ok
-          ? "The kindling catches. It will burn as long as you feed it."
-          : "Not enough wood to get one lit.", bres.ok ? "good" : "warn");
-        break;
-      }
-      const res = logMarker(sim, marker, actor);
-      if (!res.ok) {
-        // A failed survey used to be silent-but-for-a-sound-cue — indistinguishable
-        // from the button doing nothing at all if audio hadn't started or wasn't
-        // noticed. Every press now says something on screen.
-        audio.play("deny");
-        hud.say(res.reason === "over" ? "The survey is already over." : "Nothing to survey here.", "warn");
-      } else {
-        audio.play(res.real ? "log" : "logFalse");
-      }
-      break;
-    }
-    case ACTIONS.CALL: {
-      // Locked until the walk in teaches it, and only there — a basin run sets
-      // callUnlocked at construction. Gated by ABSENCE of the verb rather than
-      // by a silent refusal so the tutorial never has to intercept an input.
-      if (sim.callUnlocked === false) break;
-      const target = sim.companions[player.selected];
-      if (!target) break;
-      const cres = callCompanion(sim, target.id, actor);
-      // Only the cadences refuse, and a refusal is silent and free. There is no
-      // "nobody answered" line and there never will be: that would report the
-      // hidden meter through an error string. The call sounds the same whether
-      // or not anybody is coming; what differs is whether anybody arrives.
-      if (cres.ok) audio.play("log");
-      break;
-    }
-    case ACTIONS.CHECK_IN: {
-      // An explicit arg (a keyboard digit) both targets AND becomes the shared
-      // selection, so the roster highlight and Q/R/LB/RB cycling anchor move
-      // with it. Without updating `selected` here, a gamepad's X/Y buttons —
-      // which carry no arg and rely on this shared value — would act on
-      // whatever LB/RB last cycled to, never on a digit-picked companion.
-      if (typeof arg === "number") player.selected = arg;
-      const target = sim.companions[player.selected];
-      if (!target) return;
-      // The report filters through the ASKER's percept — a hallucinating
-      // player two garbles their own answers, and never the lead's.
-      hud.showReport(checkIn(sim, target.id), player.percept);
-      break;
-    }
-    case ACTIONS.DOSE: {
-      if (typeof arg === "number") player.selected = arg;
-      const target = sim.companions[player.selected];
-      if (!target) return;
-      if (useDose(sim, target.id)) audio.play("dose");
-      else audio.play("deny");
-      break;
-    }
-    case ACTIONS.NEXT_TARGET:
-      player.selected = (player.selected + 1) % (PARTY_SIZE - 1);
-      break;
-    case ACTIONS.PREV_TARGET:
-      player.selected = (player.selected + PARTY_SIZE - 2) % (PARTY_SIZE - 1);
-      break;
-    case ACTIONS.CYCLE_ITEM:
-      if (sim.inventory.length) player.selectedItem = (player.selectedItem + 1) % sim.inventory.length;
-      break;
-    case ACTIONS.USE_ITEM: {
-      if (!sim.inventory.length) {
-        audio.play("deny");
-        hud.say("Nothing carried to use.", "warn");
-        break;
-      }
-      if (player.selectedItem >= sim.inventory.length) player.selectedItem = 0;
-      const target = sim.companions[player.selected];
-      // Read what THIS ACTOR believed the slot was, before useItem consumes it
-      // and the slot id stops meaning anything. useItem itself never sees
-      // percept (state.js stays honest) — this is the one glue point allowed
-      // to compare what percept.js told them against what state.js actually
-      // does, and only to pick a cue/message, never to change the outcome.
-      const slot = sim.inventory[player.selectedItem];
-      const shownKind = slot?.real ? percept.itemLabels.get(slot.id) : null;
-      const misidentified = !!shownKind && shownKind !== slot.kind;
-      const ures = useItem(sim, player.selectedItem, target?.id, actor);
-      if (!ures.ok) { audio.play("deny"); break; }
-      if (!ures.real || misidentified) {
-        // The hallucination just broke on contact: either there was nothing
-        // there at all (useItem already said so), or the item was real but
-        // not what this actor believed. Either way, a distinct cue — not the
-        // ordinary "dose" chime a correctly-seen item gets.
-        audio.play("reveal");
-        if (misidentified) hud.say(`That wasn't ${ITEM_INFO[shownKind].label}. It was ${ITEM_INFO[ures.kind].label}.`, "warn");
-      } else {
-        audio.play("dose");
-      }
-      if (player.selectedItem >= sim.inventory.length && player.selectedItem > 0) player.selectedItem -= 1;
-      break;
-    }
-    case ACTIONS.DROP_ITEM: {
-      if (!sim.inventory.length) {
-        audio.play("deny");
-        hud.say("Nothing carried to put down.", "warn");
-        break;
-      }
-      if (player.selectedItem >= sim.inventory.length) player.selectedItem = 0;
-      const dres = dropItem(sim, player.selectedItem, actor);
-      if (!dres.ok) { audio.play("deny"); break; }
-      audio.play(dres.real ? "log" : "logFalse");
-      if (player.selectedItem >= sim.inventory.length && player.selectedItem > 0) player.selectedItem -= 1;
-      break;
-    }
-    case ACTIONS.CRAFT: {
-      // Crafts against what THIS player's item bar is SHOWING, not the sim's
-      // truth, so a mind that believes it holds a matching pair always gets to
-      // commit — and finds out what it actually built later (state.craftItem).
-      // `player.selectedItem` anchors WHICH pair, so the hint and the craft
-      // never disagree about what is about to be made.
-      const cres = craftItem(sim, player.selectedItem, believedKinds(percept, sim));
-      if (!cres.ok) {
-        audio.play("deny");
-        hud.say(cres.reason === "full" ? "Hands are full. Use or drop something first." : "Nothing here combines.", "warn");
-        break;
-      }
-      // Deliberately does NOT branch on cres.real: a false craft has to look,
-      // sound and read exactly like an honest one at the moment it happens.
-      audio.play("log");
-      player.selectedItem = Math.max(0, sim.inventory.length - 1); // land selection on the new item
-      break;
-    }
-    case ACTIONS.OFFER_ITEM: {
-      if (!sim.inventory.length) {
-        audio.play("deny");
-        hud.say("Nothing carried to offer.", "warn");
-        break;
-      }
-      if (player.selectedItem >= sim.inventory.length) player.selectedItem = 0;
-      const target = sim.companions[player.selected];
-      if (!target) break;
-      const ores = offerItem(
-        sim,
-        player.selectedItem,
-        target.id,
-        believedKinds(percept, sim)[player.selectedItem],
-        actor,
-      );
-      if (!ores.ok) {
-        audio.play("deny");
-        if (ores.reason === "too-far") hud.say(`${target.name} is too far to hand anything to.`, "warn");
-        else if (ores.reason === "no-target") hud.say("Pick someone else to hand it to.", "warn");
-        break;
-      }
-      // Branches on whether the offer was CALLED OUT, never on whether the item
-      // was real: a phantom that two deceived minds pass between them has to
-      // sound exactly like a real one landing, or the sound is the tell.
-      audio.play(ores.revealed ? "logFalse" : "dose");
-      if (player.selectedItem >= sim.inventory.length && player.selectedItem > 0) player.selectedItem -= 1;
-      break;
-    }
-    case ACTIONS.PAUSE:
-      // Escape closes an open account or the name list before it reaches the
-      // pause menu. Reading somebody's account and wanting out of it is the
-      // commonest press in the morning, and having it dump the player into a
-      // settings screen instead would read as the panel being stuck.
-      if (woodsUi) { closeWoodsPanel(); break; }
-      togglePause();
-      break;
-    default:
-      break;
-  }
-}
-
-// The pause menu's grid, rebuilt every time it opens. Training and "Rest until
-// morning" exist only in an expedition, and are menu choices rather than keys:
-// ending the day or spending a point should be deliberate, and the menu already
-// works on keyboard, pad and touch. Rows are numbered over what is VISIBLE, in
-// order, so pad navigation never meets a gap.
-let trainIdx = 0;
-const PAUSE_ROWS = [".vol", ".fov", "#trainNav button", "#trainSkills button", ".ui", "#resumeBtn", "#campBtn", "#restBtn", "#quitBtn"];
-function syncPauseGrid(sim) {
-  const on = !!sim.expedition;
-  el("trainBlock")?.classList.toggle("hidden", !on);
-  el("restBtn")?.classList.toggle("hidden", !on);
-  el("campBtn")?.classList.toggle("hidden", !on || !sim.camp);
-  if (on && sim.camp && el("campBtn")) el("campBtn").firstChild.textContent = sim.camp.built ? "Take camp down" : "Make camp here";
-  if (on) paintTraining(sim);
-  let row = 0;
-  for (const sel of PAUSE_ROWS) {
-    const els = [...document.querySelectorAll(`#pauseLayer ${sel}`)].filter((b) => !b.closest("#trainBlock.hidden, #restBtn.hidden"));
-    if (!els.length) continue;
-    els.forEach((b, col) => { b.dataset.row = String(row); b.dataset.col = String(col); });
-    row++;
-  }
-}
-
-function paintTraining(sim) {
-  const e = sim.expedition;
-  const n = sim.companions.length;
-  trainIdx = ((trainIdx % n) + n) % n;
-  const c = sim.companions[trainIdx];
-  el("trainPoints").textContent = `${e.skillPoints || 0} point${e.skillPoints === 1 ? "" : "s"}`;
-  el("trainName").textContent = c.name;
-  for (const b of document.querySelectorAll("#trainSkills [data-skill]")) {
-    const k = b.dataset.skill;
-    b.textContent = `${k[0].toUpperCase()}${k.slice(1)} ${c.skills?.[k] || 0}`;
-    b.classList.toggle("dim", !(e.skillPoints > 0) || (c.skills?.[k] || 0) >= SKILL_MAX);
-  }
-}
-
-function togglePause() {
-  if (!run || run.sim.status !== "playing") return;
-  paused = !paused;
-  if (paused) syncPauseGrid(run.sim);
-  screens(paused ? "pauseLayer" : "hudLayer");
-  if (!paused && input.activeScheme !== "gamepad") input.requestLock();
-}
-
-// ---- couch co-op -----------------------------------------------------------
-//
-// A joined player drives an existing companion (see state.js possess), gets
-// their OWN percept, and gets their own half of the screen. Two humans in the
-// same basin are therefore shown two different worlds — the second player can
-// be walking confidently toward a marker the first cannot see. That asymmetry
-// is the mode: the information each of you holds is unreliable in a DIFFERENT
-// way, so you have to keep talking (Brain: COUCH-MULTIPLAYER/role-balance —
-// an asymmetric split only stays load-bearing while each side holds something
-// the other lacks).
-
-function makeLocalPlayer(slot, eye, percept) {
-  // selected/selectedItem are PER PLAYER: the pack is shared, but "which
-  // companion am I aiming this tether at" and "which slot am I holding" are
-  // each player's own pointer into it. Sharing them would make one player's
-  // cycle silently move the other's selection mid-reach.
-  return { slot, eye, percept, yaw: eye.yaw || 0, pitch: 0, selected: 0, selectedItem: 0, lastMonsterId: null };
-}
-
-/** Split the canvas into one viewport per player, in DEVICE pixels for Three. */
-function viewportsFor(n) {
-  const W = canvas.width, H = canvas.height;
-  if (n <= 1) return [null]; // null = "use the whole canvas"
-  // Side-by-side, never stacked: a top/bottom split halves viewport HEIGHT,
-  // which is what breaks proportionally-sized HUD text (Brain:
-  // COUCH-MULTIPLAYER/ui — fixed-pixel text floor). Halving width instead
-  // keeps every text row at its full single-player height.
-  const w = Math.floor(W / 2);
-  return [
-    { x: 0, y: 0, w, h: H },
-    { x: w, y: 0, w: W - w, h: H },
-  ];
-}
-
-/** Poll for someone on the couch pressing Start on an unclaimed pad. */
-function pollCoopJoin() {
-  if (!coopAllowed) return;
-  const { sim } = run;
-  const padIndex = input.pendingJoinPad();
-  if (padIndex === null) return;
-  const free = possessableCompanions(sim);
-  if (!free.length) return;
-  const target = free[0];
-  const slot = possess(sim, target.id);
-  if (slot === null) return;
-  input.claimPad(padIndex, slot);
-  run.players.push(makeLocalPlayer(slot, target, createPercept(target)));
-  run.hud.say(`${target.name} is player ${slot + 1} now.`, "good");
-  const nameEl = el(`coopName${slot + 1}`);
-  if (nameEl) nameEl.textContent = target.name;
-  document.body.dataset.coop = String(run.players.length);
-  run.renderer.resize();
-}
-
-/** Drop the last joined player, handing their mind back to the party AI. */
-function dropCoopPlayer(slot) {
-  const { sim } = run;
-  if (!release(sim, slot)) return;
-  input.releaseSlot(slot);
-  run.players = run.players.filter((p) => p.slot !== slot);
-  const nameEl = el(`coopName${slot + 1}`);
-  if (nameEl) nameEl.textContent = "—";
-  document.body.dataset.coop = String(run.players.length);
-  run.renderer.resize();
-}
-
-// TEST ONLY: the whole-run bot (tests/seven-bot.mjs) plays many days in one
-// page; drawing every step made a run take minutes on the software renderer.
-// Headless skips the HUD and the draw and nothing else — the sim, the Seven
-// glue and the panels all run exactly as in play.
-let testHeadless = false;
-
-/** One simulation + presentation step. Separated from rAF so tests can drive it. */
-function step(dt, intent) {
-  const { sim, percept, renderer, hud } = run;
-  const yaw = intent.yaw ?? 0;
-  // Screen-space intent rotated into world space by the camera's yaw. Note this
-  // uses the REAL yaw: a lead with a scrambled compass still walks where their
-  // body is pointed, they just believe it is a different direction.
-  // Three's camera looks down -Z, so after a yaw rotation of θ about Y the basis
-  // is forward = (-sinθ, -cosθ) and right = (cosθ, -sinθ). Screen-space intent
-  // (W is z = -1) is projected onto that basis. Getting these signs wrong is
-  // invisible to a "did the player move?" test — it moved, just backwards — and
-  // it also silently put the follow formation in front of the lead.
-  const sin = Math.sin(yaw);
-  const cos = Math.cos(yaw);
-  const move = {
-    x: intent.move.x * cos + intent.move.z * sin,
-    z: -intent.move.x * sin + intent.move.z * cos,
   };
-
-  // THE DAY'S HOLD, before the queue. It reads the raw interact flag rather
-  // than a queued action because it is a hold: the queue carries edges, and an
-  // edge cannot tell you that a key is still down.
-  if (sim.woods && sim.woods.phase === PHASE.DAY && !nightBlackout) {
-    if (updateWorkHold(sim, sim.woods, dt, !!intent.interact)) woodsWork(sim);
-  }
-
-  for (const { action, arg } of intent.queue) handleAction(action, arg);
-  // handleAction() (pickup/use/craft/gather/log/dose) emits into sim.events —
-  // but tick()'s own first line wipes that array clean for ITS OWN internal
-  // emits (discover/recover/hallucinate/chatter/...), per sim.events'
-  // documented contract ("transient, drained by the HUD each frame" —
-  // createRun's own comment) that tick() owns and resets that array once per
-  // call. That contract is also load-bearing elsewhere (the balance harness
-  // and a couple of logic tests call tick() directly in a loop and count
-  // sim.events per call, which only works if each call starts clean) — so
-  // the fix here is a LOCAL, one-shot capture passed straight to hud.update,
-  // never written back into sim.events. This is why pickup/use/craft
-  // subtitles (and the flare-use flash) never actually appeared: the event
-  // existed for a few statements and was gone before anything read it.
-  const actionEvents = sim.events.slice();
-
-  // Couch co-op: read each joined player's own pad and rotate their movement
-  // by THEIR facing, not the lead's. A slot whose pad has vanished (unplugged,
-  // flat battery) contributes no intent this frame — its character simply
-  // stands still rather than inheriting someone else's stick.
-  const others = [];
-  for (let i = 1; i < run.players.length; i++) {
-    const p = run.players[i];
-    // A debug intent (the test harness's advance() hook) bypasses the pad
-    // entirely — already world-space, no look/queue. Real play polls the pad.
-    const dbg = intent.others && intent.others[i - 1];
-    if (dbg) {
-      if (typeof dbg.yaw === "number") p.yaw = dbg.yaw;
-      others.push({ move: dbg.move || { x: 0, z: 0 }, run: !!dbg.run, yaw: p.yaw, interact: !!dbg.interact });
-      continue;
-    }
-    const raw = input.pollSlot(p.slot);
-    if (!raw) { others.push(null); continue; }
-    if (raw.leave) { dropCoopPlayer(p.slot); i--; continue; }
-    p.yaw -= raw.look.dx * 0.0022;
-    p.pitch = Math.max(-1.2, Math.min(1.2, p.pitch - raw.look.dy * 0.0022));
-    const s2 = Math.sin(p.yaw), c2 = Math.cos(p.yaw);
-    others.push({
-      move: { x: raw.move.x * c2 + raw.move.z * s2, z: -raw.move.x * s2 + raw.move.z * c2 },
-      run: raw.run,
-      yaw: p.yaw,
-      interact: raw.interact,
-    });
-    // Verbs now take the acting character, so a joined player's press acts on
-    // THEIR position and THEIR hallucination state — not the lead's.
-    for (const action of raw.queue) handleAction(action, undefined, p);
-  }
-
-  // Seven runs the simulation faster while time is passing for a reason:
-  // sleeping to dawn, an action's hours, or the lead holding a work target.
-  // Each extra tick is an ordinary tick — drain, night and everyone else's
-  // movement advance with it. Events from every tick are kept, because tick()
-  // clears sim.events on entry.
-  const ex = sim.expedition;
-  let reps = 1;
-  let lapseInput = { move, run: intent.run, yaw, interact: intent.interact, others };
-  if (ex && sim.status === "playing") {
-    if (ex.sleeping) { reps = SLEEP_LAPSE; lapseInput = { move: { x: 0, z: 0 }, yaw, interact: false, others }; }
-    else if (ex.lapse > 0) { reps = LAPSE_REPS; lapseInput = { move: { x: 0, z: 0 }, yaw, interact: false, others }; }
-    else if (intent.interact && sim.gatherHold && sim.gatherHold.targetId) reps = WORK_LAPSE;
-  }
-  const tickEvents = [];
-  for (let r = 0; r < reps; r++) {
-    tick(sim, dt, lapseInput);
-    tickEvents.push(...sim.events);
-    if (sim.found) stepFound(sim, Math.min(dt, 0.1));
-    if (ex) {
-      if (ex.lapse > 0 && !ex.sleeping) ex.lapse = Math.max(0, ex.lapse - Math.min(dt, 0.1));
-      if (sim.status !== "playing" || (r > 0 && sevenClock(sim.time).day > ex.day)) break;
-    }
-  }
-  sim.events.length = 0;
-  sim.events.push(...tickEvents);
-  if (ex) {
-    ex.daylight = Number(sevenClock(sim.time).hoursToDusk.toFixed(2));
-    const took = pickUpPiles(sim);
-    if (took > 0) hudSay(`You take ${took} wood from the old pile.`);
-    const stacked = depositWood(sim, CAMP_RADIUS);
-    if (stacked > 0) hudSay(`You stack ${stacked} wood on the pile.`);
-    sevenPlanTriggers(sim);
-  }
-  if (sim.expedition) updateSevenKeystone(sim);
-  diag.update({ input: intent.move, move, yaw, x: sim.player.x, z: sim.player.z, camera: renderer.camera, hfov: renderer.hfov });
-  // The camp's one place-based objective. Emits once, into the same merged
-  // stream the observer reads, so "walk to the trainer" is an ordinary event
-  // like any other rather than a special case inside the overlay.
-  if (tut && sim.trainer) checkTrainer(sim, (s2, kind, text, opts) => sim.events.push({ ...opts, kind, text, t: s2.time }));
-  const events = actionEvents.concat(sim.events);
-
-  // THE observer hook. It has to be here and nowhere else: `sim.events` alone
-  // is wiped by tick() on its first line, so every verb a stage teaches —
-  // pickup, craft, offerUsed, draw, report — exists only in this merged array.
-  // An observer in state.js would have watched an empty stream forever without
-  // erroring (brain: sandbox-resolver-starves-tutorial#E2 — one silent
-  // starvation candidate per pipeline layer).
-  if (tut && !tut.done) {
-    const p = tutorialProgress();
-    // The movement stage has no entity to pin to, so it watches distance
-    // walked rather than an event, and synthesises the one kind it needs.
-    const seen = tut.stage.step.on === "moved"
-      ? (Math.hypot(sim.player.x - tut.startX, sim.player.z - tut.startZ) >= tut.stage.step.minDistance
-          ? [{ kind: "moved" }] : [])
-      : events;
-    // `tut` is the one object that lives for exactly as long as the stage does,
-    // which makes it the only correct home for a multi-target step's running
-    // tally — `p` is rebuilt from localStorage every frame (see observe).
-    // BEATS — mid-objective moments that are not completions. The pylon
-    // objective needs one: clearing the moss is not finishing it, it is the
-    // point where the trainer casts doubt and hands you the verb that answers
-    // him. Each beat fires at most once, latched on `tut.beats`.
-    for (const beat of tut.stage.beats || []) {
-      if (tut.beats.includes(beat.on)) continue;
-      if (!seen.some((ev) => ev.kind === beat.on)) continue;
-      tut.beats.push(beat.on);
-      if (beat.opens) openObjective(sim, { opens: beat.opens });
-      if (beat.say) hudSay(keyed(beat.say, input.activeScheme));
-    }
-    if (observe(p, tut.stage, seen, sim, tut)) completeStage();
-  }
-  for (const p of run.players) {
-    updatePercept(p.percept, sim, dt);
-    // A one-shot stinger on ONSET only — the id persisting across frames
-    // while the flicker holds must not replay the cue every frame, and the
-    // id clearing back to null must not play it either (that's relief, not a
-    // scare). One shared bed, so whichever player's own mind goes, the couch
-    // hears it.
-    if (p.percept.monsterId !== null && p.percept.monsterId !== p.lastMonsterId) audio.play("monster");
-    p.lastMonsterId = p.percept.monsterId;
-  }
-
-  for (const ev of events) {
-    if (ev.kind === "hallucinate") audio.play("hallucinate");
-    else if (ev.kind === "recover") audio.play("recover");
-    else if (ev.kind === "break") audio.play("break");
-    else if (ev.kind === "gather") {
-      // Approximate world height of the tree/deposit's visual centre (trees
-      // read taller than deposits) — close enough for a dot the eye follows
-      // for half a second, not a precision hit-test.
-      const h = ev.resource === "wood" ? 1.4 : 0.3;
-      const from = renderer.worldToScreen(ev.x, renderer.terrainHeight(ev.x, ev.z) + h, ev.z);
-      hud.collectFly(ev.resource, from);
-    }
-  }
-  recordSevenEvents(sim, events);
-
-  // Whispers only exist for a lead who is gone.
-  if (percept.active) {
-    whisperTimer -= dt;
-    if (whisperTimer <= 0) {
-      whisperTimer = 2.5 + Math.random() * 5;
-      audio.whisper();
-    }
-  }
-
-  let prox = 0;
-  for (const p of sim.pylons) {
-    if (p.spent) continue;
-    const d = Math.hypot(p.x - sim.player.x, p.z - sim.player.z);
-    prox = Math.max(prox, Math.max(0, 1 - d / PYLON_RADIUS));
-  }
-  audio.update(distortion(percept, sim), prox);
-
-  if (!testHeadless) hud.update({ yaw, pitch: intent.pitch ?? 0 }, run.players[0].selected, run.players[0].selectedItem, actionEvents, run.players[1] || null);
-
-  // One draw per player, each from that player's OWN percept — which is what
-  // lets the two halves of the screen legitimately disagree about the basin.
-  // dt goes to the first draw only: `elapsed` is shared scene-animation time,
-  // and advancing it once per viewport would run the world at 2x in co-op.
-  const vps = viewportsFor(run.players.length);
-  run.players[0].yaw = yaw;
-  run.players[0].pitch = intent.pitch ?? 0;
-  for (let i = 0; i < run.players.length && !testHeadless; i++) {
-    const p = run.players[i];
-    // Each player's OWN selection — co-op keeps one pointer per player.
-    const selectedId = sim.companions[p.selected]?.id || null;
-    renderer.update(p.percept, i === 0 ? dt : 0, { yaw: p.yaw, pitch: p.pitch }, { eye: p.eye, viewport: vps[i], selectedId });
-  }
-
-  // sim.events is documented as "transient, drained by the HUD each frame"
-  // (createRun's own comment), but nothing actually drained it until now:
-  // tick() only clears it at the START of ITS OWN call, so whatever tick()
-  // emitted internally this frame (gather/discover/recover/hallucinate/
-  // chatter/...) was still sitting in sim.events when THIS frame ends. The
-  // next frame's `actionEvents = sim.events.slice()` (meant to rescue only
-  // THIS frame's own handleAction emits from tick()'s upcoming clear) would
-  // then mistake last frame's already-handled tick events for fresh ones and
-  // reprocess them a second time a frame late — a duplicate audio cue, a
-  // repeated subtitle line, or (caught by testing the new collect-fly
-  // animation) a second dot flying to a pill that already landed. Clearing
-  // here, once step() itself is done with `events`, is what actually fulfills
-  // the "drained each frame" contract without touching tick()'s own clear,
-  // which a few logic tests and the balance harness depend on when they call
-  // tick() directly in a loop.
-  sim.events.length = 0;
-
-  // Autosave on the SIM's clock, not wall time, so a slow frame or a
-  // backgrounded tab can't change how much progress a save is worth.
-  // saveRun itself refuses anything that isn't status "playing", so the
-  // ordering below (save, then handle endings) can't write a finished board.
-  saveTimer += dt;
-  if (saveTimer >= AUTOSAVE_EVERY) {
-    saveTimer = 0;
-    saveRun(sim, Date.now());
-  }
-
-  updateSevenProgress(sim);
-
-  if (sim.status === "levelComplete") advanceLevel();
-  else if (sim.status === "decision") openFinalDecision(sim);
-  else if (sim.status !== "playing") finish();
+  render();
 }
 
-function finish() {
-  // The run is over: drop the slot before showing the debrief, so "Resume"
-  // can never hand the player back the frame they already lost (Brain:
-  // wrong-sky#E2 — never keep a save of an ended world).
-  clearSave();
-  const report = debrief(run.sim);
-  renderDebrief(el("debriefLayer"), report);
-  screens("debriefLayer");
-  if (document.exitPointerLock) document.exitPointerLock();
-  el("againBtn")?.addEventListener("click", () => screens("title"));
+function askPanel(m) {
+  const days = S.askableDays(sim);
+  if (!days.length) { sim.say(`${m.name}: "Ask me tomorrow. There's nothing behind us yet."`); return; }
+  UI.open(`
+    <h2>${esc(m.name)}</h2>
+    <p class="small">Ask about a day you both lived through. It takes half an hour.</p>
+    ${days.map((d) => `<button data-do="ask" data-arg="${d}">${d === sim.day - 1 ? "Yesterday" : `Day ${d}`}</button>`).join("")}
+    <button data-do="close">Never mind</button>`, { onBack: UI.close });
+  UI.bind({
+    ask: (d) => {
+      const lines = S.askAbout(sim, m.id, +d);
+      UI.open(`<h2>${esc(m.name)}, about ${+d === sim.day - 1 ? "yesterday" : `day ${d}`}</h2>
+        <div class="account">${lines.map((l) => `<p>${esc(l)}</p>`).join("")}</div>
+        <button data-do="close" autofocus>Done</button>`, { onBack: UI.close });
+      UI.bind({ close: UI.close });
+    },
+    close: UI.close,
+  });
 }
 
+function twinPanel() {
+  const t = S.twinAccounts(sim);
+  UI.open(`
+    <h2>Two at the fire</h2>
+    <p>Both of them are ${esc(t.name)}. Both say they never left.</p>
+    <p class="small">You ask them both about day ${t.day}.</p>
+    <div class="twins">
+      <div class="account"><h3>On the left</h3>${t.left.map((l) => `<p>${esc(l)}</p>`).join("")}</div>
+      <div class="account"><h3>On the right</h3>${t.right.map((l) => `<p>${esc(l)}</p>`).join("")}</div>
+    </div>
+    <p class="small">Only one can stay.</p>
+    <button data-do="keep" data-arg="L" autofocus>Keep the one on the left</button>
+    <button data-do="keep" data-arg="R">Keep the one on the right</button>`, { wide: true });
+  UI.bind({ keep: (side) => { S.keepTwin(sim, side === "L"); UI.close(); } });
+}
+
+function homePanel() {
+  const h = sim.home, cands = S.homeCandidates(sim);
+  UI.open(`
+    <h2>The far side</h2>
+    <p>${h.pylons} pylon${h.pylons === 1 ? "" : "s"} stand here, dark. One of them can send someone home, if two pairs of hands light it.</p>
+    <p class="small">Every attempt spends a pylon.${h.saved.length ? ` Gone home: ${h.saved.map((s) => esc(s.name)).join(", ")}.` : ""}</p>
+    ${cands.map((c) => `<button data-do="light" data-arg="${c.id}">Light one with ${esc(c.name)}</button>`).join("")}
+    ${cands.length ? "" : "<p>Nobody is with you.</p>"}
+    <button data-do="out">${h.saved.length ? "Walk out" : "Walk out alone"}</button>
+    <button data-do="back">Not yet. Turn back</button>`, { onBack: () => { S.turnBack(sim); UI.close(); } });
+  UI.bind({
+    light: (id) => { S.lightHome(sim, id); if (sim.status === "playing") homePanel(); else UI.close(); },
+    out: () => { S.finishRun(sim); UI.close(); },
+    back: () => { S.turnBack(sim); UI.close(); },
+  });
+}
+
+function pausePanel() {
+  UI.open(`
+    <h2>Paused</h2>
+    <button data-do="resume" autofocus>Resume</button>
+    <button data-do="how">How to play</button>
+    <button data-do="quit">Save and leave</button>`, { onBack: UI.close });
+  UI.bind({ resume: UI.close, how: () => howPanel(pausePanel), quit: () => { save(); sim = null; titlePanel(); } });
+}
+
+function endPanel() {
+  endShown = true;
+  const e = sim.ending;
+  const back = e.saved.reduce((s, x) => s + Math.ceil((x.points || 0) * RETURN_FRACTION), 0);
+  writeJSON("seven:pool", back);
+  writeJSON("seven:runs", runs().concat([{ at: Date.now(), ending: e.kind, saved: e.saved.length, day: e.day }]).slice(-50));
+  if (store) clearSave(store);
+  const head = { home: "Home", alone: "Alone", lost: "Into the trees" }[e.kind];
+  const body = {
+    home: `You came out the other side on day ${e.day}, and you did not come alone.`,
+    alone: `You came out the other side on day ${e.day}. The last pylon stayed dark.`,
+    lost: `On day ${e.day} you walked off the trail, and did not come back to it.`,
+  }[e.kind];
+  UI.open(`
+    <h2>${head}</h2>
+    <p>${body}</p>
+    ${e.saved.length ? `<p>Brought home: ${e.saved.map((s) => esc(s.name)).join(", ")}.</p>` : ""}
+    ${e.tried.length ? `<p class="small">The pylon would not take ${e.tried.map(esc).join(", ")}. Whoever that was, it was not them.</p>` : ""}
+    ${e.lost.length ? `<p class="small">Left in the woods: ${e.lost.map((l) => esc(l.name)).join(", ")}.</p>` : ""}
+    ${back ? `<p class="small">${back} points go to the next team.</p>` : ""}
+    <button data-do="again" autofocus>Again</button>`);
+  UI.bind({ again: () => { sim = null; titlePanel(); } });
+}
+
+// ---- hints: the walk-in teaches itself -------------------------------------------------
+function hintText() {
+  const t = input.touch;
+  const k = (key, btn) => (t ? btn : key);
+  const L = sim.lead, c = sim.camp, d = frontDeadfall(sim);
+  if (!moved) return `${k("WASD or arrows", "Drag on the left")} to walk. North is up.`;
+  if (L.busy && L.busy.kind === "sleep") return "";
+  if (L.carry > 0 && c.built && !S.atCamp(sim, L)) return "Carry the wood back to camp. It counts once it is on the pile.";
+  if (S.isNight(sim)) {
+    if (c.built && S.atCamp(sim, L) && c.fire <= 0 && c.pile >= 2) return `${k("F", "Fire")} lights the fire. It keeps the camp safe tonight — the camp only.`;
+    if (c.built && S.atCamp(sim, L) && c.fire > 0) return `${k("R", "Rest")} to sleep. At dawn you set the day's work.`;
+    if (c.built && !S.atCamp(sim, L)) return "It is dark. Get back to the fire.";
+    if (!c.built) return `No camp. ${k("Q", "Camp")} makes one here, or sleep in the open (${k("R", "Rest")}).`;
+    return "";
+  }
+  const left = S.lightLeft(sim);
+  if (left < 180 && c.built && c.pile < 6) return `Dusk is coming. Get wood on the pile: ${k("E", "Act")} beside a marked tree fells it.`;
+  if (sim.day === 1 && d && d.area === 0 && d.progress < 0.05) return `A trunk blocks the trail north. Walk up to it and ${k("E", "Act")} to chop. Your team can chop too.`;
+  if (sim.day >= 2 && d && d.area > areaOfRow(Math.floor(c.y)) && c.built) return `The way is open. Take camp down (${k("Q", "Camp")}) and make it further on. The woodpile stays.`;
+  if (!c.built) return `${k("Q", "Camp")} makes camp here. The old woodpile stays where you left it.`;
+  return "";
+}
+
+// ---- the loop --------------------------------------------------------------------
+let last = performance.now();
 function frame(now) {
-  requestAnimationFrame(frame);
-  if (!lastFrame) lastFrame = now;
-  const dt = Math.min(0.1, (now - lastFrame) / 1000);
-  lastFrame = now;
-  if (dt <= 0) return;
-  // input.poll() runs every frame regardless of screen — that is what lets a
-  // gamepad drive the title/pause/debrief menus before any run exists at all.
-  // In 'menu' mode it only has side effects (scheme tracking, dispatching to
-  // the registered menu handlers) and returns null; in 'game' mode it also
-  // returns the movement intent the sim step needs. Scheme-change UI updates
-  // are pushed via the onScheme callback (refreshSchemeUI), not polled here.
-  const intent = input.poll(dt);
-  // Before the early return: the night has to finish opening even on the
-  // frames where there is nothing to step — a paused game or a run that has
-  // ended must not leave the screen black.
-  updateNightfall();
-  if (!run || paused || planUi || twinUi || run.sim.status !== "playing" || !intent) return;
-  pollCoopJoin();
-  step(dt, intent);
-}
-
-// ---- menu wiring -----------------------------------------------------------
-function boot() {
-  el("buildLabel").textContent = BUILD;
-  // Preferences OUTLIVE runs — they live in their own storage key, so losing a
-  // campaign (which clears the run slot) never also resets your volume.
-  const prefs = loadSettings();
-  let difficulty = prefs.difficulty;
-  sevenTeamPref = prefs.sevenTeam || DEFAULT_TEAM;
-  fovPref = prefs.fov;
-  for (const b of document.querySelectorAll("[data-fov]")) {
-    b.classList.toggle("sel", Number(b.dataset.fov) === prefs.fov);
-    b.addEventListener("click", () => {
-      fovPref = Number(b.dataset.fov);
-      saveSettings({ fov: fovPref });
-      run?.renderer.setFov(fovPref);
-      for (const o of document.querySelectorAll("[data-fov]")) o.classList.toggle("sel", o === b);
-    });
-  }
-  // Interface size scales the HUD only (everything is rem off the root), so a
-  // big display can shrink the furniture without zooming the browser.
-  const applyUi = (u) => document.documentElement.style.setProperty("--ui", String(u));
-  applyUi(prefs.ui);
-  for (const b of document.querySelectorAll("[data-ui]")) {
-    b.classList.toggle("sel", Number(b.dataset.ui) === prefs.ui);
-    b.addEventListener("click", () => {
-      const u = Number(b.dataset.ui);
-      applyUi(u);
-      saveSettings({ ui: u });
-      for (const o of document.querySelectorAll("[data-ui]")) o.classList.toggle("sel", o === b);
-    });
-  }
-  audio.setVolume(prefs.volume);
-  for (const b of document.querySelectorAll("[data-vol]")) {
-    b.classList.toggle("sel", Number(b.dataset.vol) === prefs.volume);
-  }
-  for (const b of document.querySelectorAll("[data-diff]")) {
-    b.classList.toggle("sel", b.dataset.diff === prefs.difficulty);
-  }
-  coopAllowed = prefs.coop === "couch";
-  for (const b of document.querySelectorAll("[data-coop-opt]")) {
-    b.classList.toggle("sel", b.dataset.coopOpt === prefs.coop);
-  }
-  for (const b of document.querySelectorAll("[data-seven-team]")) {
-    b.classList.toggle("sel", b.dataset.sevenTeam === sevenTeamPref);
-  }
-  for (const btn of document.querySelectorAll("[data-diff]")) {
-    btn.addEventListener("click", () => {
-      difficulty = btn.dataset.diff;
-      saveSettings({ difficulty });
-      for (const b of document.querySelectorAll("[data-diff]")) b.classList.toggle("sel", b === btn);
-    });
-  }
-  // Couch co-op is an OPTION, chosen on the title screen — never something a
-  // stray second controller can spring on a solo run. Solo is the default;
-  // the mid-run join poll runs only when "Couch co-op" was picked.
-  for (const btn of document.querySelectorAll("[data-coop-opt]")) {
-    btn.addEventListener("click", () => {
-      coopAllowed = btn.dataset.coopOpt === "couch";
-      saveSettings({ coop: btn.dataset.coopOpt });
-      for (const b of document.querySelectorAll("[data-coop-opt]")) b.classList.toggle("sel", b === btn);
-    });
-  }
-  for (const btn of document.querySelectorAll("[data-seven-team]")) {
-    btn.addEventListener("click", () => {
-      sevenTeamPref = btn.dataset.sevenTeam || DEFAULT_TEAM;
-      saveSettings({ sevenTeam: sevenTeamPref });
-      for (const b of document.querySelectorAll("[data-seven-team]")) b.classList.toggle("sel", b === btn);
-    });
-  }
-  el("startBtn").addEventListener("click", () => {
-    // Starting fresh DISCARDS a saved run, so when one exists the first press
-    // only arms the button and says so. A destructive action reachable by one
-    // press of the control the player has been pressing all along is how you
-    // lose someone's campaign to muscle memory.
-    if (hasSaveNow && !newRunArmed) {
-      newRunArmed = true;
-      const btn = el("startBtn");
-      btn.textContent = "Discard saved run — press again";
-      btn.classList.add("confirm-new");
-      return;
+  const dt = Math.min(0.25, (now - last) / 1000); last = now;
+  if (!headless) {
+    const v = input.poll();
+    if (sim && sim.status === "playing" && !UI.isOpen() && !sim.pending) {
+      if (Math.hypot(v.mx, v.my) > 0.1) moved = true;
+      const speed = sim.lead.busy ? (sim.lead.asleep ? SPEED_SLEEP : SPEED_BUSY) : 1;
+      acc += dt * speed;
+      const step = 1 / TICKS_PER_SEC;
+      let n = 0;
+      while (acc >= step && n < 4000 && !sim.pending && sim.status === "playing") { S.tick(sim, sim.lead.busy ? {} : v); acc -= step; n++; }
+      if (sim.pending || sim.status !== "playing") acc = 0;
     }
-    const raw = el("seedInput").value.trim();
-    const seed = raw ? (/^\d+$/.test(raw) ? Number(raw) : hashSeed(raw)) : undefined;
-    startRun({ seed, difficulty });
-  });
-  el("continueBtn").addEventListener("click", () => {
-    if (!resumeRun()) refreshTitleSave(); // the save vanished or was unreadable — re-sync the button
-  });
-  el("woodsBtn").addEventListener("click", () => {
-    // Same discard guard as "Walk in": a day is a fresh run and a fresh run
-    // drops the save slot, so a player with a campaign in progress has to
-    // press twice to lose it.
-    if (hasSaveNow && !newRunArmed) {
-      newRunArmed = true;
-      const b = el("woodsBtn");
-      b.textContent = "Discard saved run — press again";
-      b.classList.add("confirm-new");
-      return;
-    }
-    const raw = el("seedInput").value.trim();
-    const seed = raw ? (/^\d+$/.test(raw) ? Number(raw) : hashSeed(raw)) : undefined;
-    startSeven({ seed, difficulty, team: sevenTeamPref });
-  });
-  el("finalLeave")?.addEventListener("click", () => chooseFinal("leave"));
-  el("finalReturn")?.addEventListener("click", () => chooseFinal("return"));
-  el("finalSeal")?.addEventListener("click", () => chooseFinal("seal"));
-  el("verdictAgain")?.addEventListener("click", () => {
-    // A NEW day, not the same one again. The seed box is for a day somebody
-    // wants to share or re-walk deliberately; the button beside the verdict is
-    // for the next one, and re-running the day whose answer you have just been
-    // told is the one thing it must not do.
-    closeWoodsPanel();
-    startWoods(null);
-  });
-  el("verdictDone")?.addEventListener("click", () => {
-    closeWoodsPanel();
-    if (run?.sim?.expedition && !run.sim.woods) {
-      paintSevenMystery(run.sim);
-      screens("hudLayer");
-      return;
-    }
-    run = null;
-    paused = false;
-    setObjective(null);
-    screens("title");
-    refreshTitleSave();
-  });
-  el("learnBtn").addEventListener("click", () => {
-    const p = tutorialProgress();
-    // Resume where they stopped; a finished tutorial restarts from the top
-    // rather than refusing, because these are worth replaying.
-    startTutorial(p.current >= STAGES.length ? 0 : p.current);
-  });
-  el("howBtn").addEventListener("click", () => el("howto").classList.toggle("hidden"));
-  el("resumeBtn").addEventListener("click", togglePause);
-  el("restBtn")?.addEventListener("click", () => restUntilMorning());
-  el("campBtn")?.addEventListener("click", () => campAction());
-  el("planGo")?.addEventListener("click", () => closePlan());
-  el("twinKeepLeft")?.addEventListener("click", () => chooseTwin(true));
-  el("twinKeepRight")?.addEventListener("click", () => chooseTwin(false));
-  const trainStep = (d) => { if (!run?.sim.expedition) return; trainIdx += d; paintTraining(run.sim); };
-  el("trainPrev")?.addEventListener("click", () => trainStep(-1));
-  el("trainNext")?.addEventListener("click", () => trainStep(1));
-  for (const b of document.querySelectorAll("#trainSkills [data-skill]")) {
-    b.addEventListener("click", () => {
-      const sim = run?.sim;
-      if (!sim?.expedition) return;
-      raiseSkill(sim, sim.companions[trainIdx]?.id, b.dataset.skill);
-      paintTraining(sim);
-    });
+    if (sim) afterTicks();
+    if (sim) draw(dt);
   }
-  el("quitBtn").addEventListener("click", () => {
-    run = null;
-    paused = false;
-    screens("title");
-  });
-  // Discrete steps rather than a range slider — see the HTML comment: a
-  // slider has no natural gamepad binding, but these buttons slot straight
-  // into the same row/col grid nav as everything else in the pause menu.
-  for (const btn of document.querySelectorAll("[data-vol]")) {
-    btn.addEventListener("click", () => {
-      const v = Number(btn.dataset.vol);
-      audio.setVolume(v);
-      saveSettings({ volume: v });
-      for (const b of document.querySelectorAll("[data-vol]")) b.classList.toggle("sel", b === btn);
-    });
-  }
-  // Touch action buttons mirror the keyboard verbs. Survey/pickup still fires
-  // on tap (click, which lands on release); pointerdown/pointerup ALSO track
-  // held state for the hold-to-gather mechanic, exactly like HELD.has("KeyE")
-  // does for keyboard — a touch button has no physical "held" state of its
-  // own, so input.js needs to be told.
-  el("btnSurvey").addEventListener("click", () => run && handleAction(ACTIONS.SURVEY));
-  el("btnSurvey").addEventListener("pointerdown", () => input.setTouchInteractHeld(true));
-  el("btnSurvey").addEventListener("pointerup", () => input.setTouchInteractHeld(false));
-  el("btnSurvey").addEventListener("pointerleave", () => input.setTouchInteractHeld(false));
-  el("btnSurvey").addEventListener("pointercancel", () => input.setTouchInteractHeld(false));
-  el("btnCheck").addEventListener("click", () => run && handleAction(ACTIONS.CHECK_IN, lead().selected));
-  el("btnDose").addEventListener("click", () => run && handleAction(ACTIONS.DOSE, lead().selected));
-  el("btnNext").addEventListener("click", () => run && handleAction(ACTIONS.NEXT_TARGET));
-  el("btnItem")?.addEventListener("click", () => run && handleAction(ACTIONS.CYCLE_ITEM));
-  el("btnUse")?.addEventListener("click", () => run && handleAction(ACTIONS.USE_ITEM));
-  el("btnCraft")?.addEventListener("click", () => run && handleAction(ACTIONS.CRAFT));
-  el("btnGive")?.addEventListener("click", () => run && handleAction(ACTIONS.OFFER_ITEM));
-  // The tutorial's pylon step needs a call; a touch-only player had no way to make one.
-  el("btnCall")?.addEventListener("click", () => run && handleAction(ACTIONS.CALL));
-
-  // A closing tab, a backgrounded phone, an alt-tab: all of these can end the
-  // session between autosaves, so flush on the way out. visibilitychange is the
-  // one that actually fires reliably on mobile — beforeunload does not.
-  const flush = () => { if (run && !paused && run.sim.status === "playing") saveRun(run.sim, Date.now()); };
-  window.addEventListener("beforeunload", flush);
-  document.addEventListener("visibilitychange", () => { if (document.hidden) flush(); });
-
-  screens("title");
   requestAnimationFrame(frame);
 }
 
-// Debug/test hook. The smoke test drives `advance()` rather than waiting on wall
-// time: headless rAF runs at a fraction of real speed, so asserting on real
-// elapsed seconds is a known source of false failures. Everything the tests
-// need to observe is reachable from here.
-if (typeof window !== "undefined") {
-  window.__seven = {
-    build: BUILD,
-    startRun,
-    startSeven,
-    get sim() { return run?.sim ?? null; },
-    get percept() { return run?.percept ?? null; },
-    // Exposed so the smoke test can assert the scene was actually DRAWN.
-    // "the module loaded and nothing threw" is a false green for 3D: under
-    // software GL a broken scene graph still loads clean, so the test reads
-    // Three's own draw-call counter instead.
-    get renderer() { return run?.renderer ?? null; },
-    get paused() { return paused; },
-    get selected() { return lead().selected; },
-    get selectedItem() { return lead().selectedItem; },
-    act: (action, arg) => run && handleAction(action, arg),
-    /** Leave the run for the title screen — what "quit" does, for tests. */
-    toTitle() { run = null; paused = false; finalUi = null; el("finalLayer")?.classList.add("hidden"); screens("title"); },
-    /** Feed a raw pointer-lock delta in CSS pixels, as a real mouse would.
-     * The DPI test needs to send the SAME PHYSICAL sweep at several display
-     * scaling levels, and the only honest way to do that is to hand the input
-     * layer the CSS-pixel figure a real device would report at that scaling. */
-    debugMouseLook(dx, dy) { return input.debugLook(dx, dy); },
-    // Seven test hooks for the whole-run bot. They press the same functions the
-    // panels' buttons press; nothing here is a shortcut past a rule.
-    set headless(v) { testHeadless = !!v; },
-    get twin() { return twinUi ? { ...twinUi } : null; },
-    get planOpen() { return planUi ? planUi.phase : null; },
-    plan(choices) { if (!planUi) return false; Object.assign(planUi.choice, choices); closePlan(); return true; },
-    chooseTwin(left) { chooseTwin(left); },
-    lightWith(id) { lightWith(id); },
-    campAction() { campAction(); },
-    rest() { restUntilMorning(); },
-    /** Start a tutorial stage by index — the same path the title button takes. */
-    startStage(i) { return startTutorial(i); },
-    // THE WOODS, driven the way the title button drives it. The browser test
-    // walks the real player to the real sites and presses the real interact
-    // key; nothing below shortcuts the day, it only WALKS.
-    startWoods(seed) { return startWoods(seed); },
-    get woods() { return run?.sim?.woods ?? null; },
-    get woodsPanel() { return woodsUi?.panel ?? null; },
-    /** Put the lead and the beat's named hand at the current site, as if they had walked. */
-    debugWalkToBeat() {
-      const sim = run?.sim; const w = sim?.woods;
-      if (!w || w.phase !== PHASE.DAY) return null;
-      const b = beatAt(w);
-      const site = sim.world.sites.find((s) => s.id === b.site);
-      sim.player.x = site.x; sim.player.z = site.z;
-      const hand = sim.companions.find((c) => c.id === w.assign[b.id]);
-      hand.x = site.x + 1; hand.z = site.z + 1;
-      return { beat: b.id, site: site.id, hand: hand.name };
-    },
-    woodsAccuse(id) { const sim = run?.sim; return sim && woodsAccuse(sim, id); },
-    /**
-     * Cut the night short. A TEST SEAM, and only that.
-     *
-     * The blackout is timed off the wall clock so it does not stretch when
-     * frames are slow — which is right for a player and unusable in a headless
-     * page under software GL, where the frame loop is throttled to a few
-     * frames a second and the timestamps rAF hands out lag the real clock. A
-     * browser test can assert that the night HAPPENED (the screen closed, the
-     * phase moved, input was swallowed) without also sitting through it.
-     */
-    debugEndNight() {
-      nightAt = -1;
-      nightBlackout = false;
-      const layer = el("nightfall");
-      if (!layer) return false;
-      el("nightfallText").textContent = "";
-      layer.classList.remove("show", "lifting");
-      layer.classList.add("hidden");
-      return true;
-    },
-    get nightBlackout() { return nightBlackout; },
-    woodsOpenAccuse() { const sim = run?.sim; return sim && openAccuse(sim); },
-    enterObjective(i) { return enterObjective(i); },
-    /** Which stages are recorded done, for the browser tutorial test. */
-    tutorialDone() { return tutorialProgress().done.slice(); },
-    /** Drive the menu grid down one row — for testing focus over a changing menu. */
-    menuDown() { menuNavY(1); },
-    // Couch co-op, driven without physical controllers. The real join path is
-    // a pad press (pollCoopJoin); this is the same possession + percept +
-    // viewport wiring with the device step skipped, so a test can exercise
-    // split-screen and independent hallucination in a headless browser.
-    get players() { return run ? run.players : []; },
-    debugJoin(companionId) {
-      if (!run) return null;
-      const target = companionId
-        ? run.sim.companions.find((c) => c.id === companionId)
-        : possessableCompanions(run.sim)[0];
-      if (!target) return null;
-      const slot = possess(run.sim, target.id);
-      if (slot === null) return null;
-      run.players.push(makeLocalPlayer(slot, target, createPercept(target)));
-      const nameEl = el(`coopName${slot + 1}`);
-      if (nameEl) nameEl.textContent = target.name;
-      document.body.dataset.coop = String(run.players.length);
-      run.renderer.resize();
-      return slot;
-    },
-    debugDrop(slot) { if (run) dropCoopPlayer(slot); },
-    get coopAllowed() { return coopAllowed; },
-    /** Per-player views, so a test can compare what each human is SHOWN. */
-    perceivedMonolithsFor(slot) {
-      const p = run && run.players[slot];
-      return p ? perceivedMonoliths(p.percept, run.sim) : [];
-    },
-    distortionFor(slot) {
-      const p = run && run.players[slot];
-      return p ? distortion(p.percept, run.sim) : 0;
-    },
-    /** Advance the sim by `seconds` in fixed slices, optionally holding movement. */
-    advance(seconds, intent = {}, slice = 1 / 30) {
-      if (!run) return null;
-      let done = 0;
-      while (done < seconds && run.sim.status === "playing") {
-        step(slice, {
-          move: intent.move || { x: 0, z: 0 },
-          run: !!intent.run,
-          yaw: intent.yaw ?? run.sim.player.yaw,
-          pitch: 0,
-          queue: [],
-          interact: !!intent.interact,
-          others: intent.others || null,
-        });
-        done += slice;
-      }
-      return run.sim.time;
-    },
-    /** Drop a character's lucidity directly — for testing the hallucination path. */
-    drain(id, to = 0) {
-      if (!run) return null;
-      const ch = run.sim.party.find((c) => c.id === id);
-      if (!ch) return null;
-      ch.lucidity = to;
-      return ch.lucidity;
-    },
-    teleport(x, z) {
-      if (!run) return null;
-      run.sim.player.x = x;
-      run.sim.player.z = z;
-      return { x, z };
-    },
-    debrief: () => (run ? debrief(run.sim) : null),
-    DIFFICULTY,
-    ACTIONS,
-    CAMPAIGN_LENGTH,
-  };
+function afterTicks() {
+  if (sim.status === "ended" && !endShown) { UI.close(); endPanel(); return; }
+  if (sim.pending && !UI.isOpen()) {
+    if (sim.pending === "dawn" || sim.pending === "dusk") planPanel(sim.pending);
+    else if (sim.pending === "twin") twinPanel();
+    else if (sim.pending === "home") homePanel();
+  }
+  if (sim.saveDue || performance.now() - lastSave > 30000) { sim.saveDue = false; save(); }
 }
 
-if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
-else boot();
+function draw(dt) {
+  view = perceive(sim);
+  const L = sim.lead;
+  const a = S.contextAction(sim);
+  renderer.draw(sim.world, view, {
+    mod: S.minuteOfDay(sim), real: performance.now() / 1000,
+    busyFrac: L.busy && Number.isFinite(L.busy.total) ? 1 - L.busy.left / L.busy.total : null,
+  }, dt);
+  const k = input.touch ? "" : "E · ";
+  UI.hud({
+    count: view.count, day: sim.day, clock: S.clockText(sim), night: S.isNight(sim),
+    area: areaOfRow(Math.floor(L.y)) + 1, carry: L.carry,
+    pile: sim.camp.built && S.atCamp(sim, L) ? sim.camp.pile : null,
+    prompt: L.busy ? busyLabel(L.busy.kind) : a ? (a.kind === "none" ? a.label : k + a.label) : "",
+    hint: sim.status === "playing" ? hintText() : "",
+  });
+  UI.messages(sim.msgs, dt);
+}
+const busyLabel = (k) => ({ chop: "Chopping…", fell: "Felling…", ask: "Talking…", fire_light: "Lighting the fire…", fire_feed: "Feeding the fire…",
+  camp_make: "Making camp…", camp_down: "Taking camp down…", light: "Lighting the pylon…", sleep: "Sleeping…", rest: "Resting…" }[k] || "");
+
+document.addEventListener("visibilitychange", () => { if (document.hidden) save(); });
+window.addEventListener("pagehide", save);
+
+// Test hooks. The browser tests drive the real loop's functions through these.
+window.__seven = {
+  build: BUILD,
+  get sim() { return sim; },
+  get panel() { return UI.isOpen() ? document.querySelector("#modal .panel h2, #modal .panel h1")?.textContent : null; },
+  set headless(v) { headless = !!v; },
+  S, UI,
+  newRun(opts) { startRun(opts); },
+  run(ticks, inp = {}) { for (let i = 0; i < ticks && !sim.pending && sim.status === "playing"; i++) S.tick(sim, inp); afterTicks(); },
+  action: onAction,
+  click(label) {
+    const b = [...document.querySelectorAll("#modal button")].find((x) => x.textContent.trim().startsWith(label));
+    if (!b) return false; b.click(); return true;
+  },
+};
+
+titlePanel();
+requestAnimationFrame(frame);

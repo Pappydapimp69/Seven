@@ -1,232 +1,134 @@
-// chronicle.js — what actually happened, and how somebody tells you about it.
-// Pure; no DOM, no Three. Reads a chronicle, never mutates one.
+// chronicle.js — the record of each day, and the account a person gives of it.
 //
-// THE WOODS rests on one claim: that a player can catch a fake by asking about
-// a day they both lived through. Everything in this file exists to keep that
-// claim honest, and the honesty has a single rule behind it:
-//
-//   THE WRONG DETAIL IS DERIVED FROM THE RECORD. IT IS NEVER AUTHORED.
-//
-// A hand-written list of tells is memorised by run ten and the game is dead.
-// So a fake's account is the REAL account with exactly one fact bent, and the
-// bent value is drawn from the values that actually occurred that day — a
-// place that was really visited, a person who was really there, the weather it
-// really was not. Nobody can learn the list because there is no list.
-//
-// PHRASING, by contrast, is authored and SHARED. Both a real member and a fake
-// are rendered by the same function from the same templates. That is not a
-// compromise of the rule above, it is what makes the rule matter: if the two
-// were phrased differently the player would be reading style rather than
-// substance, and the perturbation would be decoration.
+// SEVEN's own rule: tells are DERIVED, never authored. A real account is the
+// day's facts told straight. A fake's is the same facts with exactly ONE bent —
+// a wrong name, a wrong task, the wrong weather, the wrong direction — chosen
+// by hash from the seed, day and teller, so no rng is drawn and nothing comes
+// from a hand-written list of tells. Exactly one sentence differs.
 
-/**
- * A FACT is structured, not phrased: verb + actor + object + place, in the
- * order it happened. Facts are appended as the day is played and are never
- * rewritten, because the player's memory of the day is the only copy of the
- * truth the game cannot control.
- */
-export function fact({ i, t, verb, actor, object = null, cls = null, place = null, withWhom = [] }) {
-  // `cls` is the object's CLASS — timber, supply, structure. It exists so that
-  // a wrong-object claim stays grammatical: substituting a tent for the water
-  // someone fetched produces "went down to the creek for tent", which the
-  // player reads as a bug rather than as a lie, and a tell that reads as a bug
-  // is worse than no tell. The class comes from the day's own definition of
-  // its beats, not from a list of allowed swaps.
-  return { i, t, verb, actor, object, cls, place, withWhom: withWhom.slice() };
+import { hash01 } from "./rng.js?v=seven-1.0.0";
+import { nameOff } from "./names.js?v=seven-1.0.0";
+import { WEATHER, DIRS8 } from "./config.js?v=seven-1.0.0";
+
+export function openDay(sim, day, weather) {
+  sim.chronicle[day] = { weather, plan: null, events: [] };
 }
 
-/** The chronicle: the day's facts plus the conditions they happened under. */
-export function makeChronicle(weather) {
-  return { weather, facts: [] };
+/** Record something that happened. `who` are ids ("lead" for the player). */
+export function record(sim, kind, who = [], extra = {}) {
+  const day = sim.chronicle[sim.day];
+  if (!day) return;
+  day.events.push({ kind, who: who.slice(), ...extra });
 }
 
-export function record(chron, f) {
-  chron.facts.push({ ...f, i: chron.facts.length });
-  return chron.facts[chron.facts.length - 1];
+export function recordPlan(sim, choices) {
+  const day = sim.chronicle[sim.day];
+  if (day) day.plan = { ...choices };
 }
 
-// The weathers a day can have. Not a tells list — this is the domain the day
-// is drawn FROM, and the perturbation picks from the members of it that the
-// day did not use, which is what makes a wrong-weather claim checkable.
-export const WEATHERS = Object.freeze(["clear", "drizzle", "fog", "wind", "cold"]);
+const TASK_PHRASE = { chop: "on the deadfall", gather: "on wood", camp: "at camp", free: "to their own business" };
+const PRIORITY = ["cleared", "camp_made", "camp_down", "pylon", "fire", "call", "fell", "chop", "area"];
 
-// ---------------------------------------------------------------------------
-// Phrasing — shared by every speaker, real or not.
-// ---------------------------------------------------------------------------
-
-const VERB_PHRASE = {
-  gathered: (f, n) => `${n(f.actor)} brought the ${f.object} up from the ${f.place}`,
-  fetched: (f, n) => `${n(f.actor)} went down to the ${f.place} for ${f.object}`,
-  cut: (f, n) => `${n(f.actor)} took the saw to the ${f.object} at the ${f.place}`,
-  pitched: (f, n) => `${n(f.actor)} got the ${f.object} up at the ${f.place}`,
-  lit: (f, n) => `${n(f.actor)} got the ${f.object} going`,
-  heard: (f, n) => `${n(f.actor)} pulled up — something out past the ${f.place}`,
-  watched: (f, n) => `${n(f.actor)} took first watch by the ${f.object}`,
-  ate: (f, n) => `we had the ${f.object} round the fire`,
-};
-
-export function phrase(f, nameOf) {
-  const fn = VERB_PHRASE[f.verb];
-  if (!fn) throw new Error(`chronicle: no phrasing for verb "${f.verb}"`);
-  return fn(f, nameOf);
-}
-
-const WEATHER_PHRASE = {
-  clear: "It was clear all day.",
-  drizzle: "It drizzled on us most of the day.",
-  fog: "Fog sat in the whole day, never lifted.",
-  wind: "Wind all day, up in the tops.",
-  cold: "Cold enough that the water skinned over.",
-};
-
-// ---------------------------------------------------------------------------
-// Accounts
-// ---------------------------------------------------------------------------
-
-/**
- * Turn a chronicle into what one person says about it.
- *
- * `perturb` is null for a real member — their account is the record, in order,
- * and it is IDENTICAL to every other real member's account. That identity is
- * deliberate and it is the reason a lone difference means something.
- */
-export function account(chron, nameOf, perturb = null) {
-  let facts = chron.facts.map((f) => ({ ...f }));
-  let weather = chron.weather;
-  let names = nameOf;
-
-  if (perturb) {
-    switch (perturb.kind) {
-      case "order": {
-        const a = perturb.at;
-        [facts[a], facts[a + 1]] = [facts[a + 1], facts[a]];
-        break;
-      }
-      case "actor":
-        facts[perturb.at] = { ...facts[perturb.at], actor: perturb.to };
-        break;
-      case "place":
-        facts[perturb.at] = { ...facts[perturb.at], place: perturb.to };
-        break;
-      case "object":
-        facts[perturb.at] = { ...facts[perturb.at], object: perturb.to };
-        break;
-      case "weather":
-        weather = perturb.to;
-        break;
-      case "name": {
-        const who = facts[perturb.at].actor;
-        names = (id) => (id === who ? perturb.to : nameOf(id));
-        break;
-      }
-      default:
-        throw new Error(`chronicle: unknown perturbation "${perturb.kind}"`);
-    }
+/** The facts of a day, in a fixed order, as plain objects. */
+export function facts(sim, day) {
+  const d = sim.chronicle[day];
+  if (!d) return [];
+  const out = [{ type: "weather", v: d.weather }];
+  if (d.plan) {
+    const pairs = Object.entries(d.plan).filter(([, t]) => TASK_PHRASE[t] && t !== "free").map(([id, t]) => [id, t]);
+    if (pairs.length) out.push({ type: "plan", pairs });
   }
-
-  return {
-    weather: WEATHER_PHRASE[weather] || WEATHER_PHRASE.clear,
-    lines: facts.map((f) => phrase(f, names)),
-  };
+  // One fact per kind, people merged, in priority order; at most four.
+  const merged = new Map();
+  for (const e of d.events) {
+    const m = merged.get(e.kind) || { type: "ev", kind: e.kind, who: [], n: 0, dir: e.dir, area: e.area };
+    for (const w of e.who) if (!m.who.includes(w)) m.who.push(w);
+    m.n++;
+    if (e.dir) m.dir = e.dir;
+    if (e.area != null) m.area = e.area;
+    merged.set(e.kind, m);
+  }
+  const evs = PRIORITY.filter((k) => merged.has(k)).map((k) => merged.get(k)).slice(0, 4);
+  return out.concat(evs);
 }
 
-/** Flat text, for comparison and for tests. */
-export function accountText(acc) {
-  return [acc.weather].concat(acc.lines).join("\n");
-}
-
-// ---------------------------------------------------------------------------
-// Choosing the one wrong detail
-// ---------------------------------------------------------------------------
-
-const KINDS = Object.freeze(["order", "actor", "place", "object", "weather", "name"]);
-
-/**
- * What perturbations this particular chronicle can support. Every candidate
- * value comes out of the record itself — the actors are people who were really
- * there, the places are places really visited, the objects really handled. The
- * weather is the one inversion: the candidates are the weathers that did NOT
- * happen, because a day can only have been one.
- */
-export function candidates(chron, nearMisses = {}) {
-  const actors = [...new Set(chron.facts.map((f) => f.actor))];
-  const places = [...new Set(chron.facts.map((f) => f.place).filter(Boolean))];
-  const objects = [];
-  for (const f of chron.facts) {
-    if (f.object && !objects.some((o) => o.name === f.object)) objects.push({ name: f.object, cls: f.cls });
+/** Bend exactly one fact. Pure: decided by hash, never by the rng. */
+export function bend(sim, list, day, teller) {
+  const key = `${sim.seed}:${day}:${teller.id}`;
+  const options = [];
+  list.forEach((f, i) => {
+    if (f.type === "weather") options.push(i);
+    if (f.type === "plan" && f.pairs.length) options.push(i);
+    if (f.type === "ev" && (f.who.some((w) => w !== "lead") || f.dir)) options.push(i);
+  });
+  const i = options[Math.floor(hash01(key) * options.length)];
+  const out = list.map((f) => ({ ...f, who: f.who ? f.who.slice() : f.who, pairs: f.pairs ? f.pairs.map((p) => p.slice()) : f.pairs }));
+  const f = out[i];
+  const h = hash01(key + ":v");
+  const roster = sim.roster;
+  if (f.type === "weather") {
+    const others = WEATHER.filter((w) => w !== f.v);
+    f.v = others[Math.floor(h * others.length)];
+  } else if (f.type === "plan") {
+    const a = Math.floor(h * f.pairs.length);
+    const b = f.pairs.findIndex((p, k) => k !== a && p[1] !== f.pairs[a][1]);
+    if (b >= 0) { const t = f.pairs[a][1]; f.pairs[a][1] = f.pairs[b][1]; f.pairs[b][1] = t; }
+    else f.pairs[a] = ["~" + f.pairs[a][0], f.pairs[a][1]];   // a name a letter off
+  } else if (f.dir && (!f.who.some((w) => w !== "lead") || h < 0.5)) {
+    f.dir = DIRS8[(DIRS8.indexOf(f.dir) + 2) % 8];
+  } else {
+    const k = f.who.findIndex((w) => w !== "lead");
+    const swap = roster.filter((r) => !f.who.includes(r.id) && r.id !== teller.id);
+    if (swap.length && h < 0.7) f.who[k] = swap[Math.floor(hash01(key + ":w") * swap.length)].id;
+    else f.who[k] = "~" + f.who[k];
   }
-  const out = [];
-
-  // ORDER: any adjacent pair that is actually distinguishable once phrased.
-  // Swapping two facts that render identically is a perturbation the player
-  // cannot see, which would be indistinguishable from a real account and would
-  // therefore make the game a coin flip on that seed.
-  for (let a = 0; a + 1 < chron.facts.length; a++) {
-    if (phrase(chron.facts[a], String) !== phrase(chron.facts[a + 1], String)) out.push({ kind: "order", at: a });
-  }
-  for (let i = 0; i < chron.facts.length; i++) {
-    const f = chron.facts[i];
-    for (const a of actors) if (a !== f.actor) out.push({ kind: "actor", at: i, to: a });
-    if (f.place) for (const p of places) if (p !== f.place) out.push({ kind: "place", at: i, to: p });
-    if (f.object) {
-      for (const o of objects) {
-        if (o.name === f.object || (f.cls && o.cls !== f.cls)) continue;
-        out.push({ kind: "object", at: i, to: o.name });
-      }
-    }
-
-  }
-  // NAME is per PERSON, not per line. Somebody who has a name slightly wrong
-  // has it wrong every time they say it — a speaker who misspelled it once and
-  // got it right afterwards would be a speaker with two beliefs about one
-  // person, which is not a thing people do. `at` therefore selects the FIRST
-  // line the actor appears in, and the substitution applies wherever they
-  // appear. One wrong belief, however many lines it surfaces in.
-  for (const a of actors) {
-    const nm = nearMisses[a] || null;
-    if (nm) out.push({ kind: "name", at: chron.facts.findIndex((f) => f.actor === a), to: nm });
-  }
-  for (const w of WEATHERS) if (w !== chron.weather) out.push({ kind: "weather", to: w });
   return out;
 }
 
-/**
- * Pick one. Spreads across KINDS first and then within the kind, so a run does
- * not get six order-swaps in a row just because order-swaps are numerous — the
- * player is meant to meet a different SHAPE of wrongness each time, not a
- * different instance of the same shape.
- *
- * CONSTANT ROLL COUNT: exactly two draws, always, whatever the day was.
- *
- * `nearMisses` is a PREPARED MAP of actor id -> almost-right name, not a
- * callback. It used to be a callback, and `candidates` called it once per
- * distinct actor — so the draw count moved with the number of people who
- * happened to do something that day, and a short day and a long one consumed
- * different amounts of the caller's stream. The caller now draws its near
- * misses up front, one per party member whether or not that member appears, so
- * the cost is fixed before this function is entered.
- */
-export function pickPerturbation(rng, chron, nearMisses = {}) {
-  const all = candidates(chron, nearMisses);
-  const rKind = rng();
-  const rWhich = rng();
-  if (!all.length) return null;
-  const kinds = KINDS.filter((k) => all.some((c) => c.kind === k));
-  const kind = kinds[Math.floor(rKind * kinds.length)];
-  const pool = all.filter((c) => c.kind === kind);
-  const chosen = pool[Math.floor(rWhich * pool.length)];
-
-  // The guarantee this function exists to make: a fake's account must actually
-  // READ differently from a real one. A perturbation that renders identically
-  // is worse than none — the player does the work and gets nothing back, and
-  // no error is raised anywhere. Verified here rather than trusted.
-  const truth = accountText(account(chron, (id) => id, null));
-  const lied = accountText(account(chron, (id) => id, chosen));
-  if (truth === lied) {
-    const visible = all.filter((c) => accountText(account(chron, (id) => id, c)) !== truth);
-    return visible.length ? visible[Math.floor(rWhich * visible.length)] : null;
-  }
-  return chosen;
+/** Sentences for a list of facts, told by `teller`. */
+export function tell(sim, list, teller) {
+  const nm = (id) => {
+    if (id === "lead") return "you";
+    const off = id.startsWith("~");
+    const r = sim.roster.find((x) => x.id === (off ? id.slice(1) : id));
+    const base = r ? r.name : id;
+    if (!off && teller && id === teller.id) return "I";
+    return off ? nameOff(base) : base;
+  };
+  const join = (ids) => {
+    const n = ids.map(nm);
+    const s = n.length <= 1 ? n.join("") : n.slice(0, -1).join(", ") + " and " + n[n.length - 1];
+    return s[0].toUpperCase() + s.slice(1);
+  };
+  return list.map((f) => {
+    if (f.type === "weather") return `It was ${f.v} that day.`;
+    if (f.type === "plan") {
+      const by = {};
+      for (const [id, t] of f.pairs) (by[t] = by[t] || []).push(id);
+      const parts = Object.entries(by).map(([t, ids]) => `${join(ids).replace(/^You$/, "you")} ${TASK_PHRASE[t]}`);
+      return `At dawn you put ${parts.join("; ")}.`;
+    }
+    const who = f.who.length ? join(f.who) : "We";
+    switch (f.kind) {
+      case "cleared": return `${who} cut through the deadfall.`;
+      case "chop": return `${who} chopped at the trunk.`;
+      case "fell": return `${who} brought down ${f.n > 1 ? "trees" : "a tree"}.`;
+      case "fire": return `${who} lit the fire.`;
+      case "camp_made": return `${who} made camp.`;
+      case "camp_down": return `${who} took the camp down.`;
+      case "pylon": return `${who} lit a pylon.`;
+      case "call": return `A voice called from the ${f.dir} at first light.`;
+      case "area": return `We walked on into deeper woods.`;
+      default: return `${who} kept busy.`;
+    }
+  });
 }
 
-export const PERTURBATION_KINDS = KINDS;
+/** What `teller` says about `day`. A fake bends one fact of any day it was not there for. */
+export function account(sim, teller, day) {
+  if ((teller.away || []).includes(day)) return ["I wasn't with you that day. I was out there, in the trees.", "I don't know what happened at camp."];
+  const list = facts(sim, day);
+  if (!list.length) return ["I don't remember that day."];
+  const bent = teller.fake && day < teller.since;
+  return tell(sim, bent ? bend(sim, list, day, teller) : list, teller);
+}
