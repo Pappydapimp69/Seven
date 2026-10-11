@@ -33,7 +33,7 @@ is free. Replace that.
 
 The player stays first person and is a member of the team. No free overview.
 
-- **Morning plan, at camp.** Tasks are assigned at the campsite each day. This
+- **Morning plan, at camp, at DAWN ONLY.** Tasks are assigned at the campsite once a day, at dawn; the plan cannot be changed mid-day. This
   is what makes a camp, a fire and sleep necessary rather than arbitrary.
 - **Tasks are bounded:** "bring back a load", "clear this deadfall", "set up
   camp here". "Gather wood" with no end cannot be finished, so it cannot be
@@ -69,4 +69,14 @@ fakes come from.
 
 - What a "chunk" is for each task, in clock time.
 - Night risk numbers: alone, away from camp, no fire.
-- Whether the morning plan can be changed at camp mid-day, or only at dawn.
+- Fire vs pylon roles (leaning: fire shields NIGHT only, as the code does now;
+  pylon shields DEPTH, scarce, burns down; neither heals — IDEAS: a pylon slows
+  the fill rate, it is not a reset). If fire also blunts depth, pylons become
+  redundant and the rotting supply line dies.
+- What forces forward motion. A fed fire that holds off everything makes
+  turtling at a shallow camp optimal. Candidate: nights keep taking people, so
+  staying put is losing slowly.
+- Zone radius, whether zones stack, whether fire works by day.
+- Legibility: safety must read from the world (light, colour, pylon glow),
+  never the HUD. Brain T1 (open): a reactive hallucination vs "stable reads as
+  a place".
