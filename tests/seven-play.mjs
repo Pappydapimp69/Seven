@@ -13,11 +13,11 @@ const pg=await b.newPage({viewport:{width:640,height:360}}); const errs=[]; pg.o
 await pg.goto(`http://127.0.0.1:${P}/index.html`); await pg.waitForFunction(()=>!!window.__seven);
 await pg.evaluate(()=>window.__seven.startSeven({seed:777})); await pg.waitForTimeout(500);
 // The first dawn: the plan is open before anything else happens.
-const plan=await pg.evaluate(()=>{const L=document.getElementById("planLayer");const rows=[...document.querySelectorAll("#planRows .plan-task")];
+const plan=await pg.evaluate(()=>{const L=document.getElementById("planLayer");const open0=!L.classList.contains("hidden");const rows=[...document.querySelectorAll("#planRows .plan-task")];
   const before=rows[0]?.textContent; rows[0]?.click(); const after=rows[0]?.textContent;
   document.getElementById("planGo").click();
   const c=window.__seven.sim.companions[0];
-  return {open:!L.classList.contains("hidden"),rows:rows.length,before,after,task:c.task&&c.task.kind,hud:!document.getElementById("hudLayer").classList.contains("hidden"),kind:document.body.dataset.runKind};});
+  return {open:open0,rows:rows.length,before,after,task:c.task&&c.task.kind,hud:!document.getElementById("hudLayer").classList.contains("hidden"),kind:document.body.dataset.runKind};});
 const r=await pg.evaluate(async()=>{const M=window.__seven,s=M.sim,e=s.expedition;
   s.wood=10; s.player.x=s.world.camp.x+1; s.player.z=s.world.camp.z+1; M.advance(0.1);
   const t0=s.time; M.act("survey"); const owedBuild=e.lapse;
