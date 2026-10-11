@@ -372,6 +372,31 @@ export const FIRE_FUEL_MAX = 100;
 export const FIRE_BURN_RATE = 0.55; // fuel per second — a built fire is ~3min unfed
 export const FIRE_FEED_COST = 1;    // wood per feed
 export const FIRE_FEED = 35;        // fuel per feed
+// SEVEN'S FIRE belongs to the camp (blueprint 0.35). It shields the night only
+// within the campsite, burns whenever lit, and a full one lasts one night: 12
+// clock hours. Lighting it gives three hours; each wood fed adds an hour and a
+// half, so a fire that reaches morning needs about eight wood on the pile.
+export const SEVEN_CAMP_RADIUS = 9;             // the campsite, and the fire's shield
+export const SEVEN_FIRE_BURN = FIRE_FUEL_MAX / (12 * GAME_HOUR);
+export const SEVEN_FIRE_FEED = FIRE_FUEL_MAX / 8;
+export const SEVEN_FIRE_LIGHT = 2 * SEVEN_FIRE_FEED;
+
+/**
+ * Where the wood a fire burns comes from. In Seven it is the camp's pile —
+ * wood counts once it has been carried back — everywhere else the shared pack.
+ */
+function takeWood(sim, n) {
+  if (sim.expedition && sim.camp) {
+    if (!sim.camp.built || (sim.camp.pile || 0) < n) return false;
+    sim.camp.pile -= n;
+    return true;
+  }
+  if (sim.wood < n) return false;
+  sim.wood -= n;
+  return true;
+}
+export const woodForFire = (sim) => (sim.expedition && sim.camp ? (sim.camp.built ? sim.camp.pile || 0 : 0) : sim.wood);
+const atCampFire = (sim, actor) => !sim.camp || (sim.camp.built && dist2D(sim.camp, actor) <= SEVEN_CAMP_RADIUS);
 export const FIRE_RADIUS = 6;       // how close you stand to build on, or feed, a fire
 
 // A short campaign: winning a basin before the last one advances to a fresh
@@ -2359,10 +2384,14 @@ export function buildFire(sim, actor = sim.player) {
   // one level down from the prompt ladder. A fire has its OWN rung on the
   // interact verb instead, at the bottom where it can starve nothing.
   if (sim.status !== "playing") return { ok: false, reason: "over" };
-  if (sim.fire) return { ok: false, reason: "already" };
-  if (sim.wood < FIRE_COST.wood) return { ok: false, reason: "no-wood" };
-  sim.wood -= FIRE_COST.wood;
-  sim.fire = { x: actor.x, z: actor.z, fuel: FIRE_FUEL_MAX, builtAt: sim.time };
+  const seven = !!(sim.expedition && sim.camp);
+  // Seven: one fire, at the camp, and a burnt-out one can be lit again.
+  if (sim.fire && (!seven || sim.fire.fuel > 0)) return { ok: false, reason: "already" };
+  if (seven && !atCampFire(sim, actor)) return { ok: false, reason: "no-camp" };
+  if (!takeWood(sim, FIRE_COST.wood)) return { ok: false, reason: "no-wood" };
+  sim.fire = seven
+    ? { x: sim.camp.x, z: sim.camp.z, fuel: SEVEN_FIRE_LIGHT, builtAt: sim.time }
+    : { x: actor.x, z: actor.z, fuel: FIRE_FUEL_MAX, builtAt: sim.time };
   emit(sim, "fire", "The kindling catches. A fire, for as long as you feed it.", { who: actor.id });
   return { ok: true };
 }
@@ -2384,15 +2413,14 @@ export function fireAt(sim, actor = sim.player) {
  */
 export function feedFire(sim, actor = sim.player) {
   if (sim.status !== "playing") return { ok: false, reason: "over" };
-  if (sim.wood < FIRE_FEED_COST) return { ok: false, reason: "no-wood" };
-  sim.wood -= FIRE_FEED_COST;
+  if (!takeWood(sim, FIRE_FEED_COST)) return { ok: false, reason: "no-wood" };
   const f = fireAt(sim, actor);
   if (!f) {
     // No event, no line. Feeding a fire that is not there has to look exactly
     // like feeding one that is, or the subtitle is the tell.
     return { ok: true, fed: false };
   }
-  f.fuel = Math.min(FIRE_FUEL_MAX, f.fuel + FIRE_FEED);
+  f.fuel = Math.min(FIRE_FUEL_MAX, f.fuel + (sim.expedition ? SEVEN_FIRE_FEED : FIRE_FEED));
   return { ok: true, fed: true };
 }
 
@@ -2406,7 +2434,7 @@ export function feedFire(sim, actor = sim.player) {
  */
 export function tickFire(sim, dt) {
   if (!sim.fire || sim.fire.fuel <= 0) return;
-  sim.fire.fuel = Math.max(0, sim.fire.fuel - FIRE_BURN_RATE * dt);
+  sim.fire.fuel = Math.max(0, sim.fire.fuel - (sim.expedition ? SEVEN_FIRE_BURN : FIRE_BURN_RATE) * dt);
   if (sim.fire.fuel === 0) emit(sim, "fire", "The fire is out.", {});
 }
 

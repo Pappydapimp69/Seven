@@ -119,7 +119,8 @@ export function nearbyIds(sim, actorId, radius) {
 
 /** Companions standing at camp: the ones who stayed. */
 export function campIds(sim, radius) {
-  const camp = sim.world.camp;
+  const camp = sim.camp ? (sim.camp.built ? sim.camp : null) : sim.world.camp;
+  if (!camp) return [];
   return sim.companions.filter((c) => Math.hypot(c.x - camp.x, c.z - camp.z) <= radius).map((c) => c.id);
 }
 
@@ -169,4 +170,39 @@ export function raiseSkill(sim, companionId, skill) {
   c.skills = { ...(c.skills || {}), [skill]: level + 1 };
   e.skillPoints -= 1;
   return { ok: true, level: level + 1, left: e.skillPoints };
+}
+
+/**
+ * THE CAMP (blueprint 0.35). One at a time. It must be taken down before it can
+ * be made again somewhere else; between the two there is no fire, no pile and
+ * no shield. Taking it down puts the fire out and the pile on your backs.
+ */
+export function createCamp(at) {
+  return { x: at.x, z: at.z, pile: 0, built: true };
+}
+/** Carried wood goes onto the pile when the lead walks into a built camp. Returns how much. */
+export function depositWood(sim, radius) {
+  const c = sim.camp;
+  if (!c || !c.built || !(sim.wood > 0)) return 0;
+  if (Math.hypot(sim.player.x - c.x, sim.player.z - c.z) > radius) return 0;
+  const n = sim.wood;
+  c.pile = (c.pile || 0) + n;
+  sim.wood = 0;
+  return n;
+}
+export function dismantleCamp(sim, radius) {
+  const c = sim.camp;
+  if (!c || !c.built) return { ok: false, reason: "no-camp" };
+  if (Math.hypot(sim.player.x - c.x, sim.player.z - c.z) > radius) return { ok: false, reason: "away" };
+  sim.wood = (sim.wood || 0) + (c.pile || 0);
+  c.pile = 0;
+  c.built = false;
+  sim.fire = null;
+  return { ok: true };
+}
+export function makeCamp(sim) {
+  const c = sim.camp;
+  if (c && c.built) return { ok: false, reason: "already" };
+  sim.camp = createCamp(sim.player);
+  return { ok: true };
 }

@@ -5,7 +5,7 @@ import {
   createRun, tick, debrief, logMarker, checkIn, useDose, pickupItem, useItem, dropItem, craftItem, gatherTarget, offerItem,
   possess, release, possessableCompanions, activatePylon, pylonAt,
   callCompanion, clearMoss, mossedAt, feedFire, buildFire, FIRE_COST,
-  PARTY_SIZE, DIFFICULTY, reachOf, LOG_RADIUS, CORROBORATE_RADIUS, GAME_HOUR, sevenClock, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
+  PARTY_SIZE, DIFFICULTY, reachOf, LOG_RADIUS, CORROBORATE_RADIUS, GAME_HOUR, sevenClock, SEVEN_CAMP_RADIUS, woodForFire, PYLON_RADIUS, ITEM_CAP, ITEM_PICKUP_RADIUS, CAMPAIGN_LENGTH, ITEM_INFO,
 } from "./state.js?v=seven-0.34.0";
 import { STAGES, openObjective, checkTrainer, observe, objectiveText, stageById } from "./tutorial.js?v=seven-0.34.0";
 import { buildCamp, CAMP_SEED } from "./camp.js?v=seven-0.34.0";
@@ -19,7 +19,7 @@ import {
   recoverMissing, activeMystery, askMystery, accuseMystery, proveMystery, MYSTERY_ASKS_ALLOWED,
   startKeystoneMorning, advanceKeystoneMorning,
 } from "./expedition.js?v=seven-0.34.0";
-import { DEFAULT_TEAM, applyTeamLoadout, teamSkill, finalDecision, finalCount, nearbyIds, campIds, FIRE_DAYLIGHT, restCheck, raiseSkill, SKILL_MAX } from "./seven.js?v=seven-0.34.0";
+import { DEFAULT_TEAM, applyTeamLoadout, teamSkill, finalDecision, finalCount, nearbyIds, campIds, FIRE_DAYLIGHT, restCheck, raiseSkill, SKILL_MAX, createCamp, depositWood, dismantleCamp, makeCamp } from "./seven.js?v=seven-0.34.0";
 import { createPercept, updatePercept, distortion, perceivedMonoliths, believedKinds, believedFireAt, notePhantomFeed } from "./percept.js?v=seven-0.34.0";
 import { createRenderer } from "./render.js?v=seven-0.34.0";
 import { createHud, renderDebrief, paintHint } from "./hud.js?v=seven-0.34.0";
@@ -938,6 +938,27 @@ function spendSevenDaylight(sim, amount, reason) {
   return true;
 }
 
+/** Take the camp down here, or make it where you stand. Both take clock time. */
+function campAction() {
+  if (!run) return;
+  const sim = run.sim;
+  const e = sim.expedition;
+  if (!e || !sim.camp) return;
+  if (sim.camp.built) {
+    const r = dismantleCamp(sim, CAMP_RADIUS);
+    if (!r.ok) { hudSay("You are not at the camp."); return; }
+    recordFact(e, { kind: "breakcamp", actor: "you", object: "camp", withWhom: nearbyIds(sim, "you", CORROBORATE_RADIUS), t: sim.time });
+    spendSevenDaylight(sim, 1, "camp");
+    hudSay("Camp comes down. The pile goes on your backs.");
+  } else {
+    makeCamp(sim);
+    recordFact(e, { kind: "makecamp", actor: "you", object: "camp", withWhom: nearbyIds(sim, "you", CORROBORATE_RADIUS), t: sim.time });
+    spendSevenDaylight(sim, 2, "camp");
+    hudSay("Camp, here. It wants a fire before dark.");
+  }
+  if (paused) togglePause();
+}
+
 /** Rest until morning: sleep where you are and let the night pass, fast. */
 function restUntilMorning() {
   if (!run) return;
@@ -949,7 +970,7 @@ function restUntilMorning() {
   if (paused) togglePause();
 }
 
-const CAMP_RADIUS = 9; // the same reach extraction counts as being at camp
+const CAMP_RADIUS = SEVEN_CAMP_RADIUS; // the campsite, and the fire's night shield
 function resolveSevenNight(sim) {
   const e = sim.expedition;
   if (!e || e.phase !== "day" || sim.status !== "playing") return;
@@ -1217,6 +1238,7 @@ function startSeven({ seed, difficulty, team } = {}) {
   const sim = createRun({ seed: seedValue, difficulty: difficulty || "standard", level: 1, campaignLength: 1, world });
   sim.seven = true;
   sim.expedition = createExpedition();
+  sim.camp = createCamp(world.camp);
   applyTeamLoadout(sim, team || sevenTeamPref || DEFAULT_TEAM, { overwrite: true });
   updateSevenObjective(sim);
   clearSave();
@@ -1476,7 +1498,7 @@ function handleAction(action, arg, player = run.players[0]) {
       // here the only thing it can take precedence over is the "nothing to
       // survey" refusal, and that is not a verb.
       const marker = nearestPhantom(sim, percept, actor);
-      if (!marker && !sim.fire && sim.wood >= FIRE_COST.wood) {
+      if (!marker && (!sim.fire || (sim.camp && sim.fire.fuel <= 0)) && woodForFire(sim) >= FIRE_COST.wood) {
         const bres = buildFire(sim, actor);
         if (bres.ok) spendSevenDaylight(sim, FIRE_DAYLIGHT.build, "fire");
         audio.play(bres.ok ? "recover" : "deny");
@@ -1653,11 +1675,13 @@ function handleAction(action, arg, player = run.players[0]) {
 // works on keyboard, pad and touch. Rows are numbered over what is VISIBLE, in
 // order, so pad navigation never meets a gap.
 let trainIdx = 0;
-const PAUSE_ROWS = [".vol", ".fov", "#trainNav button", "#trainSkills button", ".ui", "#resumeBtn", "#restBtn", "#quitBtn"];
+const PAUSE_ROWS = [".vol", ".fov", "#trainNav button", "#trainSkills button", ".ui", "#resumeBtn", "#campBtn", "#restBtn", "#quitBtn"];
 function syncPauseGrid(sim) {
   const on = !!sim.expedition;
   el("trainBlock")?.classList.toggle("hidden", !on);
   el("restBtn")?.classList.toggle("hidden", !on);
+  el("campBtn")?.classList.toggle("hidden", !on || !sim.camp);
+  if (on && sim.camp && el("campBtn")) el("campBtn").firstChild.textContent = sim.camp.built ? "Take camp down" : "Make camp here";
   if (on) paintTraining(sim);
   let row = 0;
   for (const sel of PAUSE_ROWS) {
@@ -1853,7 +1877,11 @@ function step(dt, intent) {
   }
   sim.events.length = 0;
   sim.events.push(...tickEvents);
-  if (ex) ex.daylight = Number(sevenClock(sim.time).hoursToDusk.toFixed(2));
+  if (ex) {
+    ex.daylight = Number(sevenClock(sim.time).hoursToDusk.toFixed(2));
+    const stacked = depositWood(sim, CAMP_RADIUS);
+    if (stacked > 0) hudSay(`You stack ${stacked} wood on the pile.`);
+  }
   if (sim.expedition) updateSevenKeystone(sim);
   diag.update({ input: intent.move, move, yaw, x: sim.player.x, z: sim.player.z, camera: renderer.camera, hfov: renderer.hfov });
   // The camp's one place-based objective. Emits once, into the same merged
@@ -2155,6 +2183,7 @@ function boot() {
   el("howBtn").addEventListener("click", () => el("howto").classList.toggle("hidden"));
   el("resumeBtn").addEventListener("click", togglePause);
   el("restBtn")?.addEventListener("click", () => restUntilMorning());
+  el("campBtn")?.addEventListener("click", () => campAction());
   const trainStep = (d) => { if (!run?.sim.expedition) return; trainIdx += d; paintTraining(run.sim); };
   el("trainPrev")?.addEventListener("click", () => trainStep(-1));
   el("trainNext")?.addEventListener("click", () => trainStep(1));

@@ -59,6 +59,10 @@ echo "== chop (a deadfall comes down chop by chop) =="
 node tests/chop.mjs
 echo
 
+echo "== campfire (one camp, a woodpile, a fire that lasts a night) =="
+node tests/campfire.mjs
+echo
+
 echo "== seven (team loadouts and final choices) =="
 node tests/seven.mjs
 echo

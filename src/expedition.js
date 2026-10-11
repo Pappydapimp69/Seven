@@ -388,6 +388,8 @@ function phraseFactCore(f, nameOf) {
   const who = f.actor === "you" ? "You" : nameOf(f.actor);
   switch (f.kind) {
     case "fire": return `${who} lit the fire`;
+    case "breakcamp": return `${who} took camp down`;
+    case "makecamp": return `${who} made camp`;
     case "feed": return `${who} fed the fire`;
     case "call": return `${who} came when you called`;
     case "camp": return `${who} stayed at camp`;

@@ -312,6 +312,8 @@ export function serializeRun(sim) {
     // The built fire, whole. Same reason the pylons above are saved whole: it
     // exists in no seed-generated world, so nothing can rebuild it.
     fire: sim.fire ? { x: sim.fire.x, z: sim.fire.z, fuel: sim.fire.fuel, builtAt: sim.fire.builtAt ?? 0 } : null,
+    // Seven's movable camp and its woodpile.
+    camp: sim.camp ? { x: sim.camp.x, z: sim.camp.z, pile: sim.camp.pile || 0, built: !!sim.camp.built } : null,
     // Ids only. The cells come back from the regenerated world; what cannot be
     // regenerated is the fact that somebody cut through them.
     deadfallsCleared: (sim.deadfalls || []).filter((d) => d.cleared).map((d) => d.id),
@@ -448,6 +450,7 @@ export function deserializeRun(data) {
   sim.fire = data.fire
     ? { x: data.fire.x, z: data.fire.z, fuel: data.fire.fuel ?? 0, builtAt: data.fire.builtAt ?? 0 }
     : null;
+  if (data.camp) sim.camp = { x: data.camp.x, z: data.camp.z, pile: data.camp.pile ?? 0, built: !!data.camp.built };
   sim.sightTimer = data.sightTimer ?? 0;
   sim.lastDt = data.lastDt ?? 0;
 
