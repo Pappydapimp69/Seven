@@ -2,21 +2,21 @@
 // this file reads sim.pending and opens the matching panel, and the panel
 // answers through the sim's exported actions.
 
-import * as S from "./sim.js?v=seven-1.16.0";
-import { perceive } from "./percept.js?v=seven-1.16.0";
-import { createView, SLOT_COLORS } from "./view.js?v=seven-1.16.0";
-import { createInput } from "./input.js?v=seven-1.16.0";
-import * as UI from "./ui.js?v=seven-1.16.0";
-import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.16.0";
-import { STEPS, TRAINEES, tutorialStep } from "./tutorial.js?v=seven-1.16.0";
-import * as Audio from "./audio.js?v=seven-1.16.0";
-import { createRng } from "./rng.js?v=seven-1.16.0";
-import { composeRoster } from "./names.js?v=seven-1.16.0";
-import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, TASK_SKILL, frontDeadfall } from "./mates.js?v=seven-1.16.0";
-import { areaOfRow, kindAt } from "./world.js?v=seven-1.16.0";
-import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_INFO, NO_SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.16.0";
+import * as S from "./sim.js?v=seven-1.16.1";
+import { perceive } from "./percept.js?v=seven-1.16.1";
+import { createView, SLOT_COLORS } from "./view.js?v=seven-1.16.1";
+import { createInput } from "./input.js?v=seven-1.16.1";
+import * as UI from "./ui.js?v=seven-1.16.1";
+import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.16.1";
+import { STEPS, TRAINEES, tutorialStep } from "./tutorial.js?v=seven-1.16.1";
+import * as Audio from "./audio.js?v=seven-1.16.1";
+import { createRng } from "./rng.js?v=seven-1.16.1";
+import { composeRoster } from "./names.js?v=seven-1.16.1";
+import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, TASK_SKILL, frontDeadfall } from "./mates.js?v=seven-1.16.1";
+import { areaOfRow, kindAt } from "./world.js?v=seven-1.16.1";
+import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_INFO, NO_SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.16.1";
 
-const BUILD = "seven-1.16.0";
+const BUILD = "seven-1.16.1";
 const esc = UI.esc;
 const store = (() => { try { return window.localStorage; } catch { return null; } })();
 const readJSON = (k, d) => { try { const v = store && store.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
@@ -434,6 +434,7 @@ function draw(dt) {
   const L = sim.lead;
   const a = S.contextAction(sim);
   view.lead.yaw = L.yaw ?? -Math.PI / 2;
+  drawCompass(view.lead.yaw);
   // Sound: what the sim announced this frame, then the always-on layers. Both
   // come from the percept and public facts — never from lucidity (soundscape.js).
   if (view.ghost && view.ghost.hour !== lastGhost) { lastGhost = view.ghost.hour; Audio.play({ name: "voice", dir: view.ghost.dir }, view.lead); }
@@ -544,3 +545,21 @@ for (const ev of ["keydown", "pointerdown", "touchstart"]) {
 // One listener, once: a menu press is one soft sound.
 document.getElementById("modal").addEventListener("click", (e) => { if (e.target.closest("button")) Audio.ui("select"); });
 requestAnimationFrame(frame);
+
+const COMPASS = [["N", 0, 1], ["NE", 45], ["E", 90, 1], ["SE", 135], ["S", 180, 1], ["SW", 225], ["W", 270, 1], ["NW", 315]];
+let compassKey = "";
+/** The bar at the top: where north, east... are from the way you face. 0 deg = north, clockwise. */
+function drawCompass(yaw) {
+  const el = document.getElementById("compass");
+  if (!el) return;
+  const h = Math.round((((yaw + Math.PI / 2) * 180) / Math.PI + 360) % 360);
+  if (String(h) === compassKey) return;
+  compassKey = String(h);
+  let out = "<i></i>";
+  for (const [n, deg, card] of COMPASS) {
+    const d = ((deg - h + 540) % 360) - 180;          // -180..180, 0 = dead ahead
+    if (Math.abs(d) > 70) continue;
+    out += `<span class="${card ? "card" : ""}" style="left:${50 + (d / 70) * 50}%">${n}</span>`;
+  }
+  el.innerHTML = out;
+}

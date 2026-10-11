@@ -7,11 +7,11 @@
 // stands at the edge of the light who is not there. The count always says
 // "Seven of you" — that one is not the percept lying, it is the game.
 
-import { hash01 } from "./rng.js?v=seven-1.16.0";
-import { walkable } from "./world.js?v=seven-1.16.0";
-import { isNight, minutes, found } from "./sim.js?v=seven-1.16.0";
-import { working } from "./mates.js?v=seven-1.16.0";
-import { LIE_BELOW, FIRE_LIE_BELOW, GHOST_BELOW, NAME_BELOW, PYLON_BURN, DIRS8 } from "./config.js?v=seven-1.16.0";
+import { hash01 } from "./rng.js?v=seven-1.16.1";
+import { walkable } from "./world.js?v=seven-1.16.1";
+import { isNight, minutes, found } from "./sim.js?v=seven-1.16.1";
+import { working } from "./mates.js?v=seven-1.16.1";
+import { LIE_BELOW, FIRE_LIE_BELOW, GHOST_BELOW, NAME_BELOW, PYLON_BURN, DIRS8 } from "./config.js?v=seven-1.16.1";
 
 export function perceive(sim) {
   const L = sim.lead, luc = L.lucidity, now = minutes(sim);
