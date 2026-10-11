@@ -31,16 +31,27 @@ export const BODY_R = 0.3;
 export const REACH = 1.6;                    // E reaches this far
 export const CALL_RANGE = 14;
 export const CALL_MIN_LUCIDITY = 25;
-export const SKILLS = Object.freeze(["cut", "carry", "keen"]);
+export const SKILLS = Object.freeze(["cut", "carry", "keen", "tend", "build", "track"]);
+export const SKILL_INFO = Object.freeze({
+  cut: "chops the deadfall faster", carry: "fells and hauls more", keen: "holds up longer in the deep woods",
+  tend: "makes the wood last on the fire", build: "puts camp up and takes it down faster", track: "spots the lost from further off",
+});
+export const NO_SKILLS = Object.freeze({ cut: 0, carry: 0, keen: 0, tend: 0, build: 0, track: 0 });
+export const TEND_SKILL = 0.15;              // +15% fire hours per wood fed, per level
+export const BUILD_SKILL = 0.15;             // +15% camp speed per helper's level
+export const TRACK_REACH = 0.6;              // cells of extra find reach per level, from whoever is with you
 export const SKILL_MAX = 8;
 // Each candidate comes with a trade, and the skills that go with it.
 export const ROLES = Object.freeze([
-  { role: "Logger", skills: { cut: 2, carry: 0, keen: 0 } },
-  { role: "Hauler", skills: { cut: 0, carry: 2, keen: 0 } },
-  { role: "Scout", skills: { cut: 0, carry: 0, keen: 2 } },
-  { role: "Woodcutter", skills: { cut: 1, carry: 1, keen: 0 } },
-  { role: "Tracker", skills: { cut: 0, carry: 1, keen: 1 } },
-  { role: "Forester", skills: { cut: 1, carry: 0, keen: 1 } },
+  { role: "Logger", skills: { cut: 2 } },
+  { role: "Hauler", skills: { carry: 2 } },
+  { role: "Scout", skills: { keen: 2 } },
+  { role: "Firekeeper", skills: { tend: 2 } },
+  { role: "Builder", skills: { build: 2 } },
+  { role: "Tracker", skills: { track: 2 } },
+  { role: "Woodcutter", skills: { cut: 1, carry: 1 } },
+  { role: "Forester", skills: { cut: 1, keen: 1 } },
+  { role: "Pathfinder", skills: { track: 1, keen: 1 } },
 ]);
 export const BASE_POINTS = 6;                // spent on top of what each role brings
 export const PRACTICE_CHUNKS = 6;            // finished chunks of a kind per level

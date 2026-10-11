@@ -5,13 +5,13 @@
 // exported actions. Messages for the player go through sim.say(); they never
 // mention the hidden meter.
 
-import { createRng } from "./rng.js?v=seven-1.1.0";
-import { composeRoster } from "./names.js?v=seven-1.1.0";
-import { createWorld, areaOfRow, K, kindAt, walkable, lostSpots, fellTree } from "./world.js?v=seven-1.1.0";
-import { dist, cellOf, moveBody, nearestWalkable, walkTo } from "./body.js?v=seven-1.1.0";
-import { openDay, record, recordPlan, account } from "./chronicle.js?v=seven-1.1.0";
-import { updateMate, setTask, chopAt, frontDeadfall, DAY_TASKS, NIGHT_TASKS } from "./mates.js?v=seven-1.1.0";
-import * as C from "./config.js?v=seven-1.1.0";
+import { createRng } from "./rng.js?v=seven-1.2.0";
+import { composeRoster } from "./names.js?v=seven-1.2.0";
+import { createWorld, areaOfRow, K, kindAt, walkable, lostSpots, fellTree } from "./world.js?v=seven-1.2.0";
+import { dist, cellOf, moveBody, nearestWalkable, walkTo } from "./body.js?v=seven-1.2.0";
+import { openDay, record, recordPlan, account } from "./chronicle.js?v=seven-1.2.0";
+import { updateMate, setTask, chopAt, frontDeadfall, practice, DAY_TASKS, NIGHT_TASKS } from "./mates.js?v=seven-1.2.0";
+import * as C from "./config.js?v=seven-1.2.0";
 
 // ---- the clock ---------------------------------------------------------------
 export const minutes = (sim) => sim.ticks * C.TICK_MIN;
@@ -50,13 +50,13 @@ export function createSim(opts = {}) {
   for (let i = 0; i < C.TEAM; i++) {
     const a = (i / C.TEAM) * Math.PI * 2;
     const spot = nearestWalkable(world, sim.camp.x + Math.cos(a) * 2, sim.camp.y + Math.sin(a) * 2);
-    const skills = { cut: 0, carry: 0, keen: 0, ...(opts.team && opts.team[i] ? opts.team[i].skills : {}) };
+    const skills = { ...C.NO_SKILLS, ...(opts.team && opts.team[i] ? opts.team[i].skills : {}) };
     const id = `m${i}`;
     const role = opts.team && opts.team[i] ? opts.team[i].role || null : null;
     sim.roster.push({ id, name: names[i] });
     sim.mates.push({
       id, name: names[i], role, slot: i, x: spot.cx + 0.5, y: spot.cy + 0.5, facing: 0, lucidity: 100,
-      skills, points: skills.cut + skills.carry + skills.keen, practice: {},
+      skills, points: C.SKILLS.reduce((a, k) => a + (skills[k] || 0), 0), practice: {},
       task: { kind: "free", chunk: 0, carry: 0 }, following: false, callPending: false, asleep: false,
       fake: false, since: null, away: [], path: null, goal: null, repath: 0,
     });
@@ -174,21 +174,26 @@ export function fireAction(sim) {
 }
 
 function helpers(sim) {
-  return sim.mates.filter((m) => dist(m, sim.lead) <= 4 && !m.asleep && !(m.task && m.task.chunk > 0)).length;
+  return sim.mates.filter((m) => dist(m, sim.lead) <= 4 && !m.asleep && !(m.task && m.task.chunk > 0));
+}
+/** Camp work speed: more hands, and builders' hands count for more. */
+export function campSpeed(sim) {
+  const hs = helpers(sim).slice(0, 2);
+  return 1 + hs.reduce((s, m) => s + 0.5 * (1 + C.BUILD_SKILL * (m.skills.build || 0)), 0);
 }
 
 /** Make camp here, or take it down. */
 export function campAction(sim) {
   if (busy(sim)) return { ok: false };
-  const L = sim.lead, speed = 1 + 0.5 * Math.min(2, helpers(sim));
+  const L = sim.lead, speed = campSpeed(sim), crew = helpers(sim).slice(0, 2).map((m) => m.id);
   if (sim.camp.built) {
     if (!atCamp(sim, L)) return { ok: false, why: "Walk back to camp to take it down." };
-    startBusy(sim, "camp_down", Math.round(C.DISMANTLE_MIN / speed));
+    startBusy(sim, "camp_down", Math.round(C.DISMANTLE_MIN / speed), { crew });
     return { ok: true };
   }
   const k = kindAt(sim.world, Math.floor(L.x), Math.floor(L.y));
   if (k !== K.TRAIL && k !== K.CLEAR) return { ok: false, why: "No room for a camp here." };
-  startBusy(sim, "camp_make", Math.round(C.MAKE_CAMP_MIN / speed));
+  startBusy(sim, "camp_make", Math.round(C.MAKE_CAMP_MIN / speed), { crew });
   return { ok: true };
 }
 
@@ -245,11 +250,20 @@ function finishBusy(sim) {
     case "fire_feed":
       if (sim.camp.pile >= 1) { sim.camp.pile--; sim.camp.fire = Math.min(C.FIRE_MAX_HOURS, sim.camp.fire + C.FIRE_FEED_HOURS); }
       break;
-    case "camp_make": makeCampHere(sim); break;
-    case "camp_down": takeCampDown(sim); break;
+    case "camp_make": makeCampHere(sim); practiseCrew(sim, b.crew); break;
+    case "camp_down": takeCampDown(sim); practiseCrew(sim, b.crew); break;
     case "light": lightPylon(sim, b); break;
     default: break;
   }
+}
+
+function practiseCrew(sim, crew = []) {
+  for (const id of crew) { const m = sim.mates.find((x) => x.id === id); if (m) practice(m, "build"); }
+}
+/** How close the lead must come to someone lost: further with a tracker alongside. */
+export function findReach(sim) {
+  const best = Math.max(0, ...sim.mates.filter((m) => dist(m, sim.lead) <= 4 && !m.asleep).map((m) => m.skills.track || 0));
+  return C.FIND_REACH + C.TRACK_REACH * best;
 }
 
 function makeCampHere(sim) {
@@ -481,7 +495,10 @@ export function tick(sim, input = {}) {
 
   // Someone found follows you home; at camp, two stand at the fire.
   const ms = sim.missing;
-  if (ms && !ms.found && dist(ms, L) <= C.FIND_REACH) { ms.found = true; ms.path = null; sim.say(`${ms.name} is here, in the trees. They follow you.`); }
+  if (ms && !ms.found && dist(ms, L) <= findReach(sim)) {
+    const t = sim.mates.filter((m) => dist(m, L) <= 4 && !m.asleep).sort((a, b) => (b.skills.track || 0) - (a.skills.track || 0))[0];
+    if (t) practice(t, "track");
+    ms.found = true; ms.path = null; sim.say(`${ms.name} is here, in the trees. They follow you.`); }
   if (ms && ms.found) {
     if (dist(ms, L) > 2.2) { const c = cellOf(L); walkTo(w, ms, c.cx, c.cy, C.MATE_SPEED); }
     const twin = sim.mates.find((m) => m.id === ms.id);

@@ -194,5 +194,43 @@ T.check("a call sounds the same whether anyone answers", () => {
   assert(a === t.msgs[t.msgs.length - 1].text, "the call reads differently when nobody hears");
 });
 
+T.check("tend: a firekeeper on watch makes each wood last longer", () => {
+  const feed = (tend) => {
+    const s = fresh(21);
+    setClock(s, 3, 22 * 60); s.dawnDone = s.duskDone = 99;
+    const m = s.mates[0]; m.skills.tend = tend;
+    s.camp.pile = 1; s.camp.fire = 1;
+    m.x = s.camp.x + 1; m.y = s.camp.y;
+    S.applyPlan(s, "dusk", { [m.id]: "watch" });
+    s.mates.slice(1).forEach((x) => { x.task.kind = "sleep"; });
+    for (let i = 0; i < HOUR && s.camp.pile > 0; i++) S.tick(s, {});
+    return s.camp.fire;
+  };
+  const plain = feed(0), keeper = feed(4);
+  assert(keeper > plain + 0.5, `tend 4 fire ${keeper.toFixed(2)}h vs tend 0 ${plain.toFixed(2)}h`);
+});
+
+T.check("build: builders alongside put camp up faster", () => {
+  const time = (build) => {
+    const s = fresh(22);
+    S.campAction(s); finish(s);                // take it down first
+    s.mates.forEach((m, i) => { m.skills.build = build; m.x = s.lead.x + 0.5 + i * 0.1; m.y = s.lead.y; m.task = { kind: "camp", chunk: 0, carry: 0 }; });
+    const r = S.campAction(s);
+    assert(r.ok, "could not make camp");
+    return s.lead.busy.total;
+  };
+  const plain = time(0), skilled = time(4);
+  assert(skilled < plain - 5, `build 4 took ${skilled} min vs build 0 ${plain} min`);
+});
+
+T.check("track: a tracker with you spots the lost from further off", () => {
+  const s = fresh(23);
+  s.missing = { id: "m4", name: "X", slot: 4, skills: {}, points: 0, practice: {}, lucidity: 90, x: s.lead.x + C.FIND_REACH + 1.5, y: s.lead.y, area: 0, lastDay: 1, nights: 1, found: false };
+  const base = S.findReach(s);
+  s.mates[0].skills.track = 4; s.mates[0].x = s.lead.x; s.mates[0].y = s.lead.y + 0.5;
+  const tracked = S.findReach(s);
+  assert(base === C.FIND_REACH && tracked >= C.FIND_REACH + 2, `reach ${base} → ${tracked}`);
+});
+
 void chopSpot;
 T.done();

@@ -2,19 +2,19 @@
 // this file reads sim.pending and opens the matching panel, and the panel
 // answers through the sim's exported actions.
 
-import * as S from "./sim.js?v=seven-1.1.0";
-import { perceive } from "./percept.js?v=seven-1.1.0";
-import { createRenderer, SLOT_COLORS } from "./render.js?v=seven-1.1.0";
-import { createInput } from "./input.js?v=seven-1.1.0";
-import * as UI from "./ui.js?v=seven-1.1.0";
-import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.1.0";
-import { createRng } from "./rng.js?v=seven-1.1.0";
-import { composeRoster } from "./names.js?v=seven-1.1.0";
-import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, frontDeadfall } from "./mates.js?v=seven-1.1.0";
-import { areaOfRow } from "./world.js?v=seven-1.1.0";
-import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.1.0";
+import * as S from "./sim.js?v=seven-1.2.0";
+import { perceive } from "./percept.js?v=seven-1.2.0";
+import { createRenderer, SLOT_COLORS } from "./render.js?v=seven-1.2.0";
+import { createInput } from "./input.js?v=seven-1.2.0";
+import * as UI from "./ui.js?v=seven-1.2.0";
+import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.2.0";
+import { createRng } from "./rng.js?v=seven-1.2.0";
+import { composeRoster } from "./names.js?v=seven-1.2.0";
+import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, frontDeadfall } from "./mates.js?v=seven-1.2.0";
+import { areaOfRow } from "./world.js?v=seven-1.2.0";
+import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_INFO, NO_SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.2.0";
 
-const BUILD = "seven-1.1.0";
+const BUILD = "seven-1.2.0";
 const esc = UI.esc;
 const store = (() => { try { return window.localStorage; } catch { return null; } })();
 const readJSON = (k, d) => { try { const v = store && store.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
@@ -102,7 +102,7 @@ function candidates(seed) {
   const off = rng.int(0, ROLES.length - 1);
   return names.map((name, i) => {
     const r = ROLES[(i + off) % ROLES.length];
-    return { name, role: r.role, base: { ...r.skills }, skills: { ...r.skills } };
+    return { name, role: r.role, base: { ...NO_SKILLS, ...r.skills }, skills: { ...NO_SKILLS, ...r.skills } };
   });
 }
 const skillText = (sk) => SKILLS.filter((k) => sk[k]).map((k) => `${k} ${sk[k]}`).join(" · ") || "—";
@@ -140,12 +140,14 @@ function spendPanel(seed, team) {
     const left = budget - spent();
     UI.open(`
       <h2>Your team</h2>
-      <p class="small">Spend ${budget} more points. <b>Cut</b> chops faster. <b>Carry</b> fells and hauls more. <b>Keen</b> holds up longer in the deep woods.</p>
-      <table class="team">
-        <tr><th></th>${SKILLS.map((k) => `<th>${k}</th>`).join("")}</tr>
-        ${team.map((t, i) => `<tr><td><span class="dot" style="background:${SLOT_COLORS[i]}"></span>${esc(t.name)}<br><span class="small">${t.role}</span></td>${SKILLS.map((k) => `
-          <td class="sk"><button class="mini" data-do="dec" data-arg="${i}:${k}" ${t.skills[k] > t.base[k] ? "" : "disabled"}>−</button><span>${t.skills[k]}</span><button class="mini" data-do="inc" data-arg="${i}:${k}" ${left && t.skills[k] < SKILL_MAX ? "" : "disabled"}>+</button></td>`).join("")}</tr>`).join("")}
-      </table>
+      <p class="small">Spend ${budget} more points.</p>
+      <ul class="skills small">${SKILLS.map((k) => `<li><b>${k}</b> ${SKILL_INFO[k]}</li>`).join("")}</ul>
+      <div class="cards">${team.map((t, i) => `
+        <div class="card"><div class="who"><span class="dot" style="background:${SLOT_COLORS[i]}"></span>${esc(t.name)} <span class="small">${t.role}</span></div>
+          <div class="grid">${SKILLS.map((k) => `
+            <div class="sk"><span class="lbl">${k}</span><button class="mini" data-do="dec" data-arg="${i}:${k}" ${t.skills[k] > t.base[k] ? "" : "disabled"}>−</button><span class="n">${t.skills[k]}</span><button class="mini" data-do="inc" data-arg="${i}:${k}" ${left && t.skills[k] < SKILL_MAX ? "" : "disabled"}>+</button></div>`).join("")}
+          </div></div>`).join("")}
+      </div>
       <p class="small">${left} left</p>
       <button data-do="go">Set out</button>
       <button data-do="even">Spread the points evenly</button>
@@ -155,7 +157,7 @@ function spendPanel(seed, team) {
     UI.bind({
       inc: (arg) => { const [i, k] = arg.split(":"); if (budget - spent() > 0) team[+i].skills[k]++; render(`[data-do="inc"][data-arg="${arg}"]`); },
       dec: (arg) => { const [i, k] = arg.split(":"); if (team[+i].skills[k] > team[+i].base[k]) team[+i].skills[k]--; render(`[data-do="dec"][data-arg="${arg}"]`); },
-      even: () => { team.forEach((t) => (t.skills = { ...t.base })); let n = 0; while (spent() < budget && n < 999) { const t = team[n % TEAM]; const k = SKILLS[Math.floor(n / TEAM) % 3]; if (t.skills[k] < SKILL_MAX) t.skills[k]++; n++; } render('[data-do="even"]'); },
+      even: () => { team.forEach((t) => (t.skills = { ...t.base })); let n = 0; while (spent() < budget && n < 999) { const t = team[n % TEAM]; const k = SKILLS[Math.floor(n / TEAM) % SKILLS.length]; if (t.skills[k] < SKILL_MAX) t.skills[k]++; n++; } render('[data-do="even"]'); },
       go: () => { writeJSON("seven:pool", 0); startRun({ seed, team: team.map((t) => ({ name: t.name, role: t.role, skills: { ...t.skills } })) }); },
       back: () => recruitPanel(seed),
     });
@@ -181,7 +183,7 @@ function planPanel(kind) {
         : "Who sleeps, who keeps the fire, who works on in the dark."} Pile: ${sim.camp.pile}.</p>
       <div class="plan">${sim.mates.map((m) => `
         <button data-do="cycle" data-arg="${m.id}" class="row"><span class="dot" style="background:${SLOT_COLORS[m.slot]}"></span>
-          <span class="nm">${esc(m.name)}</span><span class="task">${esc(TASK_LABEL[choice[m.id]])}</span></button>`).join("")}
+          <span class="nm">${esc(m.name)}<span class="sub">${m.role ? esc(m.role) + " · " : ""}${skillText(m.skills)}</span></span><span class="task">${esc(TASK_LABEL[choice[m.id]])}</span></button>`).join("")}
       </div>
       <button data-do="done" autofocus>${kind === "dawn" ? "Start the day" : "Set the night"}</button>`, { onBack: null });
     UI.bind({

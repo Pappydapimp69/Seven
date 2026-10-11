@@ -37,7 +37,7 @@ export function refocus(selector, force = null) {
     const was = pick(selector);
     if (was && !was.disabled) el = was;
     else if (was) {
-      const row = was.closest("tr, .plan") || m;
+      const row = was.closest("tr, .card, .plan") || m;
       el = [...row.querySelectorAll("button:not([disabled])")][0] || null;
     }
   }

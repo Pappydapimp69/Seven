@@ -1,7 +1,7 @@
 // body.js — moving a body on the grid, and walking a path. Pure.
 
-import { walkable, pathTo } from "./world.js?v=seven-1.1.0";
-import { BODY_R } from "./config.js?v=seven-1.1.0";
+import { walkable, pathTo } from "./world.js?v=seven-1.2.0";
+import { BODY_R } from "./config.js?v=seven-1.2.0";
 
 export const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 export const cellOf = (p) => ({ cx: Math.floor(p.x), cy: Math.floor(p.y) });

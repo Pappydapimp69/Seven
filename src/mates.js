@@ -5,14 +5,14 @@
 // hears finishes the chunk in their hands, then follows. Work comes in chunks
 // (one chop, one tree); a day chunk is only started if it ends before dusk.
 
-import { K, bfs, kindAt, areaOfRow, fellTree, clearDeadfall } from "./world.js?v=seven-1.1.0";
-import { dist, cellOf, walkTo, nearestWalkable } from "./body.js?v=seven-1.1.0";
-import { record } from "./chronicle.js?v=seven-1.1.0";
+import { K, bfs, kindAt, areaOfRow, fellTree, clearDeadfall } from "./world.js?v=seven-1.2.0";
+import { dist, cellOf, walkTo, nearestWalkable } from "./body.js?v=seven-1.2.0";
+import { record } from "./chronicle.js?v=seven-1.2.0";
 import {
   MATE_SPEED, TICK_MIN, DUSK, CHOP_MIN, CHOP_PROGRESS, CHOP_SKILL, FELL_MIN, FELL_YIELD, HAUL_LOAD,
-  CAMP_RADIUS, WATCH_FEED_BELOW, DEADFALL_THICKER, TEAM, FIRE_FEED_HOURS, FIRE_MAX_HOURS, PRACTICE_CHUNKS, FAKE_LEARNS, SKILL_MAX,
-} from "./config.js?v=seven-1.1.0";
-import { hash01 } from "./rng.js?v=seven-1.1.0";
+  CAMP_RADIUS, WATCH_FEED_BELOW, DEADFALL_THICKER, TEAM, TEND_SKILL, FIRE_FEED_HOURS, FIRE_MAX_HOURS, PRACTICE_CHUNKS, FAKE_LEARNS, SKILL_MAX,
+} from "./config.js?v=seven-1.2.0";
+import { hash01 } from "./rng.js?v=seven-1.2.0";
 
 export const DAY_TASKS = Object.freeze(["free", "chop", "gather", "camp"]);
 export const NIGHT_TASKS = Object.freeze(["sleep", "watch", "work", "free"]);
@@ -28,7 +28,7 @@ export function setTask(m, kind, work = null) {
 
 /** A finished chunk of work. Returns the new level on a level-up, else 0. */
 export function practice(m, skill) {
-  const level = m.skills[skill] || 0;
+  const level = (m.skills && m.skills[skill]) || 0;
   if (level >= SKILL_MAX) return 0;
   m.practice[skill] = (m.practice[skill] || 0) + 1;
   const need = (PRACTICE_CHUNKS * (0.7 + 0.6 * hash01(`${m.id}:${skill}:${level}`))) / (m.fake ? FAKE_LEARNS : 1);
@@ -96,7 +96,8 @@ export function updateMate(sim, m) {
     if (t.chunk >= 30) {
       t.chunk = 0;
       if (camp.fire > 0 && camp.fire < WATCH_FEED_BELOW && camp.pile > 0) {
-        camp.pile--; camp.fire = Math.min(FIRE_MAX_HOURS, camp.fire + FIRE_FEED_HOURS);
+        camp.pile--; camp.fire = Math.min(FIRE_MAX_HOURS, camp.fire + FIRE_FEED_HOURS * (1 + TEND_SKILL * (m.skills.tend || 0)));
+        practice(m, "tend");
       }
     }
     return;
