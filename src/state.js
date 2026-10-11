@@ -142,7 +142,7 @@ export const DEPTH_DRAIN = 1.5;
  * three days; night, depth and isolation still multiply on top of it.
  * Sleeping halves it — rest is the reason to stop.
  */
-export const SEVEN_DRAIN_SCALE = 0.045;
+export const SEVEN_DRAIN_SCALE = 0.02; // 0.045 left the party at ~37 by day 2 (tests/seven-bot.mjs)
 export const SLEEP_DRAIN = 0.5;
 export function depthOf(sim, ch) {
   if (!sim || !sim.expedition || !sim.world || !ch) return 0;
@@ -1953,8 +1953,8 @@ export function release(sim, slot) {
 // lead holds the verb, so these are sim seconds that the clock really spends.
 export const CHOP_HOLD = GAME_HOUR / 2;
 export const SEVEN_GATHER_HOLD = GAME_HOUR;
-/** Share of a deadfall one chop by an unskilled pair of hands takes off. 16 chops = 8 hours alone. */
-export const CHOP_PROGRESS = 1 / 16;
+/** Share of a deadfall one chop by an unskilled pair of hands takes off. 32 chops = 16 hours alone; four hands, about four. */
+export const CHOP_PROGRESS = 1 / 32;
 /** Each level of cut skill adds this much to a chop. A percentage, never a flat amount, so it cannot floor to nothing. */
 export const CHOP_SKILL = 0.15;
 /** Lucid companions this close to the deadfall chop alongside the lead. */

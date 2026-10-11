@@ -925,7 +925,7 @@ function sevenRoute(sim) {
   const startZ = sim.world.camp.z;
   const total = Math.max(1, startZ - exitZ);
   const progress = Math.max(0, Math.min(1, (startZ - sim.player.z) / total));
-  return { exitZ, startZ, progress, area: Math.min(SEVEN_AREAS, Math.floor(progress * SEVEN_AREAS)) };
+  return { exitZ, startZ, progress, area: Math.min(SEVEN_AREAS - 1, Math.floor(progress * SEVEN_AREAS)) };
 }
 
 // TIME, NOT A WALLET. An action that "takes an hour" asks for an hour of the
@@ -1975,6 +1975,12 @@ function dropCoopPlayer(slot) {
   run.renderer.resize();
 }
 
+// TEST ONLY: the whole-run bot (tests/seven-bot.mjs) plays many days in one
+// page; drawing every step made a run take minutes on the software renderer.
+// Headless skips the HUD and the draw and nothing else — the sim, the Seven
+// glue and the panels all run exactly as in play.
+let testHeadless = false;
+
 /** One simulation + presentation step. Separated from rAF so tests can drive it. */
 function step(dt, intent) {
   const { sim, percept, renderer, hud } = run;
@@ -2160,7 +2166,7 @@ function step(dt, intent) {
   }
   audio.update(distortion(percept, sim), prox);
 
-  hud.update({ yaw, pitch: intent.pitch ?? 0 }, run.players[0].selected, run.players[0].selectedItem, actionEvents, run.players[1] || null);
+  if (!testHeadless) hud.update({ yaw, pitch: intent.pitch ?? 0 }, run.players[0].selected, run.players[0].selectedItem, actionEvents, run.players[1] || null);
 
   // One draw per player, each from that player's OWN percept — which is what
   // lets the two halves of the screen legitimately disagree about the basin.
@@ -2169,7 +2175,7 @@ function step(dt, intent) {
   const vps = viewportsFor(run.players.length);
   run.players[0].yaw = yaw;
   run.players[0].pitch = intent.pitch ?? 0;
-  for (let i = 0; i < run.players.length; i++) {
+  for (let i = 0; i < run.players.length && !testHeadless; i++) {
     const p = run.players[i];
     // Each player's OWN selection — co-op keeps one pointer per player.
     const selectedId = sim.companions[p.selected]?.id || null;
@@ -2469,6 +2475,16 @@ if (typeof window !== "undefined") {
      * scaling levels, and the only honest way to do that is to hand the input
      * layer the CSS-pixel figure a real device would report at that scaling. */
     debugMouseLook(dx, dy) { return input.debugLook(dx, dy); },
+    // Seven test hooks for the whole-run bot. They press the same functions the
+    // panels' buttons press; nothing here is a shortcut past a rule.
+    set headless(v) { testHeadless = !!v; },
+    get twin() { return twinUi ? { ...twinUi } : null; },
+    get planOpen() { return planUi ? planUi.phase : null; },
+    plan(choices) { if (!planUi) return false; Object.assign(planUi.choice, choices); closePlan(); return true; },
+    chooseTwin(left) { chooseTwin(left); },
+    lightWith(id) { lightWith(id); },
+    campAction() { campAction(); },
+    rest() { restUntilMorning(); },
     /** Start a tutorial stage by index — the same path the title button takes. */
     startStage(i) { return startTutorial(i); },
     // THE WOODS, driven the way the title button drives it. The browser test
@@ -2548,9 +2564,8 @@ if (typeof window !== "undefined") {
       return p ? distortion(p.percept, run.sim) : 0;
     },
     /** Advance the sim by `seconds` in fixed slices, optionally holding movement. */
-    advance(seconds, intent = {}) {
+    advance(seconds, intent = {}, slice = 1 / 30) {
       if (!run) return null;
-      const slice = 1 / 30;
       let done = 0;
       while (done < seconds && run.sim.status === "playing") {
         step(slice, {

@@ -31,7 +31,9 @@ import { CELL_KIND } from "./camp.js?v=seven-0.39.0";
 export const TRAIL_GRID = 120;
 export const TRAIL_AREAS = 7;
 /** Areas (0-based) whose stretch of trail is crossed by a deadfall. */
-export const DEADFALL_AREAS = Object.freeze([0, 2, 4]);
+// Every area. The bot (tests/seven-bot.mjs) found three gates let a team cross
+// the woods in a day and a half, before the first night could take anyone.
+export const DEADFALL_AREAS = Object.freeze([0, 1, 2, 3, 4, 5, 6]);
 /** Pylons in the first area; later areas roll PYLONS_MIN..PYLONS_MAX. */
 export const PYLONS_FIRST = 3;
 export const PYLONS_MIN = 2;
@@ -164,7 +166,10 @@ export function generateTrail(seed = 1) {
       if (p >= nPylons) continue;
       let cz = Math.round(north + 2 + rRow * Math.max(1, south - north - 4));
       if (a === 0 && cz > CAMP_CZ - 7) cz = CAMP_CZ - 7;
-      if (nearDeadfall(cz, 2)) cz = Math.max(north + 1, cz - 4);
+      // Four rows clear of any deadfall row: a pocket is radius 2, so it can
+      // never touch the row and be split by the seal below.
+      const df = deadfallRows.find((d) => Math.abs(d.row - cz) <= 3);
+      if (df) cz = df.row + 4 <= south - 1 ? df.row + 4 : df.row - 4;
       const side = rSide < 0.5 ? -1 : 1;
       const off = 4 + Math.floor(rOff * 4);
       const tx = trailX[cz];
@@ -196,9 +201,22 @@ export function generateTrail(seed = 1) {
   // under a fallen trunk rather than as rock.
   const deadfalls = deadfallRows.map(({ a, row }, i) => {
     const tx = trailX[row];
+    // Every open cell on this row that joins the trail, not a fixed four: a
+    // pocket or clearing opened beside the trail on this row would otherwise
+    // leave a way round the end of the trunk (found on seed 777777 once every
+    // area had a deadfall).
+    let lo = tx, hi = tx + 1;
+    while (lo - 1 > 0 && !blocked[at(lo - 1, row)]) lo--;
+    while (hi + 1 < G - 1 && !blocked[at(hi + 1, row)]) hi++;
     const cells = [];
-    for (let k = tx - 1; k <= tx + 2; k++) {
+    for (let k = lo; k <= hi; k++) {
       if (!blocked[at(k, row)]) { blocked[at(k, row)] = 1; cells.push({ cx: k, cz: row }); }
+    }
+    // And the whole row is forest everywhere else: two openings off the trail,
+    // one either side of the row, joined round the end of the trunk on seed 42.
+    // The trunk is the only way through this row.
+    for (let k = 1; k < G - 1; k++) {
+      if (!blocked[at(k, row)]) { blocked[at(k, row)] = 1; cellKind[at(k, row)] = CELL_KIND.WOOD; }
     }
     return {
       id: `df${i}`, kind: FEATURE.DEADFALL, area: a,

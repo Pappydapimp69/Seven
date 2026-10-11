@@ -20,7 +20,7 @@ function setup(seed = 7) {
 }
 const chopsToClear = (sim, d) => { let n = 0; while (!d.cleared && n < 100) { chopDeadfall(sim); n++; } return n; };
 
-check("alone and unskilled, a deadfall takes 16 chops (8 clock hours)", () => {
+check("alone and unskilled, a deadfall takes 1/CHOP_PROGRESS chops", () => {
   const { sim, d } = setup();
   const n = chopsToClear(sim, d);
   assert(n === Math.ceil(1 / CHOP_PROGRESS), `took ${n} chops`);
@@ -29,7 +29,7 @@ check("alone and unskilled, a deadfall takes 16 chops (8 clock hours)", () => {
 check("more hands finish it in fewer chops", () => {
   const { sim, d } = setup();
   for (const c of sim.companions.slice(0, 3)) { c.x = d.x + 1; c.z = d.z + 2; }
-  assert(chopsToClear(sim, d) === 4, "four pairs of hands did not take a quarter of the chops");
+  assert(chopsToClear(sim, d) === Math.ceil(1 / (4 * CHOP_PROGRESS)), "four pairs of hands did not take a quarter of the chops");
 });
 check("cut skill makes each chop count for more", () => {
   const a = setup(), b = setup();
@@ -41,7 +41,7 @@ check("cut skill makes each chop count for more", () => {
 check("a hallucinating mind does not help", () => {
   const { sim, d } = setup();
   const h = sim.companions[0]; h.x = d.x + 1; h.z = d.z + 2; h.hallucinating = true;
-  assert(chopsToClear(sim, d) === 16, "a gone mind added to the chopping");
+  assert(chopsToClear(sim, d) === Math.ceil(1 / CHOP_PROGRESS), "a gone mind added to the chopping");
 });
 check("progress stays on the deadfall, through a save", () => {
   const { sim, d } = setup();

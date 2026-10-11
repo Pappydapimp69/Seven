@@ -66,6 +66,19 @@ for (const s of SEEDS) {
   });
 }
 
+check("sweep: 60 seeds — every deadfall is a gate, and everything is reachable once they are cut", () => {
+  const bad = [];
+  for (let s = 2000; s < 2060; s++) {
+    const w = generateTrail(s);
+    if (exitReached(w, reach(w))) bad.push(`${s}: exit open with every deadfall standing`);
+    w.deadfalls.forEach((d, i) => { if (exitReached(w, reach(w, cleared(w, i)))) bad.push(`${s}: deadfall ${i} can be walked round`); });
+    const r = reach(w, cleared(w));
+    for (const f of [...w.pylons, ...w.trees, ...w.stones, ...w.items]) if (!r[f.cz * G + f.cx]) bad.push(`${s}: ${f.id} unreachable`);
+    if (w.pylons.filter((p) => p.area === 0).length !== PYLONS_FIRST) bad.push(`${s}: area 1 pylons`);
+  }
+  assert(!bad.length, bad.slice(0, 6).join("; ") + (bad.length > 6 ? ` (+${bad.length - 6} more)` : ""));
+});
+
 check("later areas roll different pylon counts across seeds", () => {
   const counts = new Set();
   for (const s of SEEDS) { const w = generateTrail(s); for (let a = 1; a < TRAIL_AREAS; a++) counts.add(w.pylons.filter((p) => p.area === a).length); }
