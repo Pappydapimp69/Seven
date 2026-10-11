@@ -115,12 +115,13 @@ fakes come from.
 
 - **Nobody is alerted.** IDEAS: nothing is announced; the replacement takes the
   slot. A sleeping lead wakes to a full roster.
-- **The call is only heard by someone awake.** The lead hears it only if they
-  took the watch or a night shift at dusk. Otherwise whoever WAS awake may
-  mention it at dawn — and that report comes through a person, who can be the
-  fake. Nobody awake, nobody hears. The call repeats on later nights while the
-  missing one is inside the spatial window. This makes the watch the camp's
-  ear, and staying up yourself a real dusk choice.
+- **One call, at first light, heard by everyone at camp.** A direction, never a
+  name. No watch dependency, no second-hand reports. It repeats each dawn while
+  the missing one is inside the spatial window (this area or the next); when it
+  stops, they are gone. (Replaces an earlier "only the waking hear it" draft —
+  the owner found it messy.)
+- **Searching is a dawn task:** assign someone (or go yourself) toward the call
+  for a shift. It competes with the deadfall and the woodpile.
 
 ## Open
 
