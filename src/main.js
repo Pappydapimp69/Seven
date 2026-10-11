@@ -2,19 +2,20 @@
 // this file reads sim.pending and opens the matching panel, and the panel
 // answers through the sim's exported actions.
 
-import * as S from "./sim.js?v=seven-1.8.0";
-import { perceive } from "./percept.js?v=seven-1.8.0";
-import { createView, SLOT_COLORS } from "./view.js?v=seven-1.8.0";
-import { createInput } from "./input.js?v=seven-1.8.0";
-import * as UI from "./ui.js?v=seven-1.8.0";
-import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.8.0";
-import { createRng } from "./rng.js?v=seven-1.8.0";
-import { composeRoster } from "./names.js?v=seven-1.8.0";
-import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, frontDeadfall } from "./mates.js?v=seven-1.8.0";
-import { areaOfRow } from "./world.js?v=seven-1.8.0";
-import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_INFO, NO_SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.8.0";
+import * as S from "./sim.js?v=seven-1.9.0";
+import { perceive } from "./percept.js?v=seven-1.9.0";
+import { createView, SLOT_COLORS } from "./view.js?v=seven-1.9.0";
+import { createInput } from "./input.js?v=seven-1.9.0";
+import * as UI from "./ui.js?v=seven-1.9.0";
+import { saveTo, loadFrom, clearSave } from "./save.js?v=seven-1.9.0";
+import * as Audio from "./audio.js?v=seven-1.9.0";
+import { createRng } from "./rng.js?v=seven-1.9.0";
+import { composeRoster } from "./names.js?v=seven-1.9.0";
+import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, frontDeadfall } from "./mates.js?v=seven-1.9.0";
+import { areaOfRow } from "./world.js?v=seven-1.9.0";
+import { TICKS_PER_SEC, SPEED_BUSY, SPEED_SLEEP, BASE_POINTS, SKILLS, SKILL_INFO, NO_SKILLS, SKILL_MAX, TEAM, CANDIDATES, ROLES, RETURN_FRACTION } from "./config.js?v=seven-1.9.0";
 
-const BUILD = "seven-1.8.0";
+const BUILD = "seven-1.9.0";
 const esc = UI.esc;
 const store = (() => { try { return window.localStorage; } catch { return null; } })();
 const readJSON = (k, d) => { try { const v = store && store.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
@@ -32,6 +33,7 @@ const input = createInput({
 
 // ---- play actions ---------------------------------------------------------------
 function onAction(a, e) {
+  if (splashOn) { leaveSplash(); return; }
   if (UI.isOpen()) { UI.navigate(a, e); return; }
   if (!sim || sim.status !== "playing" || sim.pending) return;
   if (a === "pause") return pausePanel();
@@ -51,6 +53,7 @@ const bank = () => readJSON("seven:pool", 0);
 const runs = () => readJSON("seven:runs", []);
 
 function startRun(opts) {
+  if (splashOn) { splashOn = false; splash.classList.remove("on"); }
   sim = S.createSim(opts);
   endShown = false; moved = false; acc = 0;
   UI.close(); UI.setPlaying(true);
@@ -143,7 +146,7 @@ function spendPanel(seed, team) {
     const left = budget - spent();
     UI.open(`
       <h2>Your team</h2>
-      <p class="small">Spend ${budget} more points.</p>
+      <p class="points"><b>${left}</b> of ${budget} points left to spend</p>
       <ul class="skills small">${SKILLS.map((k) => `<li><b>${k}</b> ${SKILL_INFO[k]}</li>`).join("")}</ul>
       <div class="cards">${team.map((t, i) => `
         <div class="card"><div class="who"><span class="dot" style="background:${SLOT_COLORS[i]}"></span>${esc(t.name)} <span class="small">${t.role}</span></div>
@@ -151,7 +154,6 @@ function spendPanel(seed, team) {
             <div class="sk"><span class="lbl">${k}</span><button class="mini" data-do="dec" data-arg="${i}:${k}" ${t.skills[k] > t.base[k] ? "" : "disabled"}>−</button><span class="n">${t.skills[k]}</span><button class="mini" data-do="inc" data-arg="${i}:${k}" ${left && t.skills[k] < SKILL_MAX ? "" : "disabled"}>+</button></div>`).join("")}
           </div></div>`).join("")}
       </div>
-      <p class="small">${left} left</p>
       <button data-do="go">Set out</button>
       <button data-do="even">Spread the points evenly</button>
       <button data-do="back">Back</button>`, { onBack: () => recruitPanel(seed), wide: true });
@@ -393,6 +395,8 @@ window.addEventListener("pagehide", save);
 // Test hooks. The browser tests drive the real loop's functions through these.
 window.__seven = {
   build: BUILD,
+  get splash() { return splashOn; },
+  get audio() { return Audio.state(); },
   get sim() { return sim; },
   get visible() { return [...renderer.visible]; },
   worldMove,
@@ -408,5 +412,19 @@ window.__seven = {
   },
 };
 
-titlePanel();
+// ---- the studio splash: one press opens audio, then the menu --------------------
+let splashOn = true;
+const splash = document.getElementById("splash");
+function leaveSplash() {
+  if (!splashOn) return;
+  splashOn = false;
+  Audio.unlock(); Audio.sting();
+  splash.classList.add("out");
+  setTimeout(() => { splash.classList.remove("on", "out"); }, 600);
+  titlePanel();
+}
+for (const ev of ["keydown", "pointerdown", "touchstart"]) {
+  // Capture, and stop it there: the press that leaves the splash must not also press a menu button.
+  window.addEventListener(ev, (e) => { if (splashOn) { e.preventDefault(); e.stopImmediatePropagation(); leaveSplash(); } }, { capture: true, passive: false });
+}
 requestAnimationFrame(frame);

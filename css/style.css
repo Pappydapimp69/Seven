@@ -109,3 +109,18 @@ td.sk span { width: 16px; }
   .plan .row { padding: 5px 12px; }
   .panel .head { padding-top: 10px; }
 }
+.panel .head .points { margin: 4px 0 0; font-size: 15px; }
+.panel .head .points b { color: var(--accent); font-size: 18px; }
+
+/* The studio splash: the first press opens audio, then the menu. */
+#splash { position: fixed; inset: 0; z-index: 50; display: none; flex-direction: column; align-items: center; justify-content: center;
+  background: #050806; color: var(--ink); cursor: pointer; }
+#splash.on { display: flex; }
+#splash .studio { font: 700 clamp(28px, 7vw, 64px)/1.05 Georgia, "Times New Roman", serif; letter-spacing: .28em; text-align: center;
+  animation: studioIn 1.6s ease-out both; }
+#splash .studio span { display: block; font-size: .38em; letter-spacing: .9em; margin-top: .6em; color: var(--accent); }
+#splash .press { margin-top: 48px; font-size: 15px; color: var(--dim); animation: pressPulse 2s ease-in-out 1.6s infinite both; }
+#splash.out { animation: studioOut .6s ease-in forwards; pointer-events: none; }
+@keyframes studioIn { from { opacity: 0; letter-spacing: .5em; } to { opacity: 1; } }
+@keyframes pressPulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+@keyframes studioOut { to { opacity: 0; } }

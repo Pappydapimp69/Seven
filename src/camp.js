@@ -4,9 +4,9 @@
 // stays where it was, and walking camp forward past someone lost abandons
 // them with no prompt and no message.
 
-import { record } from "./chronicle.js?v=seven-1.8.0";
-import { areaOfRow } from "./world.js?v=seven-1.8.0";
-import { PILE_CAP, SURPLUS_CAP } from "./config.js?v=seven-1.8.0";
+import { record } from "./chronicle.js?v=seven-1.9.0";
+import { areaOfRow } from "./world.js?v=seven-1.9.0";
+import { PILE_CAP, SURPLUS_CAP } from "./config.js?v=seven-1.9.0";
 
 const areaOf = (p) => areaOfRow(Math.floor(p.y));
 

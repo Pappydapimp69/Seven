@@ -31,6 +31,9 @@ async function page(opts) {
   p.on("console", (m) => { if (m.type() === "error" && !m.text().includes("404")) errs.push(m.text()); });
   await p.goto(URL0);
   await p.waitForFunction(() => window.__seven);
+  if (opts.keepSplash) return { p, ctx };
+  await p.keyboard.press("Space");
+  await p.waitForFunction(() => !window.__seven.splash);
   return { p, ctx };
 }
 const sim = (p, f) => p.evaluate(f);
@@ -80,9 +83,9 @@ const sim = (p, f) => p.evaluate(f);
   await p.click("#modal [data-do='inc'][data-arg='0:cut']");
   ok(await p.evaluate(() => document.activeElement.dataset.do === "inc" && document.activeElement.dataset.arg === "0:cut"), "focus stays on + after a press");
   await p.keyboard.press("Enter");
-  ok(await p.evaluate(() => document.activeElement.dataset.arg === "0:cut" && document.querySelector("#modal").textContent.includes("4 left")), "Enter again adds again, focus kept");
+  ok(await p.evaluate(() => document.activeElement.dataset.arg === "0:cut" && document.querySelector("#modal .points b").textContent === "4"), "Enter again adds again, focus kept, the count in the title goes down");
   for (let i = 0; i < 4; i++) await p.keyboard.press("Enter");
-  ok(await p.evaluate(() => document.querySelector("#modal").textContent.includes("0 left") && document.activeElement.dataset.do === "go"), "out of points: focus drops to Set out");
+  ok(await p.evaluate(() => document.querySelector("#modal .points b").textContent === "0" && document.activeElement.dataset.do === "go"), "out of points: focus drops to Set out");
   await p.evaluate(() => window.__seven.click("Set out"));
   await p.waitForTimeout(200);
   ok(await p.evaluate(() => !window.__seven.panel && !window.__seven.sim.camp.built), "the run starts with no camp and no plan");
@@ -156,9 +159,22 @@ const sim = (p, f) => p.evaluate(f);
   await p.keyboard.press("Escape");
   await p.evaluate(() => window.__seven.click("Save and leave"));
   await p.reload(); await p.waitForFunction(() => window.__seven);
+  await p.keyboard.press("Space"); await p.waitForFunction(() => !window.__seven.splash);
   ok(await p.evaluate(() => [...document.querySelectorAll("#modal button")].some((b) => b.textContent.startsWith("Continue"))), "Continue after reload");
   await p.evaluate(() => window.__seven.click("Continue"));
   ok(await p.evaluate(() => window.__seven.sim && window.__seven.sim.day >= 1 && window.__seven.sim.world.deadfalls[0].progress > 0), "the resumed run kept the chopping");
+  await ctx.close();
+}
+
+// ---- the studio splash: first, and one press opens audio and the menu (and presses nothing else) ----
+{
+  const { p, ctx } = await page({ viewport: { width: 1280, height: 720 }, keepSplash: true });
+  ok(await p.evaluate(() => window.__seven.splash && getComputedStyle(document.getElementById("splash")).display !== "none" && document.getElementById("splash").textContent.includes("ZANE PAUL")), "the Zane Paul Studios splash comes first");
+  ok(await p.evaluate(() => !window.__seven.panel), "no menu behind it yet");
+  await p.keyboard.press("Enter");
+  await p.waitForTimeout(100);
+  ok(await p.evaluate(() => !window.__seven.splash && window.__seven.panel === "SEVEN" && window.__seven.audio === "running"), `one press: the menu, and audio is open (${await p.evaluate(() => window.__seven.audio)})`);
+  ok(await p.evaluate(() => window.__seven.panel === "SEVEN"), "that press did not also press a menu button");
   await ctx.close();
 }
 
@@ -188,6 +204,16 @@ const sim = (p, f) => p.evaluate(f);
     return { hTop: h.top, hBottom: h.bottom, pTop: panel.top, fTop: f.top, fBottom: f.bottom, headBottom: head.bottom, vh: innerHeight, scrolled: document.querySelector("#modal .panel").scrollTop, focus: document.activeElement.textContent.trim().slice(0, 20) };
   });
   await p.screenshot({ path: path.join(ROOT, "tests", "shot-short.png") });
+  // The spend screen too: the points left stay in view, and count down, while the list scrolls.
+  for (let i = 0; i < 5; i++) await p.click(`#modal [data-do='pick'][data-arg='${i}']`);
+  await p.evaluate(() => window.__seven.click("Next"));
+  await p.focus("#modal [data-do='inc'][data-arg='4:track']");
+  await p.keyboard.press("Enter");
+  const sp = await p.evaluate(() => {
+    const b = document.querySelector("#modal .points b"), r = b.getBoundingClientRect();
+    return { left: b.textContent, top: r.top, bottom: r.bottom, vh: innerHeight, scrolled: document.querySelector("#modal .panel").scrollTop };
+  });
+  ok(sp.scrolled > 0 && sp.top >= 0 && sp.bottom <= sp.vh && sp.left === "5", `spend screen scrolled ${sp.scrolled}px: "${sp.left} points left" still on screen`);
   await ctx.close();
 }
 
