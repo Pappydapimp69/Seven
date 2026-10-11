@@ -23,7 +23,10 @@ import {
   activatePylon,
   updatePing, isAnswering, isReturning,
   PRIME_WINDOW,
+  chopDeadfall, feedFire, sevenClock, GAME_HOUR, CHOP_HOLD, SEVEN_GATHER_HOLD, GATHER_YIELD, GATHER_RADIUS,
+  SEVEN_CAMP_RADIUS, FIRE_FUEL_MAX,
 } from "./state.js?v=seven-0.35.0";
+import { effectiveKind, inChunk, CHUNK_HOURS } from "./tasks.js?v=seven-0.35.0";
 
 // Higher band = worse. Lets a per-companion trait move the pylon-seeking
 // trigger EARLIER than the uniform BRITTLE tell everyone else gets, without
@@ -357,6 +360,88 @@ function phantomGoal(sim, c) {
 }
 
 /** Advance all five companions by `dt`. Called from state.tick. */
+
+// ---------------------------------------------------------------------------
+// SEVEN'S TASKS (src/tasks.js holds the vocabulary). Returns true when the task
+// steered this companion this tick. "free" returns false: their own business is
+// the ordinary behaviour below.
+const CAMP_STAND = 3.5;         // close enough to the fire to count as at camp
+const WATCH_FEED_BELOW = 0.6;   // a watcher feeds the fire when it falls under this share
+function chunkFits(sim, c, hours) {
+  // Night work starts chunks in the dark, on purpose. A day task does not.
+  if (c.task.kind === "work") return true;
+  const clk = sevenClock(sim.time);
+  return !clk.night && clk.hoursToDusk >= hours;
+}
+function toCamp(sim, c, dt, band) {
+  const camp = sim.camp && sim.camp.built ? sim.camp : null;
+  if (!camp) { c.goalKind = "task"; return; }
+  const d = dist(c, camp);
+  if (d > CAMP_STAND) stepToward(sim, c, camp, followSpeed(d, band), dt);
+  if (d <= SEVEN_CAMP_RADIUS && c.task.carry > 0) {
+    camp.pile = (camp.pile || 0) + c.task.carry;
+    emit(sim, "stack", `${c.name} stacks ${c.task.carry} wood on the pile.`, { who: c.id, amount: c.task.carry });
+    c.task.carry = 0;
+  }
+}
+function runTask(sim, c, dt, band) {
+  const t = c.task;
+  const kind = effectiveKind(c);
+  if (kind === "free") return false;
+  c.goalKind = "task";
+  if (kind === "camp" || kind === "sleep") { toCamp(sim, c, dt, band); return true; }
+  if (kind === "watch") {
+    toCamp(sim, c, dt, band);
+    const f = sim.fire;
+    if (f && sim.camp && sim.camp.built && dist(c, f) <= CAMP_STAND + 1) {
+      t.chunk += dt;
+      if (t.chunk >= GAME_HOUR / 2) {
+        t.chunk = 0;
+        if (f.fuel < FIRE_FUEL_MAX * WATCH_FEED_BELOW && (sim.camp.pile || 0) > 0) feedFire(sim, c);
+      }
+    }
+    return true;
+  }
+  if (t.carry > 0) { toCamp(sim, c, dt, band); return true; }
+  if (kind === "chop") {
+    const d = (sim.deadfalls || []).filter((x) => !x.cleared).sort((a, b) => dist(a, c) - dist(b, c))[0];
+    if (!d) { toCamp(sim, c, dt, band); return true; }
+    if (t.chunk === 0 && !chunkFits(sim, c, CHUNK_HOURS.chop)) { toCamp(sim, c, dt, band); return true; }
+    // The camp side of the deadfall: the route runs north, so stand to its south.
+    // The trail bends row to row, so stand on the trail cell of the row just
+    // south of it — a fixed offset from the deadfall can land in the forest,
+    // and a path to a blocked cell is no path at all.
+    const tr = sim.world.trail;
+    const row = d.cz + 1;
+    const tx = tr ? tr.trailX[row] : null;
+    const spot = tx != null && tx >= 0
+      ? cellToWorld(tx + ((c.id.charCodeAt(1) % 2) ? 1 : 0), row, gridOf(sim.world))
+      : { x: d.x, z: d.z + CELL * 1.25 };
+    if (dist(c, spot) > 1.4) { stepToward(sim, c, spot, followSpeed(dist(c, spot), band), dt); return true; }
+    c.facing = Math.atan2(d.x - c.x, d.z - c.z);
+    t.chunk += dt;
+    if (t.chunk >= CHOP_HOLD) { t.chunk = 0; chopDeadfall(sim, c, { helpers: false }); }
+    return true;
+  }
+  if (kind === "gather") {
+    const tree = sim.trees.filter((x) => !x.chopped).sort((a, b) => dist(a, c) - dist(b, c))[0];
+    if (!tree) { toCamp(sim, c, dt, band); return true; }
+    if (t.chunk === 0 && !chunkFits(sim, c, CHUNK_HOURS.gather)) { toCamp(sim, c, dt, band); return true; }
+    if (dist(c, tree) > GATHER_RADIUS - 0.6) { stepToward(sim, c, tree, followSpeed(dist(c, tree), band), dt); return true; }
+    c.facing = Math.atan2(tree.x - c.x, tree.z - c.z);
+    t.chunk += dt;
+    if (t.chunk >= SEVEN_GATHER_HOLD) {
+      t.chunk = 0;
+      tree.chopped = true;
+      const n = sim.rng.int(GATHER_YIELD.min, GATHER_YIELD.max);
+      t.carry += n;
+      emit(sim, "haul", `${c.name} brings a tree down.`, { who: c.id, resource: "wood", amount: n, x: tree.x, z: tree.z });
+    }
+    return true;
+  }
+  return false;
+}
+
 export function updateCompanions(sim, dt) {
   for (const c of sim.companions) {
     ensureMemory(c);
@@ -630,6 +715,17 @@ export function updateCompanions(sim, dt) {
     // driven by balanced inflow and outflow reaches a fixed point and freezes
     // there). When the deadline passes they stop where they are and go back to
     // their own business, wherever that has left them.
+    // ---- on a task (Seven) ------------------------------------------------
+    // Before answering a call, so the chunk in their hands is finished first;
+    // a called companion who is between chunks drops the task and comes.
+    if (c.task && sim.expedition) {
+      if (isAnswering(sim, c) && !inChunk(c)) {
+        // Wood already cut is taken back to the pile first; otherwise they come.
+        c.task = c.task.carry > 0 ? { ...c.task, kind: "camp" } : null;
+      } else if (runTask(sim, c, dt, band)) {
+        continue;
+      }
+    }
     const summoned = isAnswering(sim, c);
     if (summoned || isReturning(sim, c)) {
       c.goalKind = summoned ? "answering" : "regrouping";

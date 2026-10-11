@@ -67,6 +67,10 @@ echo "== pylon zones (a lit pylon shields its area from depth, 36h) =="
 node tests/pylonzone.mjs
 echo
 
+echo "== tasks (companions chop, gather, keep camp and watch) =="
+node tests/tasks.mjs
+echo
+
 echo "== seven (team loadouts and final choices) =="
 node tests/seven.mjs
 echo

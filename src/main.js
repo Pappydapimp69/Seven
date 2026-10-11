@@ -28,6 +28,7 @@ import { createInput, ACTIONS } from "./input.js?v=seven-0.35.0";
 import { createAudio } from "./audio.js?v=seven-0.35.0";
 import { createDiag } from "./diag.js?v=seven-0.35.0";
 import { generateTrail, areaOfRow } from "./trail.js?v=seven-0.35.0";
+import { DAY_TASKS, NIGHT_TASKS, TASK_LABEL, setTask, effectiveKind } from "./tasks.js?v=seven-0.35.0";
 import { hashSeed, makeRng } from "./rng.js?v=seven-0.35.0";
 import { saveRun, loadSave, clearSave, deserializeRun, describeSave, loadSettings, saveSettings, recordDay, summariseTally } from "./save.js?v=seven-0.35.0";
 
@@ -70,11 +71,14 @@ const AUTOSAVE_EVERY = 5;
 let lastFrame = 0;
 let campaignSeed = 0; // the seed the player actually entered/rolled — each basin in the campaign derives its own seed from this so "New basin" always starts a fresh campaign
 
-const LAYERS = ["title", "hudLayer", "pauseLayer", "debriefLayer", "finalLayer"];
+const LAYERS = ["title", "hudLayer", "pauseLayer", "debriefLayer", "finalLayer", "planLayer"];
+const runKindOf = (sim) => (sim.expedition ? "seven" : sim.woods ? "woods" : sim.trainer ? "training" : "basin");
 function screens(show) {
   for (const id of LAYERS) el(id).classList.toggle("hidden", id !== show);
   input.setMode(show === "hudLayer" ? "game" : "menu");
-  if (show !== "hudLayer") document.body.dataset.runKind = "";
+  // Restored on the way back to the HUD: clearing it on every menu and never
+  // setting it again left Seven wearing the basin's HUD after one pause.
+  document.body.dataset.runKind = show === "hudLayer" && run ? runKindOf(run.sim) : "";
   // Before focus is seated, so the grid is already its final shape: showing or
   // hiding Resume changes which rows exist.
   if (show === "title") { refreshTitleSave(); refreshLearnLabel(); }
@@ -94,7 +98,7 @@ function screens(show) {
 // or a keyboard cannot reach.
 const ROOT_SELECTOR = {
   title: "#title", pauseLayer: "#pauseLayer", debriefLayer: "#debriefLayer",
-  finalLayer: "#finalLayer",
+  finalLayer: "#finalLayer", planLayer: "#planLayer",
   accusePanel: "#accusePanel", verdictPanel: "#verdictPanel",
 };
 const menu = { root: null, row: 0, col: 0 };
@@ -817,7 +821,7 @@ function mountRun(sim, openingLine) {
   paused = false;
   whisperTimer = 0;
   run = { sim, percept, renderer, hud, players: [makeLocalPlayer(0, sim.player, percept)] };
-  document.body.dataset.runKind = sim.expedition ? "seven" : sim.woods ? "woods" : sim.trainer ? "training" : "basin";
+  document.body.dataset.runKind = runKindOf(sim);
   input.setView(sim.player.yaw || 0, 0);
   hud.setHints(input.activeScheme);
   hud.say(openingLine, "warn");
@@ -938,6 +942,77 @@ function spendSevenDaylight(sim, amount, reason) {
   return true;
 }
 
+// ---- the plan: dawn and dusk, at the camp ---------------------------------
+let planUi = null; // { phase, choice: { [id]: kind } } while the plan is open
+const atBuiltCamp = (sim) => !!(sim.camp && sim.camp.built && Math.hypot(sim.player.x - sim.camp.x, sim.player.z - sim.camp.z) <= CAMP_RADIUS);
+const skillLine = (c) => Object.entries(c.skills || {}).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k, v]) => `${k} ${v}`).join(" · ") || "—";
+function openPlan(sim, phase) {
+  const opts = phase === "dawn" ? DAY_TASKS : NIGHT_TASKS;
+  const choice = {};
+  for (const c of sim.companions) {
+    const k = c.task && c.task.kind;
+    choice[c.id] = phase === "dawn" ? (DAY_TASKS.includes(k) ? k : "free") : (NIGHT_TASKS.includes(k) ? k : "sleep");
+  }
+  planUi = { phase, choice };
+  el("planHead").textContent = phase === "dawn" ? `Dawn, day ${sim.expedition.day}` : "Dusk";
+  el("planSub").textContent = phase === "dawn"
+    ? "Set the day. This is the only time it changes until dusk."
+    : "Who sleeps, who keeps the fire, who keeps working in the dark.";
+  el("planGo").textContent = phase === "dawn" ? "Begin the day" : "Into the night";
+  const rows = el("planRows");
+  rows.textContent = "";
+  sim.companions.forEach((c, i) => {
+    const row = document.createElement("div");
+    row.className = "plan-row";
+    const name = Object.assign(document.createElement("span"), { className: "plan-name", textContent: c.name });
+    const skill = Object.assign(document.createElement("span"), { className: "plan-skill", textContent: skillLine(c) });
+    const b = Object.assign(document.createElement("button"), { className: "diff plan-task" });
+    b.dataset.row = String(i); b.dataset.col = "0"; b.dataset.who = c.id;
+    const paint = () => { b.textContent = TASK_LABEL[planUi.choice[c.id]]; };
+    b.addEventListener("click", () => {
+      const cur = opts.indexOf(planUi.choice[c.id]);
+      planUi.choice[c.id] = opts[(cur + 1) % opts.length];
+      paint();
+    });
+    paint();
+    row.append(name, skill, b);
+    rows.appendChild(row);
+  });
+  el("planGo").dataset.row = String(sim.companions.length);
+  screens("planLayer");
+}
+function closePlan() {
+  if (!planUi || !run) return;
+  const sim = run.sim, e = sim.expedition;
+  for (const c of sim.companions) {
+    const k = planUi.choice[c.id];
+    // Night "work" carries on with whatever the day's task was.
+    const prior = c.task ? effectiveKind(c) : null;
+    setTask(c, k, e.day, k === "work" ? (prior === "chop" || prior === "gather" ? prior : null) : null);
+  }
+  planUi = null;
+  screens("hudLayer");
+  if (input.activeScheme !== "gamepad") input.requestLock();
+}
+
+/** Dawn and dusk open the plan — at the camp. Away from it, nobody gets new orders. */
+function sevenPlanTriggers(sim) {
+  const e = sim.expedition;
+  if (!e || sim.status !== "playing" || planUi) return;
+  if (e.planDawnPending) {
+    e.planDawnPending = false;
+    if (atBuiltCamp(sim)) { openPlan(sim, "dawn"); return; }
+    for (const c of sim.companions) c.task = null;
+    hudSay("You woke away from the camp. Nobody has orders today.");
+  }
+  const clk = sevenClock(sim.time);
+  if (clk.night && clk.hour >= 18 && e.duskPlanDay !== e.day && !e.sleeping) {
+    e.duskPlanDay = e.day;
+    if (atBuiltCamp(sim)) openPlan(sim, "dusk");
+    else hudSay("Dark, and you are away from the camp. They will make their own way back.");
+  }
+}
+
 /** Take the camp down here, or make it where you stand. Both take clock time. */
 function campAction() {
   if (!run) return;
@@ -978,6 +1053,7 @@ function resolveSevenNight(sim) {
   // turns over into the next day.
   if (sevenClock(sim.time).day <= e.day) return;
   e.sleeping = false;
+  e.planDawnPending = true;
   // Who stayed at camp today, written down before the day closes.
   for (const id of campIds(sim, CAMP_RADIUS)) recordFact(e, { kind: "camp", actor: id, object: "camp", withWhom: [], t: sim.time });
   sleep(e);
@@ -1061,6 +1137,8 @@ function recordSevenEvents(sim, events) {
       spendSevenDaylight(sim, 0.25, "pylon");
     } else if (ev.kind === "log") {
       recordFact(e, { kind: "survey", actor: ev.who || "you", object: ev.id, withWhom: near(ev.who), t: sim.time });
+    } else if (ev.kind === "haul") {
+      recordFact(e, { kind: "gather", object: "wood", actor: ev.who, amount: ev.amount ?? 0, withWhom: near(ev.who), t: sim.time });
     } else if (ev.kind === "fire" && /kindling catches/i.test(ev.text || "")) {
       recordFact(e, { kind: "fire", actor: ev.who || "you", object: "the fire", withWhom: near(ev.who), t: sim.time });
     } else if (ev.kind === "call") {
@@ -1246,6 +1324,7 @@ function startSeven({ seed, difficulty, team } = {}) {
   clearSave();
   const r = mountRun(sim, "Seven of you enter the woods. The way out is north.");
   updateSevenObjective(sim);
+  openPlan(sim, "dawn");
   return r;
 }
 
@@ -1883,6 +1962,7 @@ function step(dt, intent) {
     ex.daylight = Number(sevenClock(sim.time).hoursToDusk.toFixed(2));
     const stacked = depositWood(sim, CAMP_RADIUS);
     if (stacked > 0) hudSay(`You stack ${stacked} wood on the pile.`);
+    sevenPlanTriggers(sim);
   }
   if (sim.expedition) updateSevenKeystone(sim);
   diag.update({ input: intent.move, move, yaw, x: sim.player.x, z: sim.player.z, camera: renderer.camera, hfov: renderer.hfov });
@@ -2044,7 +2124,7 @@ function frame(now) {
   // frames where there is nothing to step — a paused game or a run that has
   // ended must not leave the screen black.
   updateNightfall();
-  if (!run || paused || run.sim.status !== "playing" || !intent) return;
+  if (!run || paused || planUi || run.sim.status !== "playing" || !intent) return;
   pollCoopJoin();
   step(dt, intent);
 }
@@ -2186,6 +2266,7 @@ function boot() {
   el("resumeBtn").addEventListener("click", togglePause);
   el("restBtn")?.addEventListener("click", () => restUntilMorning());
   el("campBtn")?.addEventListener("click", () => campAction());
+  el("planGo")?.addEventListener("click", () => closePlan());
   const trainStep = (d) => { if (!run?.sim.expedition) return; trainIdx += d; paintTraining(run.sim); };
   el("trainPrev")?.addEventListener("click", () => trainStep(-1));
   el("trainNext")?.addEventListener("click", () => trainStep(1));

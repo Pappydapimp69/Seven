@@ -1067,3 +1067,10 @@ body[data-run-kind="seven"] .pill-log,
 body[data-run-kind="seven"] .pill-doses,
 body[data-run-kind="seven"] .pill-stone,
 body[data-run-kind="seven"] .pill-seed { display: none; }
+
+/* Seven's dawn/dusk plan: one row per companion, a button that cycles the task. */
+.plan-rows { display: flex; flex-direction: column; gap: 0.4rem; margin: 0.6rem 0 0.9rem; }
+.plan-row { display: flex; align-items: center; gap: 0.6rem; }
+.plan-name { flex: 0 0 7.5rem; font-weight: 600; letter-spacing: 0.04em; }
+.plan-skill { flex: 0 0 6.5rem; color: var(--dim); font-size: 0.8rem; }
+.plan-row .diff { flex: 1; text-align: left; }

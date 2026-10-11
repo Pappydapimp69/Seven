@@ -964,7 +964,7 @@ export function tickLucidity(sim, ch, dt) {
   mult *= depthMult;
   if (sim.expedition) {
     mult *= SEVEN_DRAIN_SCALE;
-    if (sim.expedition.sleeping) mult *= SLEEP_DRAIN;
+    if (sim.expedition.sleeping || (ch.task && ch.task.kind === "sleep" && sevenClock(sim.time).night)) mult *= SLEEP_DRAIN;
   }
 
   // Slip check, using the draw taken at the top. Gated on the same grace window
@@ -1969,10 +1969,13 @@ export const holdTimeFor = (target, sim = null) => {
  * party on it is everything else left undone, not night arriving faster.
  * Progress stays on the deadfall between days. No rng.
  */
-export function chopDeadfall(sim, actor = sim.player) {
+export function chopDeadfall(sim, actor = sim.player, { helpers = true } = {}) {
   const d = deadfallAt(sim, actor);
   if (!d) return { ok: false, reason: "nothing-here" };
-  const hands = [actor, ...sim.companions.filter((c) => c !== actor && !c.hallucinating && dist2D(c, d) <= HELP_RADIUS)];
+  // A companion whose task is chopping swings on their own clock (party.js);
+  // counting them again as the lead's helper would chop twice per swing.
+  const tasked = (c) => c.task && (c.task.kind === "chop" || (c.task.kind === "work" && c.task.work === "chop"));
+  const hands = [actor, ...(helpers ? sim.companions.filter((c) => c !== actor && !c.hallucinating && !tasked(c) && dist2D(c, d) <= HELP_RADIUS) : [])];
   const gain = hands.reduce((sum, c) => sum + CHOP_PROGRESS * (1 + CHOP_SKILL * ((c.skills && c.skills.cut) || 0)), 0);
   d.progress = Math.min(1, (d.progress || 0) + gain);
   if (d.progress >= 1) return { ...clearDeadfall(sim, actor), hands: hands.map((c) => c.id) };

@@ -12,6 +12,12 @@ const b=await chromium.launch({executablePath:"/opt/pw-browsers/chromium-1194/ch
 const pg=await b.newPage({viewport:{width:640,height:360}}); const errs=[]; pg.on("pageerror",e=>errs.push(String(e)));
 await pg.goto(`http://127.0.0.1:${P}/index.html`); await pg.waitForFunction(()=>!!window.__seven);
 await pg.evaluate(()=>window.__seven.startSeven({seed:777})); await pg.waitForTimeout(500);
+// The first dawn: the plan is open before anything else happens.
+const plan=await pg.evaluate(()=>{const L=document.getElementById("planLayer");const rows=[...document.querySelectorAll("#planRows .plan-task")];
+  const before=rows[0]?.textContent; rows[0]?.click(); const after=rows[0]?.textContent;
+  document.getElementById("planGo").click();
+  const c=window.__seven.sim.companions[0];
+  return {open:!L.classList.contains("hidden"),rows:rows.length,before,after,task:c.task&&c.task.kind,hud:!document.getElementById("hudLayer").classList.contains("hidden"),kind:document.body.dataset.runKind};});
 const r=await pg.evaluate(async()=>{const M=window.__seven,s=M.sim,e=s.expedition;
   s.wood=10; s.player.x=s.world.camp.x+1; s.player.z=s.world.camp.z+1; M.advance(0.1);
   const t0=s.time; M.act("survey"); const owedBuild=e.lapse;
@@ -22,6 +28,9 @@ const r=await pg.evaluate(async()=>{const M=window.__seven,s=M.sim,e=s.expeditio
   const facts=e.current.facts.map(f=>f.kind);
   return {owedBuild,owedFeed,tBuild,facts,fuel:s.fire?.fuel,GH:30};});
 const fails=[]; const A=(c,m)=>{if(!c)fails.push(m)};
+A(plan.open && plan.rows===5, `the dawn plan did not open with five rows: ${JSON.stringify(plan)}`);
+A(plan.before!==plan.after && plan.task==="chop", `cycling a task did not stick: ${JSON.stringify(plan)}`);
+A(plan.hud && plan.kind==="seven", `beginning the day did not return to Seven's HUD: ${JSON.stringify(plan)}`);
 A(Math.abs(r.owedBuild-0.75*r.GH)<1e-6, `building a fire asked for ${r.owedBuild}s of time, expected ${0.75*r.GH}`);
 A(r.tBuild>=0.75*r.GH-0.2, `the clock moved only ${r.tBuild}s while the fire's hours passed`);
 A(Math.abs(r.owedFeed-0.25*r.GH)<1e-6, `feeding asked for ${r.owedFeed}s, expected ${0.25*r.GH}`);
@@ -30,11 +39,12 @@ A(r.facts.includes("fire")&&r.facts.includes("feed"), `fire facts missing: ${r.f
 await pg.evaluate(()=>{const s=window.__seven.sim;s.player.x=s.world.camp.x+60;});
 await pg.keyboard.press("Escape"); await pg.waitForTimeout(300);
 const vis=await pg.evaluate(()=>!document.getElementById("restBtn").classList.contains("hidden"));
+const kindPaused=await pg.evaluate(()=>document.body.dataset.runKind);
 const tr0=await pg.evaluate(()=>[...new Set([...document.querySelectorAll("#pauseLayer [data-row]")].filter(b=>!b.closest(".hidden")).map(b=>Number(b.dataset.row)))].sort((a,b)=>a-b));
 await pg.evaluate(()=>document.getElementById("restBtn").click()); await pg.waitForTimeout(200);
 const home=await pg.evaluate(()=>{const M=window.__seven,s=M.sim,e=s.expedition;const asleep=e.sleeping;
   for(let i=0;i<20000&&e.day<2;i++) M.advance(1/60);
-  return {asleep,day:e.day,sleeping:e.sleeping,time:s.time,paused:M.paused};});
+  return {asleep,day:e.day,sleeping:e.sleeping,time:s.time,paused:M.paused,kind:document.body.dataset.runKind};});
 A(vis, "Rest until morning is not offered in an expedition");
 const tr=await pg.evaluate(async()=>{const M=window.__seven,s=M.sim,e=s.expedition;
   const rows=[...new Set([...document.querySelectorAll("#pauseLayer [data-row]")].filter(b=>!b.closest(".hidden")).map(b=>Number(b.dataset.row)))].sort((a,b)=>a-b);
@@ -48,6 +58,7 @@ A(tr.label===`Scout ${tr.lvl+1}`, `training label is stale: ${tr.label}`);
 A(tr.name===tr.second, "the next arrow did not move to the next person");
 A(tr0.every((r,i)=>r===i), `pause grid rows are not contiguous: ${tr0}`);
 A(home.asleep, "Rest until morning did not put the camp to sleep");
+A(home.kind==="seven", `after a pause Seven lost its HUD kind: ${home.kind}`);
 A(home.day===2&&!home.sleeping&&!home.paused, `sleeping did not reach the next dawn: ${JSON.stringify(home)}`);
 A(home.time>=24*30-0.5, `the next dawn came at ${home.time}s, before 24 hours had passed`);
 A(errs.length===0, "page errors: "+errs.join("|"));
