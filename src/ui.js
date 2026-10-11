@@ -85,7 +85,7 @@ export function hud({ count, day, clock, area, carry, pile, prompt, hint, night 
   $("hud-clock").classList.toggle("night", night);
   $("hud-area").textContent = `Woods ${area} of 7`;
   $("hud-wood").textContent = carry > 0 ? `Carrying ${carry} wood` : "";
-  $("hud-pile").textContent = pile != null ? `Pile ${pile}` : "";
+  $("hud-pile").textContent = pile ? `Pile ${pile.pile}${pile.surplus ? ` · surplus ${pile.surplus}` : ""}` : "";
   $("prompt").textContent = prompt || "";
   $("prompt").classList.toggle("on", !!prompt);
   $("hint").textContent = hint || "";

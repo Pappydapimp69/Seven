@@ -7,7 +7,7 @@ import { clearDeadfall } from "../src/world.js";
 
 const T = harness("sim");
 const HOUR = 60 / C.TICK_MIN;
-const fresh = (seed = 11) => { const s = S.createSim({ seed }); S.applyPlan(s, "dawn", {}); return s; };
+const fresh = (seed = 11) => { const s = S.createSim({ seed, startCamp: true }); S.applyPlan(s, "dawn", {}); return s; };
 const run = (s, ticks, inp = {}) => { for (let i = 0; i < ticks; i++) { if (s.pending) S.applyPlan(s, s.pending, {}); S.tick(s, inp); } };
 const setClock = (s, day, hhmm) => { s.ticks = Math.round(((day - 1) * 1440 + (hhmm - 6 * 60)) / C.TICK_MIN); s.day = day; s.duskSeen = day - 1; };
 
@@ -272,6 +272,28 @@ T.check("a fire dying in the night wakes the lead sleeping by it", () => {
   t.lead.x = t.camp.x; t.lead.y = t.camp.y + 1; t.camp.fire = 10;
   S.rest(t); run(t, HOUR);
   assert(t.lead.asleep, "woke with the fire still burning");
+});
+
+T.check("a run starts with no camp; making one is a choice", () => {
+  const s = S.createSim({ seed: 27 });
+  assert(!s.camp.built, "the run began with camp already up");
+  for (let i = 0; i < 50; i++) S.tick(s, {});
+  assert(s.pending !== "dawn", "a dawn plan opened with no camp");
+  S.campAction(s); finish(s);
+  assert(s.camp.built && s.camp.pile === 0, "Q did not make camp here");
+});
+
+T.check("wood stacks on the pile to 12, then the surplus stack to 30; the fire takes the pile first", () => {
+  const s = fresh(28);
+  s.camp.pile = 0; s.camp.surplus = 0;
+  s.lead.carry = 50; s.lead.x = s.camp.x; s.lead.y = s.camp.y + 1;
+  run(s, 1);
+  assert(s.camp.pile === C.PILE_CAP && s.camp.surplus === C.SURPLUS_CAP && s.lead.carry === 50 - C.PILE_CAP - C.SURPLUS_CAP, `pile ${s.camp.pile} surplus ${s.camp.surplus} carry ${s.lead.carry}`);
+  s.camp.pile = 1; s.lead.carry = 0;
+  S.fireAction(s); finish(s);
+  assert(s.camp.pile === 0 && s.camp.surplus === C.SURPLUS_CAP - 1 && s.camp.fire > 0, `lit from pile ${s.camp.pile} / surplus ${s.camp.surplus}`);
+  S.campAction(s); finish(s);
+  assert(s.piles.length === 1 && s.piles[0].surplus && s.piles[0].wood === C.SURPLUS_CAP - 1, `old piles ${JSON.stringify(s.piles)}`);
 });
 
 void chopSpot;

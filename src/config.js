@@ -81,6 +81,8 @@ export const FIRE_FEED_HOURS = 1.5;
 export const FIRE_MAX_HOURS = 14;
 export const WATCH_FEED_BELOW = 4;           // a watcher feeds under this many hours
 export const PILE_REACH = 1.2;
+export const PILE_CAP = 12;                  // the stack by the fire
+export const SURPLUS_CAP = 30;               // the surplus stack beside it; past that, you keep carrying
 
 // ---- the hidden meter -------------------------------------------------------
 export const DRAIN = 0.9;                    // lucidity per game hour at depth 1, by day

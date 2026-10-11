@@ -4,14 +4,15 @@
 // stays where it was, and walking camp forward past someone lost abandons
 // them with no prompt and no message.
 
-import { record } from "./chronicle.js?v=seven-1.4.0";
-import { areaOfRow } from "./world.js?v=seven-1.4.0";
+import { record } from "./chronicle.js?v=seven-1.5.0";
+import { areaOfRow } from "./world.js?v=seven-1.5.0";
+import { PILE_CAP, SURPLUS_CAP } from "./config.js?v=seven-1.5.0";
 
 const areaOf = (p) => areaOfRow(Math.floor(p.y));
 
 export function makeCampAt(sim, x, y, who) {
   const prevArea = areaOf(sim.camp);
-  sim.camp = { x, y, built: true, pile: 0, fire: 0 };
+  sim.camp = { x, y, built: true, pile: 0, surplus: 0, fire: 0 };
   record(sim, "camp_made", who);
   if (areaOf(sim.camp) > prevArea) record(sim, "area", [], { area: areaOf(sim.camp) });
   sim.say(who.includes("lead") ? "Camp is up. The pile starts empty." : "Word comes back: camp is up further on.");
@@ -22,7 +23,26 @@ export function makeCampAt(sim, x, y, who) {
 export function takeCampDown(sim, who) {
   const c = sim.camp;
   if (c.pile > 0) sim.piles.push({ id: `pile${++sim.pileSeq}`, x: c.x, y: c.y + 1.2, wood: c.pile });
-  sim.camp = { x: c.x, y: c.y, built: false, pile: 0, fire: 0 };
+  if (c.surplus > 0) sim.piles.push({ id: `pile${++sim.pileSeq}`, x: c.x + 1.6, y: c.y + 1.2, wood: c.surplus, surplus: true });
+  sim.camp = { x: c.x, y: c.y, built: false, pile: 0, surplus: 0, fire: 0 };
   record(sim, "camp_down", who);
   sim.say(who.includes("lead") ? "Camp comes down. The woodpile stays where it is." : "Camp is coming down. The woodpile stays.");
+}
+
+// ---- the woodpile and the surplus stack ----------------------------------------
+/** All the wood at camp. */
+export const campWood = (c) => (c.built ? (c.pile || 0) + (c.surplus || 0) : 0);
+/** Stack wood: the pile by the fire fills first, then the surplus stack. Returns what would not fit. */
+export function stackWood(c, n) {
+  const toPile = Math.min(n, Math.max(0, PILE_CAP - (c.pile || 0)));
+  c.pile = (c.pile || 0) + toPile; n -= toPile;
+  const toSurplus = Math.min(n, Math.max(0, SURPLUS_CAP - (c.surplus || 0)));
+  c.surplus = (c.surplus || 0) + toSurplus;
+  return n - toSurplus;
+}
+/** Take wood for the fire: the pile first, then the surplus. Returns how many were taken. */
+export function takeWood(c, n) {
+  const a = Math.min(n, c.pile || 0); c.pile -= a;
+  const b = Math.min(n - a, c.surplus || 0); c.surplus = (c.surplus || 0) - b;
+  return a + b;
 }

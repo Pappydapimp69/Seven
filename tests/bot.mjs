@@ -50,6 +50,7 @@ export function playRun(seed) {
   let guard = 0, triedDay = 0, calledHome = false;
   while (sim.status === "playing" && sim.day <= MAX_DAYS && guard++ < 3000) {
     if (sim.pending) { panels(sim); continue; }
+    if (!sim.camp.built && guard === 1) { S.campAction(sim); finish(sim, panels); continue; }
     const left = S.lightLeft(sim);
     // Dusk: home, fire stocked, sleep through.
     if (left < 130) {

@@ -5,14 +5,14 @@
 // exported actions. Messages for the player go through sim.say(); they never
 // mention the hidden meter.
 
-import { createRng } from "./rng.js?v=seven-1.4.0";
-import { composeRoster } from "./names.js?v=seven-1.4.0";
-import { createWorld, areaOfRow, K, kindAt, walkable, lostSpots, fellTree } from "./world.js?v=seven-1.4.0";
-import { dist, cellOf, moveBody, nearestWalkable, walkTo } from "./body.js?v=seven-1.4.0";
-import { openDay, record, recordPlan, account } from "./chronicle.js?v=seven-1.4.0";
-import { makeCampAt, takeCampDown as campDown } from "./camp.js?v=seven-1.4.0";
-import { updateMate, setTask, chopAt, frontDeadfall, practice, moving, DAY_TASKS, NIGHT_TASKS } from "./mates.js?v=seven-1.4.0";
-import * as C from "./config.js?v=seven-1.4.0";
+import { createRng } from "./rng.js?v=seven-1.5.0";
+import { composeRoster } from "./names.js?v=seven-1.5.0";
+import { createWorld, areaOfRow, K, kindAt, walkable, lostSpots, fellTree } from "./world.js?v=seven-1.5.0";
+import { dist, cellOf, moveBody, nearestWalkable, walkTo } from "./body.js?v=seven-1.5.0";
+import { openDay, record, recordPlan, account } from "./chronicle.js?v=seven-1.5.0";
+import { makeCampAt, takeCampDown as campDown, campWood, stackWood, takeWood } from "./camp.js?v=seven-1.5.0";
+import { updateMate, setTask, chopAt, frontDeadfall, practice, moving, DAY_TASKS, NIGHT_TASKS } from "./mates.js?v=seven-1.5.0";
+import * as C from "./config.js?v=seven-1.5.0";
 
 // ---- the clock ---------------------------------------------------------------
 export const minutes = (sim) => sim.ticks * C.TICK_MIN;
@@ -39,7 +39,8 @@ export function createSim(opts = {}) {
     v: 1, seed, rng, world, ticks: 0, day: 1, status: "playing", ending: null,
     lead: { x: world.start.x, y: world.start.y + 1, facing: -Math.PI / 2, lucidity: 100, carry: 0, busy: null, asleep: false },
     mates: [], roster: [],
-    camp: { x: world.start.x, y: world.start.y, built: true, pile: 4, fire: 0 },
+    // No camp to begin with: making one is the first thing you choose to do.
+    camp: { x: world.start.x, y: world.start.y, built: !!opts.startCamp, pile: opts.startCamp ? 4 : 0, surplus: 0, fire: 0 },
     piles: [], pileSeq: 0,
     missing: null, lost: [],
     chronicle: {},
@@ -164,11 +165,11 @@ export function fireAction(sim) {
   const c = sim.camp;
   if (busy(sim) || !atCamp(sim, sim.lead)) return { ok: false, why: c.built ? "Not at the fire." : "There is no camp." };
   if (c.fire <= 0) {
-    if (c.pile < C.FIRE_LIGHT_WOOD) return { ok: false, why: "Not enough wood on the pile to light a fire." };
+    if (campWood(c) < C.FIRE_LIGHT_WOOD) return { ok: false, why: "Not enough wood stacked to light a fire." };
     startBusy(sim, "fire_light", C.FIRE_MIN);
     return { ok: true };
   }
-  if (c.pile < 1) return { ok: false, why: "The pile is empty." };
+  if (campWood(c) < 1) return { ok: false, why: "There is no wood stacked." };
   if (c.fire > C.FIRE_MAX_HOURS - 1) return { ok: false, why: "The fire is as high as it goes." };
   startBusy(sim, "fire_feed", C.FIRE_MIN);
   return { ok: true };
@@ -242,14 +243,14 @@ function finishBusy(sim) {
       break;
     }
     case "fire_light":
-      if (sim.camp.pile >= C.FIRE_LIGHT_WOOD) {
-        sim.camp.pile -= C.FIRE_LIGHT_WOOD; sim.camp.fire = C.FIRE_LIGHT_HOURS;
+      if (campWood(sim.camp) >= C.FIRE_LIGHT_WOOD) {
+        takeWood(sim.camp, C.FIRE_LIGHT_WOOD); sim.camp.fire = C.FIRE_LIGHT_HOURS;
         record(sim, "fire", ["lead"]);
         sim.say("The fire catches.");
       }
       break;
     case "fire_feed":
-      if (sim.camp.pile >= 1) { sim.camp.pile--; sim.camp.fire = Math.min(C.FIRE_MAX_HOURS, sim.camp.fire + C.FIRE_FEED_HOURS); }
+      if (takeWood(sim.camp, 1)) { sim.camp.fire = Math.min(C.FIRE_MAX_HOURS, sim.camp.fire + C.FIRE_FEED_HOURS); }
       break;
     case "camp_make": if (!sim.camp.built) { makeCampHere(sim); practiseCrew(sim, b.crew); } break;
     case "camp_down": if (sim.camp.built) { campDown(sim, ["lead"]); practiseCrew(sim, b.crew); } break;
@@ -467,7 +468,11 @@ export function tick(sim, input = {}) {
   }
 
   // Wood: carried wood counts once it is on the pile; old piles are picked up.
-  if (L.carry > 0 && atCamp(sim, L)) { sim.camp.pile += L.carry; sim.say(`You stack ${L.carry} wood on the pile.`); L.carry = 0; }
+  if (L.carry > 0 && atCamp(sim, L)) {
+    const left = stackWood(sim.camp, L.carry), put = L.carry - left;
+    if (put > 0) sim.say(left ? `You stack ${put} wood. Both stacks are full; you keep ${left}.` : `You stack ${put} wood.`);
+    L.carry = left;
+  }
   // An old pile is taken by walking onto it — never by standing where it was left.
   for (const p of sim.piles) {
     if (walked && p.wood > 0 && dist(p, L) <= C.PILE_REACH) { L.carry += p.wood; sim.say(`You take ${p.wood} wood from the old pile.`); p.wood = 0; }
@@ -566,3 +571,4 @@ function drain(sim, p, keen, night, h) {
 }
 
 export { frontDeadfall, walkable };
+export { campWood };

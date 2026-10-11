@@ -57,8 +57,14 @@ const sim = (p, f) => p.evaluate(f);
   ok(await p.evaluate(() => document.querySelector("#modal").textContent.includes("0 left") && document.activeElement.dataset.do === "go"), "out of points: focus drops to Set out");
   await p.evaluate(() => window.__seven.click("Set out"));
   await p.waitForTimeout(200);
-  ok(await p.evaluate(() => (window.__seven.panel || "").startsWith("Dawn")), "dawn plan opens at camp");
-  // Keyboard drives the panel: down to the first person, Enter cycles their task.
+  ok(await p.evaluate(() => !window.__seven.panel && !window.__seven.sim.camp.built), "the run starts with no camp and no plan");
+  ok(await p.evaluate(() => document.getElementById("hint").textContent.includes("No camp yet") || document.getElementById("hint").textContent.includes("walk")), "a hint points at making camp");
+  await p.keyboard.press("KeyQ");
+  await p.waitForFunction(() => window.__seven.sim.camp.built || window.__seven.panel, null, { timeout: 20000 });
+  ok(await p.evaluate(() => window.__seven.sim.camp.built), "Q made camp");
+  await p.waitForTimeout(200);
+  ok(await p.evaluate(() => (window.__seven.panel || "").startsWith("Dawn")), "with camp up, the dawn plan opens");
+  // Keyboard drives the panel: Enter cycles the focused person's task.
   const before = await p.evaluate(() => document.querySelector("#modal .task").textContent);
   await p.focus("#modal button[data-do='cycle']");
   await p.keyboard.press("Enter");

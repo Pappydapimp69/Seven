@@ -7,9 +7,9 @@
 // Each frame blits the visible part, then draws people and things, then the
 // dark. Sized from devicePixelRatio re-read on every resize (Brain mirage#E10).
 
-import { K } from "./world.js?v=seven-1.4.0";
-import { hash01 } from "./rng.js?v=seven-1.4.0";
-import { CAMP_RADIUS, FIRE_LIGHT, DAWN, DUSK, FIRE_MAX_HOURS } from "./config.js?v=seven-1.4.0";
+import { K } from "./world.js?v=seven-1.5.0";
+import { hash01 } from "./rng.js?v=seven-1.5.0";
+import { CAMP_RADIUS, FIRE_LIGHT, DAWN, DUSK, FIRE_MAX_HOURS, PILE_CAP, SURPLUS_CAP } from "./config.js?v=seven-1.5.0";
 
 const MAP_PX = 20;
 export const SLOT_COLORS = ["#e0b354", "#5fb3c9", "#d9745a", "#9fc46a", "#b98fd6", "#e88fb0"];
@@ -114,13 +114,14 @@ export function createRenderer(canvas) {
 
     const t = clock.real;
     // Old woodpiles, and the camp.
-    for (const p of view.piles) drawPile(sx(p.x), sy(p.y));
+    for (const p of view.piles) (p.surplus ? drawSurplus : drawPile)(sx(p.x), sy(p.y), p.wood);
     if (view.camp) {
       const c = view.camp;
       ctx.strokeStyle = "rgba(230,200,140,0.18)"; ctx.setLineDash([4, 6]); ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.arc(sx(c.x), sy(c.y), CAMP_RADIUS * tile, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
       drawTent(sx(c.x - 1.6), sy(c.y - 1.4));
-      if (c.pile > 0) drawPile(sx(c.x + 1.6), sy(c.y + 1.1), Math.min(3, Math.ceil(c.pile / 4)));
+      drawPile(sx(c.x + 1.4), sy(c.y + 1.2), c.pile);
+      drawSurplus(sx(c.x + 2.6), sy(c.y + 1.2), c.surplus);
       drawFire(sx(c.x), sy(c.y), c.fire, t);
     }
     for (const p of view.pylons) drawPylon(sx(p.x), sy(p.y), p, t);
@@ -170,13 +171,36 @@ export function createRenderer(canvas) {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
 
-    function drawPile(x, y, n = 2) {
-      ctx.fillStyle = "#7b5a36";
-      for (let i = 0; i < n + 1; i++) {
-        ctx.fillRect(x - tile * 0.35, y - tile * 0.1 - i * tile * 0.13, tile * 0.7, tile * 0.11);
+    // The woodpile by the fire: five states, empty to full (PILE_CAP).
+    // Each row is three log ends seen from the side; rows fill bottom up.
+    function drawPile(x, y, wood) {
+      const rows = wood <= 0 ? 0 : Math.min(4, Math.ceil((wood / PILE_CAP) * 4));
+      ctx.fillStyle = "rgba(0,0,0,0.25)"; ctx.fillRect(x - tile * 0.42, y + tile * 0.02, tile * 0.84, tile * 0.08);
+      if (!rows) { ctx.strokeStyle = "rgba(160,130,90,0.5)"; ctx.lineWidth = 1; ctx.strokeRect(x - tile * 0.38, y - tile * 0.1, tile * 0.76, tile * 0.1); return; }
+      for (let r = 0; r < rows; r++) {
+        const n = 3 - (r % 2 ? 1 : 0), w = tile * 0.24;
+        for (let i = 0; i < n; i++) {
+          const lx = x - (n * w) / 2 + w / 2 + i * w, ly = y - tile * 0.07 - r * tile * 0.17;
+          ctx.fillStyle = "#6e4f2e"; ctx.beginPath(); ctx.arc(lx, ly, tile * 0.11, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = "#c9a26b"; ctx.beginPath(); ctx.arc(lx, ly, tile * 0.065, 0, Math.PI * 2); ctx.fill();
+        }
       }
-      ctx.fillStyle = "#c9a26b";
-      ctx.beginPath(); ctx.arc(x + tile * 0.35, y - tile * 0.05, tile * 0.05, 0, Math.PI * 2); ctx.fill();
+    }
+    // The surplus stack: a crib between four stakes, six states, empty to full (SURPLUS_CAP).
+    function drawSurplus(x, y, wood) {
+      const rows = wood <= 0 ? 0 : Math.min(5, Math.ceil((wood / SURPLUS_CAP) * 5));
+      const W2 = tile * 0.42, H = tile * 0.95;
+      ctx.fillStyle = "rgba(0,0,0,0.25)"; ctx.fillRect(x - W2 - 2, y + tile * 0.02, W2 * 2 + 4, tile * 0.08);
+      ctx.fillStyle = "#4f3a22";
+      ctx.fillRect(x - W2 - tile * 0.05, y - H, tile * 0.07, H + tile * 0.04);
+      ctx.fillRect(x + W2 - tile * 0.02, y - H, tile * 0.07, H + tile * 0.04);
+      for (let r = 0; r < rows; r++) {
+        const ly = y - tile * 0.12 - r * tile * 0.16;
+        ctx.fillStyle = r % 2 ? "#8a6a43" : "#7b5a36";
+        ctx.fillRect(x - W2, ly - tile * 0.06, W2 * 2, tile * 0.13);
+        ctx.fillStyle = "#c9a26b";
+        for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.arc(x - W2 + tile * 0.1 + i * (W2 * 2 - tile * 0.2) / 3, ly, tile * 0.045, 0, Math.PI * 2); ctx.fill(); }
+      }
     }
     function drawTent(x, y) {
       ctx.fillStyle = "#8a7a55";
