@@ -20,7 +20,7 @@ export function createInput({ onAction, stickEl, stickKnob }) {
   const stick = { id: null, ox: 0, oy: 0, mx: 0, my: 0 };
   const lookTouch = { id: null, x: 0 };
   let look = 0;                            // accumulated look, in device pixels, since the last poll
-  let pad = { buttons: [], up: false, down: false };
+  let pad = { buttons: [], up: false, down: false, left: false, right: false };
   let usedTouch = false;
   let device = "key";                     // the last thing the player touched: key | pad | touch
 
@@ -30,6 +30,8 @@ export function createInput({ onAction, stickEl, stickKnob }) {
     if (e.code.startsWith("Arrow") || e.code === "Space") e.preventDefault();
     if (e.code === "ArrowUp" || e.code === "KeyW") onAction("up", e);
     if (e.code === "ArrowDown" || e.code === "KeyS") onAction("down", e);
+    if (e.code === "ArrowLeft") onAction("left", e);
+    if (e.code === "ArrowRight") onAction("right", e);
     if (e.code === "Escape" || e.code === "Backspace") onAction("back", e);
     const a = KEYMAP[e.code];
     if (a) onAction(a, e);
@@ -106,9 +108,15 @@ export function createInput({ onAction, stickEl, stickKnob }) {
         }
       });
       pad.buttons = gp.buttons.map((x) => x.pressed);
-      const up = ay < -0.6 || b(12), down = ay > 0.6 || b(13);
-      if (up && !pad.up) onAction("up"); if (down && !pad.down) onAction("down");
-      pad.up = up; pad.down = down;
+      // Panels: d-pad and left stick move focus in all four directions, with
+      // repeat while held (first after 400 ms, then every 140 ms).
+      const dirs = { up: ay < -0.6 || b(12), down: ay > 0.6 || b(13), left: ax < -0.6 || b(14), right: ax > 0.6 || b(15) };
+      const now = performance.now();
+      for (const d of ["up", "down", "left", "right"]) {
+        if (dirs[d] && !pad[d]) { onAction(d); pad[d + "At"] = now + 400; }
+        else if (dirs[d] && now >= (pad[d + "At"] || 0)) { onAction(d); pad[d + "At"] = now + 140; }
+        pad[d] = dirs[d];
+      }
     }
     const len = Math.hypot(mx, my);
     vec.mx = len > 1 ? mx / len : mx; vec.my = len > 1 ? my / len : my;

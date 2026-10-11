@@ -48,6 +48,34 @@ const sim = (p, f) => p.evaluate(f);
   ok(await p.evaluate(() => document.activeElement.dataset.do === "next"), "with five chosen, focus moves to Next");
   await p.evaluate(() => window.__seven.click("Next"));
   ok(await p.evaluate(() => window.__seven.panel === "Your team"), "spend screen");
+  // Four-way focus: right moves along a person's row of skills, down moves down the column.
+  await p.focus("#modal [data-do='inc'][data-arg='0:cut']");
+  const at = () => p.evaluate(() => { const a = document.activeElement; const r = a.getBoundingClientRect(); return { arg: a.dataset.arg || "", do: a.dataset.do || "", x: r.left, y: r.top }; });
+  const s0 = await at();
+  await p.keyboard.press("ArrowRight");
+  const s1 = await at();
+  ok(s1.x > s0.x && Math.abs(s1.y - s0.y) < 4 && s1.arg.startsWith("0:") && s1.arg !== "0:cut", `→ moves along the row (${s0.arg} → ${s1.do} ${s1.arg})`);
+  await p.keyboard.press("ArrowLeft");
+  ok((await at()).arg === "0:cut", "← comes back");
+  await p.keyboard.press("ArrowDown");
+  const s2 = await at();
+  ok(s2.y > s0.y && Math.abs(s2.x - s0.x) < 4, `↓ moves down the column (${s0.arg} → ${s2.arg})`);
+  // The same on a pad: d-pad right.
+  const padMoved = await p.evaluate(async () => {
+    const before = document.activeElement;
+    const btns = Array.from({ length: 17 }, () => ({ pressed: false, value: 0 }));
+    navigator.getGamepads = () => [{ connected: true, axes: [0, 0, 0, 0], buttons: btns }];
+    await new Promise((r) => setTimeout(r, 60));
+    btns[15] = { pressed: true, value: 1 };
+    await new Promise((r) => setTimeout(r, 80));
+    btns[15] = { pressed: false, value: 0 };
+    await new Promise((r) => setTimeout(r, 60));
+    navigator.getGamepads = () => [];
+    const a = before.getBoundingClientRect(), b = document.activeElement.getBoundingClientRect();
+    return b.left > a.left && Math.abs(b.top - a.top) < 4;
+  });
+  ok(padMoved, "pad d-pad right moves along the row too");
+  await p.focus("#modal [data-do='inc'][data-arg='0:cut']");
   // Focus stays on the + just pressed while points remain; drops to Set out only when they run out.
   await p.click("#modal [data-do='inc'][data-arg='0:cut']");
   ok(await p.evaluate(() => document.activeElement.dataset.do === "inc" && document.activeElement.dataset.arg === "0:cut"), "focus stays on + after a press");
@@ -131,6 +159,35 @@ const sim = (p, f) => p.evaluate(f);
   ok(await p.evaluate(() => [...document.querySelectorAll("#modal button")].some((b) => b.textContent.startsWith("Continue"))), "Continue after reload");
   await p.evaluate(() => window.__seven.click("Continue"));
   ok(await p.evaluate(() => window.__seven.sim && window.__seven.sim.day >= 1 && window.__seven.sim.world.deadfalls[0].progress > 0), "the resumed run kept the chopping");
+  await ctx.close();
+}
+
+// ---- a short screen (a projector): the title stays readable while a pad scrolls the list ----
+{
+  const { p, ctx } = await page({ viewport: { width: 960, height: 480 } });
+  await p.evaluate(() => window.__seven.click("New run"));
+  const look = () => p.evaluate(() => {
+    const h = document.querySelector("#modal .panel h2").getBoundingClientRect();
+    const f = document.activeElement.getBoundingClientRect();
+    const head = document.querySelector("#modal .panel .head").getBoundingClientRect();
+    return { hTop: h.top, hBottom: h.bottom, fTop: f.top, fBottom: f.bottom, headBottom: head.bottom, vh: innerHeight, scrolled: document.querySelector("#modal .panel").scrollTop, focus: document.activeElement.textContent.trim().slice(0, 20) };
+  });
+  let worst = null, maxScroll = 0;
+  for (let i = 0; i < 12; i++) {
+    await p.keyboard.press("ArrowDown"); await p.waitForTimeout(40);
+    const q = await look();
+    maxScroll = Math.max(maxScroll, q.scrolled);
+    if (!(q.hTop >= 0 && q.hBottom <= q.vh && q.fTop >= q.headBottom - 1 && q.fBottom <= q.vh)) worst = worst || q;
+  }
+  ok(maxScroll > 0 && !worst, `short screen: a pad down the whole list (and round again) keeps the title readable and the focus clear of it${worst ? " — " + JSON.stringify(worst) : ""}`);
+  const r = await p.evaluate(() => {
+    const h = document.querySelector("#modal .panel h2").getBoundingClientRect();
+    const f = document.activeElement.getBoundingClientRect();
+    const panel = document.querySelector("#modal .panel").getBoundingClientRect();
+    const head = document.querySelector("#modal .panel .head").getBoundingClientRect();
+    return { hTop: h.top, hBottom: h.bottom, pTop: panel.top, fTop: f.top, fBottom: f.bottom, headBottom: head.bottom, vh: innerHeight, scrolled: document.querySelector("#modal .panel").scrollTop, focus: document.activeElement.textContent.trim().slice(0, 20) };
+  });
+  await p.screenshot({ path: path.join(ROOT, "tests", "shot-short.png") });
   await ctx.close();
 }
 

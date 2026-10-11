@@ -96,3 +96,16 @@ td.sk span { width: 16px; }
 @media (max-width: 480px) { .card .grid { grid-template-columns: repeat(2, 1fr); } }
 .plan .sub { display: block; font-size: 12px; font-weight: 500; color: var(--dim); }
 .plan .row { padding: 7px 12px; }
+
+/* The title stays put while the list scrolls (pad focus would scroll it away). */
+.panel { padding-top: 0; }
+.panel .head { position: sticky; top: 0; z-index: 2; background: var(--panel); padding: 16px 0 6px; margin: 0 -2px; }
+.panel .head h1, .panel .head h2 { margin-top: 0; }
+.panel button { scroll-margin-top: calc(var(--head, 0px) + 8px); scroll-margin-bottom: 8px; }
+@media (max-height: 640px) {
+  .panel { max-height: calc(100vh - 16px); }
+  #modal { padding: 8px; }
+  .panel button { padding: 7px 12px; margin-top: 5px; }
+  .plan .row { padding: 5px 12px; }
+  .panel .head { padding-top: 10px; }
+}
